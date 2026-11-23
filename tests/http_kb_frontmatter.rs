@@ -7,7 +7,7 @@
 use agent_hub::app::AppState;
 use agent_hub::http::router;
 use agent_hub::okf::parse_frontmatter;
-use agent_hub::store::{projects, sessions};
+use agent_hub::store::projects;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use serde_json::{Value, json};
@@ -136,7 +136,7 @@ async fn promote_fields_cannot_write_frontmatter_of_their_own() {
     let project = projects::create(&hub.state.db, "escape", "Escape")
         .await
         .expect("create project");
-    let session = sessions::start(&hub.state.db, &project.id, "notes", "agent-one")
+    let session = common::seed::start_session(&hub.state.db, &project.id, "notes", "agent-one")
         .await
         .expect("create session");
     let brain = hub
@@ -228,7 +228,7 @@ async fn promote_of_a_source_that_cannot_be_patched_is_refused_and_writes_nothin
     let project = projects::create(&hub.state.db, "refuse-promote", "Refuse")
         .await
         .expect("create project");
-    let session = sessions::start(&hub.state.db, &project.id, "notes", "agent-one")
+    let session = common::seed::start_session(&hub.state.db, &project.id, "notes", "agent-one")
         .await
         .expect("create session");
     let brain = hub

@@ -40,12 +40,17 @@ async fn identity_changes_emit_system_events() {
     projects::create(&db, "proj", "Project")
         .await
         .expect("project");
-    let agent = identity::create_agent(&db, "worker", "Worker")
+    let agent = identity::create_member(&db, "worker", "Worker")
         .await
         .expect("create");
 
-    identity::issue_token(&db, "worker").await.expect("issue");
-    identity::revoke_token(&db, "worker").await.expect("revoke");
+    identity::issue_member_token(&db, "worker")
+        .await
+        .map(|(issued, _)| issued)
+        .expect("issue");
+    identity::revoke_member_token(&db, "worker")
+        .await
+        .expect("revoke");
     identity::add_grant(&db, "worker", "proj")
         .await
         .expect("grant");
@@ -86,7 +91,7 @@ async fn identity_changes_emit_system_events() {
 async fn reserved_agent_ids_are_rejected() {
     let db = fresh("identity-reserved").await;
     for id in ["human", "local"] {
-        let err = identity::create_agent(&db, id, "Name")
+        let err = identity::create_member(&db, id, "Name")
             .await
             .expect_err("reserved id");
         assert_eq!(err.code(), ErrorCode::InvalidArgument);

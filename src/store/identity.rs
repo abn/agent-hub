@@ -1,8 +1,8 @@
-//! Agent identities, tokens, and grants.
+//! Members, their tokens, and grants.
 //!
-//! An agent is a stable id with a personal space, a project it owns. A token's
+//! A member is a stable id with a personal space, a project it owns. A token's
 //! plaintext is returned once and only its hash is stored, so a leaked database
-//! does not yield usable tokens. A grant opens one project to one agent.
+//! does not yield usable tokens. A grant opens one project to one member.
 
 use serde::Serialize;
 use turso::{Database, Row, Value};
@@ -16,29 +16,10 @@ const HEX: &[u8; 16] = b"0123456789abcdef";
 /// a read does not turn into a write on every call.
 const TOUCH_INTERVAL_SECS: i64 = 300;
 
-/// An agent.
-#[derive(Debug, Clone, Serialize)]
-pub struct Agent {
-    /// Stable identity, also the recorded actor.
-    pub id: String,
-    /// Human-readable name.
-    pub display_name: String,
-    /// The agent's private project.
-    pub personal_project_id: String,
-    /// When the agent was created.
-    pub created_at: String,
-    /// When the agent was last seen, if ever.
-    pub last_seen_at: Option<String>,
-    /// Whether the agent has a live (unrevoked) token.
-    pub has_live_token: bool,
-    /// Lifecycle state: 'active' or 'pending'.
-    pub state: String,
-    /// The agent's why line, if enrolled.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enrol_note: Option<String>,
-    /// Address the agent enrolled from, if enrolled.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enrol_source: Option<String>,
+/// A pending member as its approval reads it.
+struct PendingRow {
+    personal_project_id: String,
+    state: String,
 }
 
 /// A freshly issued token. The plaintext is returned once and never stored.
@@ -53,9 +34,7 @@ pub struct IssuedToken {
 /// A grant of one project to one agent.
 #[derive(Debug, Clone, Serialize)]
 pub struct Grant {
-    /// The member the grant opens the project to. Kept under its old name
-    /// until every reader takes `member_id`.
-    pub agent_id: String,
+    /// The member the grant opens the project to.
     pub member_id: String,
     pub project_id: String,
     pub created_at: String,
@@ -68,37 +47,6 @@ pub struct Grant {
 pub fn hash_token(token: &str) -> String {
     use sha2::{Digest, Sha256};
     hex(&Sha256::digest(token.as_bytes()))
-}
-
-/// Resolve a token hash to its agent id and state.
-///
-/// A revoked token never resolves. The token and agent last-seen timestamps
-/// are refreshed at most once per window, and only for active agents.
-pub async fn resolve_token(db: &Database, token_hash: &str) -> Result<Option<(String, String)>> {
-    let conn = super::connect(db)?;
-    let mut rows = conn
-        .query(
-            "SELECT a.id, a.last_seen_at, t.last_used_at, a.state
-             FROM member_tokens t
-             JOIN members a ON a.id = t.member_id
-             WHERE t.token_hash = ?1 AND t.revoked_at IS NULL",
-            [token_hash],
-        )
-        .await
-        .map_err(engine)?;
-    let Some(row) = rows.next().await.map_err(engine)? else {
-        return Ok(None);
-    };
-    let agent_id = text(&row, 0)?;
-    let agent_seen = text_at(&row, 1)?;
-    let token_used = text_at(&row, 2)?;
-    let state = text_at(&row, 3)?.unwrap_or_else(|| "active".to_string());
-    drop(rows);
-
-    if state == "active" {
-        touch(&conn, token_hash, &agent_id, token_used, agent_seen).await?;
-    }
-    Ok(Some((agent_id, state)))
 }
 
 /// Refresh the last-seen timestamps, but only when stale, so a read does not
@@ -138,67 +86,7 @@ async fn touch(
     Ok(())
 }
 
-/// List agents, oldest first.
-pub async fn list_agents(db: &Database) -> Result<Vec<Agent>> {
-    let conn = super::connect(db)?;
-    let mut rows = conn
-        .query(
-            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source,
-                    EXISTS(SELECT 1 FROM member_tokens t WHERE t.member_id = members.id AND t.revoked_at IS NULL)
-             FROM members ORDER BY created_at ASC",
-            (),
-        )
-        .await
-        .map_err(engine)?;
-    let mut agents = Vec::new();
-    while let Some(row) = rows.next().await.map_err(engine)? {
-        agents.push(agent_from_row(&row)?);
-    }
-    Ok(agents)
-}
-
-/// Fetch one agent.
-pub async fn get_agent(db: &Database, id: &str) -> Result<Option<Agent>> {
-    let conn = super::connect(db)?;
-    let mut rows = conn
-        .query(
-            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source,
-                    EXISTS(SELECT 1 FROM member_tokens t WHERE t.member_id = members.id AND t.revoked_at IS NULL)
-             FROM members WHERE id = ?1",
-            [id],
-        )
-        .await
-        .map_err(engine)?;
-    match rows.next().await.map_err(engine)? {
-        Some(row) => Ok(Some(agent_from_row(&row)?)),
-        None => Ok(None),
-    }
-}
-
-/// Make sure an active agent with this id exists, creating one on loopback.
-///
-/// Used by the loopback MCP gate when a caller declares its identity through
-/// `X-Agent-Id` instead of a bearer token. The agent is active and non-admin,
-/// with its own personal space, like one enrolled normally.
-pub async fn ensure_local_agent(db: &Database, id: &str) -> Result<String> {
-    validate_agent_id(id)?;
-    if get_agent(db, id).await?.is_some() {
-        return Ok(id.to_string());
-    }
-    match create_agent(db, id, id).await {
-        Ok(_) => Ok(id.to_string()),
-        Err(Error::Conflict(_)) => Ok(id.to_string()),
-        Err(err) => Err(err),
-    }
-}
-
-/// Create an agent and its personal space as one unit.
-pub async fn create_agent(db: &Database, id: &str, display_name: &str) -> Result<Agent> {
-    validate_agent_id(id)?;
-    create_inner(db, id, display_name).await
-}
-
-async fn create_inner(db: &Database, id: &str, display_name: &str) -> Result<Agent> {
+async fn create_inner(db: &Database, id: &str, display_name: &str) -> Result<()> {
     validate_display_name(display_name)?;
     let created_at = crate::store::now_rfc3339();
     let personal_project_id = format!("space-{}", crate::store::next_id());
@@ -246,19 +134,7 @@ async fn create_inner(db: &Database, id: &str, display_name: &str) -> Result<Age
         }),
     )
     .await?;
-    tx.commit().await.map_err(engine)?;
-
-    Ok(Agent {
-        id: id.to_string(),
-        display_name: display_name.to_string(),
-        personal_project_id,
-        created_at,
-        last_seen_at: None,
-        has_live_token: false,
-        state: "active".to_string(),
-        enrol_note: None,
-        enrol_source: None,
-    })
+    tx.commit().await.map_err(engine)
 }
 
 /// Whether an agent holds a grant on a project.
@@ -272,17 +148,6 @@ pub async fn has_grant(db: &Database, agent_id: &str, project_id: &str) -> Resul
         .await
         .map_err(engine)?;
     Ok(rows.next().await.map_err(engine)?.is_some())
-}
-
-/// Issue the agent's token, replacing any it already has.
-///
-/// One token per agent: the previous live token is revoked and the new one
-/// inserted in the same transaction, so a reissue never leaves two usable
-/// tokens. The plaintext is returned once and never stored.
-pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
-    issue_token_inner(db, agent_id)
-        .await
-        .map(|(issued, _)| issued)
 }
 
 async fn issue_token_inner(db: &Database, agent_id: &str) -> Result<(IssuedToken, Vec<String>)> {
@@ -364,14 +229,6 @@ async fn live_hashes(conn: &turso::Connection, member: &str) -> Result<Vec<Strin
         out.push(text(&row, 0)?);
     }
     Ok(out)
-}
-
-/// Revoke the agent's live token, if it has one.
-///
-/// Agent-keyed and idempotent: revoking an agent that already has no live
-/// token is not an error. An unknown agent is not found.
-pub async fn revoke_token(db: &Database, agent_id: &str) -> Result<()> {
-    revoke_token_inner(db, agent_id).await.map(|_| ())
 }
 
 async fn revoke_token_inner(db: &Database, agent_id: &str) -> Result<Vec<String>> {
@@ -468,7 +325,6 @@ pub async fn add_grant(db: &Database, agent_id: &str, project_id: &str) -> Resul
     .await?;
     tx.commit().await.map_err(engine)?;
     Ok(Grant {
-        agent_id: agent_id.to_string(),
         member_id: agent_id.to_string(),
         project_id: project_id.to_string(),
         created_at,
@@ -558,23 +414,6 @@ pub async fn remove_grant(db: &Database, agent_id: &str, project_id: &str) -> Re
     Ok(())
 }
 
-/// Enrol an agent in pending state with an issued token.
-///
-/// One pending request per source IP is enforced: a second request while one is
-/// pending is rate-limited. The token is minted immediately and works only on
-/// the enrolment status route until approved.
-pub async fn enrol_agent(
-    db: &Database,
-    id: &str,
-    display_name: &str,
-    source: &str,
-    why: &str,
-    pending_max: usize,
-) -> Result<(Agent, IssuedToken)> {
-    validate_agent_id(id)?;
-    enrol_inner(db, id, display_name, source, why, pending_max, None).await
-}
-
 /// What an MCP enrolment adds to the request: the asking agent, its OS and
 /// its host.
 type EnrolExtra<'a> = (&'a str, Option<&'a str>, Option<&'a str>);
@@ -587,7 +426,7 @@ async fn enrol_inner(
     why: &str,
     pending_max: usize,
     extra: Option<EnrolExtra<'_>>,
-) -> Result<(Agent, IssuedToken)> {
+) -> Result<IssuedToken> {
     validate_display_name(display_name)?;
     let created_at = crate::store::now_rfc3339();
     let personal_project_id = format!("space-{}", crate::store::next_id());
@@ -699,11 +538,18 @@ async fn enrol_inner(
     )
     .await?;
 
-    // Create approval event in inbox
+    // The request is the pending member's own, made by the agent that asked.
+    let asker = crate::author::Writer::call(crate::author::Author::Participant {
+        member: id.to_string(),
+        agent: extra
+            .map_or(crate::agent_name::CLI, |(agent, _, _)| agent)
+            .to_string(),
+        session: None,
+    });
     events::append_in_tx(
         &tx,
         0,
-        id,
+        &asker,
         None,
         NewEvent {
             project_id: personal_project_id.clone(),
@@ -725,41 +571,10 @@ async fn enrol_inner(
 
     tx.commit().await.map_err(engine)?;
 
-    Ok((
-        Agent {
-            id: id.to_string(),
-            display_name: display_name.to_string(),
-            personal_project_id,
-            created_at: created_at.clone(),
-            last_seen_at: None,
-            has_live_token: true,
-            state: "pending".to_string(),
-            enrol_note: Some(why.to_string()),
-            enrol_source: Some(source.to_string()),
-        },
-        IssuedToken {
-            token: plaintext,
-            created_at,
-        },
-    ))
-}
-
-/// Approve an agent enrolment request.
-///
-/// Marks the agent 'active', resolves the inbox approval, optionally renames
-/// the id and display name, and attaches any confidential projects granted.
-pub async fn approve_enrolment(
-    db: &Database,
-    current_id: &str,
-    new_id: Option<&str>,
-    new_display_name: Option<&str>,
-    projects: Option<&[String]>,
-) -> Result<Agent> {
-    let tx = super::begin_write(db).await?;
-    let agent =
-        approve_enrolment_in_tx(&tx, current_id, new_id, new_display_name, projects).await?;
-    tx.commit().await.map_err(engine)?;
-    Ok(agent)
+    Ok(IssuedToken {
+        token: plaintext,
+        created_at,
+    })
 }
 
 /// Approve an enrolment inside the caller's transaction.
@@ -773,12 +588,10 @@ pub(crate) async fn approve_enrolment_in_tx(
     new_id: Option<&str>,
     new_display_name: Option<&str>,
     projects: Option<&[String]>,
-) -> Result<Agent> {
+) -> Result<String> {
     let mut rows = tx
         .query(
-            "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source,
-                    EXISTS(SELECT 1 FROM member_tokens t WHERE t.member_id = members.id AND t.revoked_at IS NULL)
-             FROM members WHERE id = ?1",
+            "SELECT personal_project_id, state FROM members WHERE id = ?1",
             vec![Value::Text(current_id.to_string())],
         )
         .await
@@ -787,7 +600,10 @@ pub(crate) async fn approve_enrolment_in_tx(
         drop(rows);
         return Err(Error::NotFound(format!("agent {current_id} not found")));
     };
-    let mut agent = agent_from_row(&row)?;
+    let agent = PendingRow {
+        personal_project_id: text(&row, 0)?,
+        state: text_at(&row, 1)?.unwrap_or_else(|| "active".to_string()),
+    };
     drop(rows);
 
     if agent.state != "pending" {
@@ -887,8 +703,6 @@ pub(crate) async fn approve_enrolment_in_tx(
             )
             .await
             .map_err(engine)?;
-
-            agent.id = target_id.to_string();
             target_id.to_string()
         } else {
             current_id.to_string()
@@ -908,7 +722,6 @@ pub(crate) async fn approve_enrolment_in_tx(
         )
         .await
         .map_err(engine)?;
-        agent.display_name = target_name.to_string();
     }
 
     tx.execute(
@@ -917,7 +730,6 @@ pub(crate) async fn approve_enrolment_in_tx(
     )
     .await
     .map_err(engine)?;
-    agent.state = "active".to_string();
 
     if let Some(project_ids) = projects {
         let created_at = crate::store::now_rfc3339();
@@ -961,7 +773,7 @@ pub(crate) async fn approve_enrolment_in_tx(
     )
     .await?;
 
-    Ok(agent)
+    Ok(effective_id)
 }
 
 /// Refuse an agent enrolment request.
@@ -1087,25 +899,6 @@ pub(crate) async fn pending_enrolment_in_tx(
     }
 }
 
-/// Look up the current agent id and state for a live token hash.
-pub async fn lookup_agent_by_token_hash(
-    db: &Database,
-    token_hash: &str,
-) -> Result<Option<(String, String)>> {
-    let conn = super::connect(db)?;
-    let mut rows = conn
-        .query(
-            "SELECT a.id, a.state FROM member_tokens t JOIN members a ON a.id = t.member_id WHERE t.token_hash = ?1 AND t.revoked_at IS NULL",
-            [token_hash],
-        )
-        .await
-        .map_err(engine)?;
-    match rows.next().await.map_err(engine)? {
-        Some(row) => Ok(Some((text(&row, 0)?, text(&row, 1)?))),
-        None => Ok(None),
-    }
-}
-
 fn generate_token() -> String {
     use rand::RngCore;
     let mut bytes = [0u8; 32];
@@ -1137,7 +930,7 @@ async fn audit(
     events::append_in_tx(
         tx,
         0,
-        "human",
+        &crate::author::Writer::human(),
         None,
         NewEvent {
             project_id: project_id.to_string(),
@@ -1156,22 +949,22 @@ async fn audit(
 /// The names the hub records its own actions under, which no agent may hold.
 const RESERVED_AGENT_IDS: [&str; 3] = ["human", "local", "hub"];
 
-/// Revoke the live token of every agent whose id is reserved, and return
+/// Revoke the live token of every member whose id is reserved, and return
 /// their ids.
 ///
 /// `hub` became reserved when the hub began recording the resolutions it
-/// makes at a deadline under it. A store from before may already hold an
-/// agent by that name, and while its token works its writes read as the
-/// hub's. The agent and its history stay; only the token goes, through the
-/// same audited revoke an operator would make, and [`issue_token`] refuses
-/// that id a new one.
-pub async fn retire_reserved_agents(db: &Database) -> Result<Vec<String>> {
+/// makes at a deadline under it. A store from before may already hold a
+/// member by that name, and while its token works its writes read as the
+/// hub's. The member and its history stay; only the token goes, through the
+/// same audited revoke an operator would make, and [`issue_member_token`]
+/// refuses that id a new one.
+pub async fn retire_reserved_members(db: &Database) -> Result<Vec<String>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT DISTINCT a.id FROM member_tokens t
-             JOIN members a ON a.id = t.member_id
-             WHERE t.revoked_at IS NULL AND a.id IN (?1, ?2, ?3)",
+            "SELECT DISTINCT m.id FROM member_tokens t
+             JOIN members m ON m.id = t.member_id
+             WHERE t.revoked_at IS NULL AND m.id IN (?1, ?2, ?3)",
             RESERVED_AGENT_IDS
                 .map(|id| Value::Text(id.to_string()))
                 .to_vec(),
@@ -1183,8 +976,8 @@ pub async fn retire_reserved_agents(db: &Database) -> Result<Vec<String>> {
         held.push(text(&row, 0)?);
     }
     drop(rows);
-    for agent_id in &held {
-        revoke_token(db, agent_id).await?;
+    for member in &held {
+        revoke_token_inner(db, member).await?;
     }
     Ok(held)
 }
@@ -1217,23 +1010,8 @@ fn validate_display_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-fn agent_from_row(row: &Row) -> Result<Agent> {
-    Ok(Agent {
-        id: text(row, 0)?,
-        display_name: text(row, 1)?,
-        personal_project_id: text(row, 2)?,
-        created_at: text(row, 3)?,
-        last_seen_at: text_at(row, 4)?,
-        has_live_token: integer_at(row, 8)?.unwrap_or(0) != 0,
-        state: text_at(row, 5)?.unwrap_or_else(|| "active".to_string()),
-        enrol_note: text_at(row, 6)?,
-        enrol_source: text_at(row, 7)?,
-    })
-}
-
 fn grant_from_row(row: &Row) -> Result<Grant> {
     Ok(Grant {
-        agent_id: text(row, 0)?,
         member_id: text(row, 0)?,
         project_id: text(row, 1)?,
         created_at: text(row, 2)?,
@@ -1523,7 +1301,7 @@ pub async fn enrol_member(
     if !valid_new_member_id(enrolment.member) {
         return Err(refuse_member_id(enrolment.member));
     }
-    let (_, token) = enrol_inner(
+    let token = enrol_inner(
         db,
         enrolment.member,
         enrolment.display_name,
@@ -1551,8 +1329,11 @@ pub async fn approve_member(
     {
         return Err(refuse_member_id(target));
     }
-    let approved = approve_enrolment(db, current_id, new_id, new_display_name, projects).await?;
-    member_or_missing(db, &approved.id).await
+    let tx = super::begin_write(db).await?;
+    let approved =
+        approve_enrolment_in_tx(&tx, current_id, new_id, new_display_name, projects).await?;
+    tx.commit().await.map_err(engine)?;
+    member_or_missing(db, &approved).await
 }
 
 /// Issue a member a new token, revoking the old. Returns the token and the

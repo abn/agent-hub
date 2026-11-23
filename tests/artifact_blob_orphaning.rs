@@ -21,7 +21,7 @@ async fn a_failure_after_promotion_leaves_the_final_path_to_reconcile() {
         &db,
         &dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Artifact Title",
             description: "",
@@ -44,7 +44,7 @@ async fn a_failure_after_promotion_leaves_the_final_path_to_reconcile() {
         &dir,
         None,
         1,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &art.id,
         b"version 2 content that will fail commit",
         EnvelopeUpdate::Keep,
@@ -95,7 +95,7 @@ async fn a_version_row_left_at_the_next_number_is_reused() {
         &db,
         &dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Artifact Title",
             description: "",
@@ -123,7 +123,7 @@ async fn a_version_row_left_at_the_next_number_is_reused() {
     let updated = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &art.id,
         b"version 2 content",
         EnvelopeUpdate::Keep,
@@ -156,7 +156,7 @@ async fn startup_reconcile_removes_unreferenced_version_blobs() {
         &db,
         &dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Legit Artifact",
             description: "",

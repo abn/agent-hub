@@ -53,7 +53,7 @@ async fn concurrent_same_key_publishes_serialize() {
                 &db,
                 &dir,
                 NewArtifact {
-                    actor: "agent-one",
+                    writer: &common::seed::writer("agent-one"),
                     project_id: "proj",
                     title: "Report",
                     kind: "html",
@@ -109,7 +109,7 @@ async fn concurrent_same_key_questions_serialize() {
                 &agent_hub::limits::InboxCaps::disabled(),
                 0,
                 NewQuestion {
-                    actor: "agent-one",
+                    writer: &common::seed::writer("agent-one"),
                     project_id: "proj",
                     subject: "Ship it?",
                     body: None,
@@ -156,7 +156,7 @@ async fn concurrent_same_key_answers_serialize() {
         &agent_hub::limits::InboxCaps::disabled(),
         0,
         NewQuestion {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             subject: "Ship it?",
             body: None,
@@ -175,7 +175,15 @@ async fn concurrent_same_key_answers_serialize() {
         let db = db.clone();
         let question_id = question_id.clone();
         handles.push(tokio::spawn(async move {
-            questions::answer(&db, 0, "agent-two", &question_id, "yes", Some("a-key")).await
+            questions::answer(
+                &db,
+                0,
+                &common::seed::writer("agent-two"),
+                &question_id,
+                "yes",
+                Some("a-key"),
+            )
+            .await
         }));
     }
 
@@ -226,7 +234,7 @@ async fn a_steady_stream_of_appends_starves_no_writer() {
                 let result = events::append(
                     &db,
                     0,
-                    "agent-one",
+                    &common::seed::writer("agent-one"),
                     None,
                     events::NewEvent {
                         project_id: "proj".to_string(),

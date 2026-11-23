@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use agent_hub::app::AppState;
 use agent_hub::brain::BrainStore;
 use agent_hub::http::router;
-use agent_hub::store::{identity, migrate, open_engine, prune, schema, sessions};
+use agent_hub::store::{identity, migrate, open_engine, prune, schema};
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use serde_json::Value as Json;
@@ -46,15 +46,16 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
     // commit as soon as the server starts.
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     migrate(&db).await.expect("migrate");
-    let agent = identity::create_agent(&db, "probe", "Probe")
+    let agent = identity::create_member(&db, "probe", "Probe")
         .await
         .expect("create agent");
-    let agent_token = identity::issue_token(&db, &agent.id)
+    let agent_token = identity::issue_member_token(&db, &agent.id)
         .await
+        .map(|(issued, _)| issued)
         .expect("issue token")
         .token;
     let _ = agent_hub::store::projects::create(&db, "proj", "Project").await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start session");
     let store = BrainStore::new(dir.join("sessions"));
@@ -62,7 +63,7 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
     brain.put("/kv/note", b"to be pruned").await.expect("put");
     let brain_file = dir.join(&session.brain_path);
     assert!(brain_file.exists());
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end session");
     prune::prune_session(&db, &session.id)
@@ -263,43 +264,73 @@ async fn migrate_refuses_a_store_newer_than_the_binary() {
     );
 }
 
-/// A store that has migrations pending is copied aside first; one that is
-/// already current is not. The copy is per migration, not per start.
+/// A fresh store has nothing to keep and is not copied aside; a store with
+/// migrations pending is, once, as one set; one already current is not.
 #[tokio::test]
 async fn a_second_start_writes_no_pre_migration_backup() {
     let dir = TempDir::new("topology-backup-once");
     let config = common::state::config(&dir);
+    let state = AppState::open(config.clone()).await.expect("fresh open");
+    assert_eq!(
+        backup_sets(dir.path()),
+        Vec::<String>::new(),
+        "a fresh store is not copied aside"
+    );
+    drop(state);
 
-    let state = AppState::open(config.clone()).await.expect("first open");
-    let first = backup_names(dir.path());
+    let older = TempDir::new("topology-backup-older");
+    {
+        let db = agent_hub::store::open_engine(&older.path().join("hub.db"))
+            .await
+            .expect("open engine");
+        let conn = db.connect().expect("connect");
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
+            (),
+        )
+        .await
+        .expect("schema_version table");
+        let newest = schema::MIGRATIONS.last().expect("migrations").version;
+        for migration in schema::MIGRATIONS.iter().filter(|m| m.version < newest) {
+            conn.execute_batch(migration.ddl)
+                .await
+                .expect("apply migration");
+            conn.execute(
+                "INSERT INTO schema_version(version) VALUES (?1)",
+                [migration.version],
+            )
+            .await
+            .expect("record version");
+        }
+    }
+    let config = common::state::config(&older);
+    let state = AppState::open(config.clone()).await.expect("upgrade");
+    let first = backup_sets(older.path());
     assert_eq!(
         first.len(),
         1,
-        "a fresh store is copied aside once before migrating: {first:?}"
+        "an upgrade copies the store aside once: {first:?}"
     );
     drop(state);
 
     let state = AppState::open(config).await.expect("second open");
     assert_eq!(
-        backup_names(dir.path()),
+        backup_sets(older.path()),
         first,
         "an up-to-date store writes no backup on start"
     );
     drop(state);
 }
 
-/// The pre-migration backup files present in `data_dir`.
-fn backup_names(data_dir: &std::path::Path) -> Vec<String> {
+/// The pre-migration backup sets present in `data_dir`.
+fn backup_sets(data_dir: &std::path::Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(data_dir.join("backups"))
         .map(|entries| {
             entries
                 .flatten()
-                .filter(|entry| {
-                    entry.file_name().to_str().is_some_and(|name| {
-                        name.starts_with("pre-migration-") && name.ends_with(".db")
-                    })
-                })
+                .filter(|entry| entry.path().is_dir())
                 .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+                .filter(|name| name.starts_with("pre-migration-"))
                 .collect()
         })
         .unwrap_or_default();

@@ -530,7 +530,7 @@ async fn migration_seven_rekeys_sessions_without_losing_rows() {
         .await
         .expect("upgrade");
     assert_eq!(version, latest());
-    let resumed = agent_hub::store::sessions::start(&db, "proj", "nightly", "agent-one")
+    let resumed = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("resume");
     assert_eq!(resumed.id, "live");
@@ -953,7 +953,7 @@ async fn migration_nine_seeds_each_cursor_at_the_newest_event() {
     agent_hub::store::events::append(
         &db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         agent_hub::store::events::NewEvent {
             project_id: "one".to_string(),
@@ -1586,9 +1586,15 @@ async fn ids_clear_a_persisted_high_water_ahead_of_the_clock_across_restarts() {
         let state = AppState::open(common::state::config(dir.path()))
             .await
             .expect("open state");
-        let id = events::append(&state.db, 0, "agent", None, event("after the step back"))
-            .await
-            .expect("append");
+        let id = events::append(
+            &state.db,
+            0,
+            &common::seed::writer("agent"),
+            None,
+            event("after the step back"),
+        )
+        .await
+        .expect("append");
         agent_hub::store::persist_id_high_water(&state.db)
             .await
             .expect("persist the mark as a clean stop would");
@@ -1601,9 +1607,15 @@ async fn ids_clear_a_persisted_high_water_ahead_of_the_clock_across_restarts() {
         let state = AppState::open(common::state::config(dir.path()))
             .await
             .expect("open state");
-        events::append(&state.db, 0, "agent", None, event("still behind the clock"))
-            .await
-            .expect("append")
+        events::append(
+            &state.db,
+            0,
+            &common::seed::writer("agent"),
+            None,
+            event("still behind the clock"),
+        )
+        .await
+        .expect("append")
     };
 
     assert!(

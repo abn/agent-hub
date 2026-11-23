@@ -939,10 +939,8 @@ async fn migrated_cursors(
 }
 
 /// A comment or page event's audience, read in either shape: the V27 array
-/// of labels, or `{"sessions","participants","labels"}`. New writes keep the
-/// label array under `audience` and carry the sessions and participants
-/// beside it (`audience_sessions`, `audience_participants`) until every
-/// reader takes the object.
+/// of labels, which names no session or participant, or
+/// `{"sessions","participants","labels"}`, which every write since V28 uses.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Audience {
     pub sessions: Vec<String>,
@@ -984,10 +982,11 @@ impl Audience {
                 participants: keys(object.get("participants")),
                 labels: strings(object.get("labels")),
             },
+            // A bare label list is a V27 audience the upgrade has not rewritten
+            // yet: its labels are history and name no session or participant.
             other => Self {
-                sessions: strings(payload.get("audience_sessions")),
-                participants: keys(payload.get("audience_participants")),
                 labels: strings(other),
+                ..Self::default()
             },
         }
     }
@@ -1889,10 +1888,10 @@ mod tests {
 
     #[test]
     fn audiences_read_in_both_shapes() {
-        let old = serde_json::json!({"audience": ["laptop/claude"], "audience_sessions": ["s1"]});
+        let old = serde_json::json!({"audience": ["laptop/claude"]});
         let read = Audience::of(Some(&old));
         assert_eq!(read.labels, vec!["laptop/claude".to_string()]);
-        assert!(read.names(Some("s1"), None));
+        assert!(!read.names(Some("s1"), None));
         let new = serde_json::json!({"audience": {"sessions": [], "participants": [{"member": "laptop", "agent": ""}], "labels": []}});
         let key = crate::author::ParticipantKey {
             member: "laptop".into(),

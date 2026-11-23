@@ -86,7 +86,9 @@ pub struct ArtifactVersion {
 
 /// A new artifact to publish.
 pub struct NewArtifact<'a> {
-    pub actor: &'a str,
+    /// Who publishes it. A caller with a principal writes under the principal
+    /// in the artifact's session instead.
+    pub writer: &'a crate::author::Writer,
     pub project_id: &'a str,
     pub title: &'a str,
     pub description: &'a str,
@@ -235,7 +237,7 @@ pub async fn publish_for_principal_capped(
     let mut created_rel: Option<String> = None;
     let writer = match principal {
         Some(p) => p.writer(artifact.session_id),
-        None => crate::author::Writer::from(artifact.actor),
+        None => artifact.writer.clone(),
     };
 
     let write = async {
@@ -266,7 +268,7 @@ pub async fn publish_for_principal_capped(
         // the caller holds its gate shared, so an end or prune cannot pass
         // this check and the commit.
         if let Some(session_id) = artifact.session_id {
-            crate::store::sessions::refuse_closed_in_tx(&tx, session_id).await?;
+            crate::store::sessions::writable_in_tx(&tx, session_id).await?;
         }
 
         if let Some(key) = idempotency_key
@@ -425,7 +427,7 @@ pub async fn publish_for_principal_capped(
 pub async fn update(
     db: &Database,
     data_dir: &Path,
-    actor: impl Into<crate::author::Writer>,
+    actor: &crate::author::Writer,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
@@ -456,7 +458,7 @@ pub async fn update_capped(
     db: &Database,
     data_dir: &Path,
     ceiling: i64,
-    actor: impl Into<crate::author::Writer>,
+    actor: &crate::author::Writer,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
@@ -483,7 +485,7 @@ pub async fn update_for_principal(
     db: &Database,
     data_dir: &Path,
     principal: Option<&crate::principal::Principal>,
-    actor: impl Into<crate::author::Writer>,
+    actor: &crate::author::Writer,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
@@ -511,14 +513,14 @@ pub async fn update_for_principal_capped(
     data_dir: &Path,
     principal: Option<&crate::principal::Principal>,
     ceiling: i64,
-    actor: impl Into<crate::author::Writer>,
+    actor: &crate::author::Writer,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
     opts: UpdateOptions<'_>,
     idempotency_key: Option<&str>,
 ) -> Result<Artifact> {
-    let writer: crate::author::Writer = actor.into();
+    let writer = actor;
     limits::check_artifact(content.len())?;
     if let Some(Some(l)) = opts.label {
         check_label(Some(l))?;
@@ -593,7 +595,7 @@ pub async fn update_for_principal_capped(
         // the caller holds its gate shared, so an end or prune cannot pass
         // this check and the commit.
         if let Some(session_id) = opts.session_id {
-            crate::store::sessions::refuse_closed_in_tx(&tx, session_id).await?;
+            crate::store::sessions::writable_in_tx(&tx, session_id).await?;
         }
 
         if let Some(key) = idempotency_key
@@ -703,7 +705,7 @@ pub async fn update_for_principal_capped(
         } else {
             insert_version(
                 &tx,
-                &writer,
+                writer,
                 artifact_id,
                 version,
                 &existing.title,
@@ -739,7 +741,7 @@ pub async fn update_for_principal_capped(
         let event_id = append_event(
             &tx,
             ceiling,
-            &writer,
+            writer,
             &existing.project_id,
             "updated",
             artifact_id,
@@ -821,7 +823,7 @@ pub async fn update_for_principal_capped(
 pub async fn draft(
     db: &Database,
     data_dir: &Path,
-    actor: impl Into<crate::author::Writer>,
+    actor: &crate::author::Writer,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
@@ -864,13 +866,13 @@ pub async fn draft_for_principal_capped(
     data_dir: &Path,
     principal: Option<&crate::principal::Principal>,
     ceiling: i64,
-    actor: impl Into<crate::author::Writer>,
+    actor: &crate::author::Writer,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
     opts: LiveOptions<'_>,
 ) -> Result<Artifact> {
-    let writer: crate::author::Writer = actor.into();
+    let writer = actor;
     limits::check_artifact(content.len())?;
 
     let conn = super::connect(db)?;
@@ -923,7 +925,7 @@ pub async fn draft_for_principal_capped(
         // the caller holds its gate shared, so an end or prune cannot pass
         // this check and the commit.
         if let Some(session_id) = opts.session_id {
-            crate::store::sessions::refuse_closed_in_tx(&tx, session_id).await?;
+            crate::store::sessions::writable_in_tx(&tx, session_id).await?;
         }
 
         let existing = row_on(&tx, artifact_id)
@@ -994,7 +996,7 @@ pub async fn draft_for_principal_capped(
             } else {
                 insert_version(
                     &tx,
-                    &writer,
+                    writer,
                     artifact_id,
                     version,
                     &existing.title,
@@ -1012,7 +1014,7 @@ pub async fn draft_for_principal_capped(
             append_event(
                 &tx,
                 ceiling,
-                &writer,
+                writer,
                 &existing.project_id,
                 "live",
                 artifact_id,
@@ -1118,10 +1120,10 @@ pub async fn clear_idle_live(db: &Database, since: &str) -> Result<()> {
 pub async fn delete(
     db: &Database,
     data_dir: &Path,
-    actor: impl Into<crate::author::Writer>,
+    actor: &crate::author::Writer,
     artifact_id: &str,
 ) -> Result<Artifact> {
-    let writer: crate::author::Writer = actor.into();
+    let writer = actor;
     let tx = super::begin_write(db).await?;
     let existing = row_on(&tx, artifact_id)
         .await?
@@ -1172,7 +1174,7 @@ pub async fn delete(
     append_event(
         &tx,
         0,
-        &writer,
+        writer,
         &existing.project_id,
         "deleted",
         artifact_id,

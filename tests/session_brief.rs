@@ -150,7 +150,7 @@ impl Fleet {
         }
         let mut tokens = Vec::new();
         for (index, agent) in agents.iter().enumerate() {
-            identity::create_agent(&db, agent, agent)
+            identity::create_member(&db, agent, agent)
                 .await
                 .expect("create agent");
             if confidential && index == 0 {
@@ -159,8 +159,9 @@ impl Fleet {
                     .expect("add grant");
             }
             tokens.push(
-                identity::issue_token(&db, agent)
+                identity::issue_member_token(&db, agent)
                     .await
+                    .map(|(issued, _)| issued)
                     .expect("issue token")
                     .token,
             );
@@ -328,7 +329,7 @@ async fn the_count_of_the_rest_stops_at_its_cap() {
         events::append(
             &db,
             0,
-            "writer",
+            &common::seed::writer("writer"),
             None,
             NewEvent {
                 project_id: PROJECT.to_string(),

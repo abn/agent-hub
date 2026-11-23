@@ -17,6 +17,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::app::AppState;
+use crate::author::Writer;
 use crate::brain::knowledge::{self, HUMAN, REVIEW_OP, Written};
 use crate::brain::{self, Brain, EntryKind, WriteFilter, WriteRecord, is_under};
 use crate::error::Error;
@@ -420,7 +421,7 @@ pub async fn page_put(
     let written = knowledge::put(
         &state,
         &project_id,
-        HUMAN,
+        &Writer::human(),
         &path,
         &content,
         if_version.as_deref(),
@@ -442,7 +443,7 @@ pub async fn page_delete(
     let path = knowledge::delete(
         &state,
         &project_id,
-        HUMAN,
+        &Writer::human(),
         None,
         &path,
         query.if_version.as_deref(),
@@ -515,7 +516,7 @@ async fn page_revert(
     let written = knowledge::revert(
         state,
         project_id,
-        HUMAN,
+        &Writer::human(),
         None,
         &path,
         &revert.version,
@@ -611,7 +612,7 @@ pub async fn promote(
     let written = knowledge::promote(
         &state,
         &project_id,
-        HUMAN,
+        &Writer::human(),
         &knowledge::Promotion {
             session: &session,
             from_path: &body.from_path,

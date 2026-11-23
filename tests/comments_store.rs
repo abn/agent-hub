@@ -16,7 +16,7 @@ async fn publish(db: &turso::Database, dir: &std::path::Path) -> String {
         db,
         dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Report",
             description: "",
@@ -37,7 +37,7 @@ async fn post(db: &turso::Database, artifact_id: &str) -> agent_hub::store::comm
     comments::add_comment(
         db,
         artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Looks good.",
         None,
         None,
@@ -58,7 +58,7 @@ async fn post_list_resolve_and_delete_round_trip() {
     let (comment, replayed) = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Looks good.",
         Some(AnchorInput::Point { x: 10.0, y: 20.0 }),
         None,
@@ -116,7 +116,7 @@ async fn a_post_replays_on_its_idempotency_key_without_a_second_token() {
     let (first, replayed) = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Same note twice.",
         None,
         None,
@@ -130,7 +130,7 @@ async fn a_post_replays_on_its_idempotency_key_without_a_second_token() {
     let (second, replayed) = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Same note twice.",
         None,
         None,
@@ -155,7 +155,7 @@ async fn a_post_replays_on_its_idempotency_key_without_a_second_token() {
     let clash = comments::add_comment(
         &db,
         &other_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Same note twice.",
         None,
         None,
@@ -178,7 +178,7 @@ async fn a_key_records_fresh_after_its_comment_is_deleted() {
     let (first, replayed) = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "First note.",
         None,
         None,
@@ -198,7 +198,7 @@ async fn a_key_records_fresh_after_its_comment_is_deleted() {
     let (second, replayed) = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Second note.",
         None,
         None,
@@ -222,9 +222,18 @@ async fn missing_artifacts_and_comments_are_not_found() {
     let dir = TempDir::new("comment-missing");
     let db = open(&dir).await;
 
-    let err = comments::add_comment(&db, "ghost", "agent-one", "Hi.", None, None, None, None)
-        .await
-        .expect_err("missing artifact");
+    let err = comments::add_comment(
+        &db,
+        "ghost",
+        &common::seed::writer("agent-one"),
+        "Hi.",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect_err("missing artifact");
     assert_eq!(err.code(), ErrorCode::NotFound);
 
     let err = comments::list_comments(&db, "ghost")
@@ -260,7 +269,7 @@ async fn validation_rejects_bad_comments() {
     let blank = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "   ",
         None,
         None,
@@ -276,7 +285,7 @@ async fn validation_rejects_bad_comments() {
     let long = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &"b".repeat(2001),
         None,
         None,
@@ -289,8 +298,17 @@ async fn validation_rejects_bad_comments() {
         ErrorCode::InvalidArgument
     );
 
-    let no_author =
-        comments::add_comment(&db, &artifact_id, "  ", "Hi.", None, None, None, None).await;
+    let no_author = comments::add_comment(
+        &db,
+        &artifact_id,
+        &common::seed::writer("  "),
+        "Hi.",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await;
     assert_eq!(
         no_author.expect_err("blank author").code(),
         ErrorCode::InvalidArgument
@@ -299,7 +317,7 @@ async fn validation_rejects_bad_comments() {
     let long_author = comments::add_comment(
         &db,
         &artifact_id,
-        &"a".repeat(201),
+        &common::seed::writer(&"a".repeat(201)),
         "Hi.",
         None,
         None,
@@ -315,7 +333,7 @@ async fn validation_rejects_bad_comments() {
     let nan = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Hi.",
         Some(AnchorInput::Point {
             x: f64::NAN,
@@ -334,7 +352,7 @@ async fn validation_rejects_bad_comments() {
     let blank_quote = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Hi.",
         Some(AnchorInput::Text {
             quote: "  ".to_string(),
@@ -354,7 +372,7 @@ async fn validation_rejects_bad_comments() {
     let long_quote = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Hi.",
         Some(AnchorInput::Text {
             quote: "q".repeat(2001),
@@ -383,7 +401,7 @@ async fn a_text_anchor_keeps_its_context_and_caps_it() {
     let (comment, _) = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "This one.",
         Some(AnchorInput::Text {
             quote: "quality".to_string(),
@@ -404,7 +422,7 @@ async fn a_text_anchor_keeps_its_context_and_caps_it() {
     let (plain, _) = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "No context.",
         Some(AnchorInput::Text {
             quote: "quality".to_string(),
@@ -425,7 +443,7 @@ async fn a_text_anchor_keeps_its_context_and_caps_it() {
     let long_context = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Too much.",
         Some(AnchorInput::Text {
             quote: "quality".to_string(),
@@ -478,7 +496,7 @@ async fn a_text_anchor_is_refused_on_a_protected_version() {
     artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact_id,
         b"ciphertext",
         EnvelopeUpdate::Set(serde_json::json!({"alg": "AES-GCM"})),
@@ -492,7 +510,7 @@ async fn a_text_anchor_is_refused_on_a_protected_version() {
     let quoted = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "About this line.",
         Some(AnchorInput::Text {
             quote: "a public line".to_string(),
@@ -511,7 +529,7 @@ async fn a_text_anchor_is_refused_on_a_protected_version() {
     let refused = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "About this line.",
         Some(AnchorInput::Text {
             quote: "a secret line".to_string(),
@@ -532,7 +550,7 @@ async fn a_text_anchor_is_refused_on_a_protected_version() {
     let point = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Pinned here.",
         Some(AnchorInput::Point { x: 1.0, y: 2.0 }),
         None,
@@ -553,7 +571,7 @@ async fn a_forged_anchor_version_clamps_to_current() {
     let (comment, _) = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "From the future.",
         Some(AnchorInput::Point { x: 0.0, y: 0.0 }),
         Some(999),
@@ -578,7 +596,7 @@ async fn a_key_replays_fresh_after_its_artifact_is_deleted() {
     let (first, _) = comments::add_comment(
         &db,
         &artifact_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Doomed note.",
         None,
         None,
@@ -588,7 +606,7 @@ async fn a_key_replays_fresh_after_its_artifact_is_deleted() {
     .await
     .expect("post");
 
-    artifacts::delete(&db, &dir, "agent-one", &artifact_id)
+    artifacts::delete(&db, &dir, &common::seed::writer("agent-one"), &artifact_id)
         .await
         .expect("delete artifact");
 
@@ -596,7 +614,7 @@ async fn a_key_replays_fresh_after_its_artifact_is_deleted() {
     let (second, replayed) = comments::add_comment(
         &db,
         &second_id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "Doomed note.",
         None,
         None,
@@ -624,7 +642,7 @@ async fn deleting_an_artifact_or_project_drops_its_comments() {
         &db,
         &dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "doomed",
             title: "Report",
             description: "",
@@ -641,7 +659,7 @@ async fn deleting_an_artifact_or_project_drops_its_comments() {
     .id;
     post(&db, &second).await;
 
-    artifacts::delete(&db, &dir, "agent-one", &first)
+    artifacts::delete(&db, &dir, &common::seed::writer("agent-one"), &first)
         .await
         .expect("delete artifact");
     let conn = db.connect().expect("connect");

@@ -92,7 +92,7 @@ async fn post_expiring_approval(db: &turso::Database, actor: &str, seconds: i64)
         db,
         &agent_hub::limits::InboxCaps::disabled(),
         0,
-        actor,
+        &common::seed::writer(actor),
         None,
         agent_hub::store::events::NewEvent {
             project_id: PROJECT.to_string(),

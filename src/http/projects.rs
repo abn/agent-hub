@@ -92,13 +92,13 @@ pub async fn get(
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
-    let visible = match (&project, principal.is_admin) {
+    let visible = match (&project, principal.is_admin()) {
         (Some(_), true) => true,
         (Some(p), false) => {
             if !p.confidential {
                 true
-            } else if let Some(agent_id) = principal.agent_id.as_deref() {
-                crate::store::identity::has_grant(&state.db, agent_id, &p.id)
+            } else if let Some(member) = principal.member() {
+                crate::store::identity::has_grant(&state.db, member, &p.id)
                     .await
                     .map_err(|err| Problem::from_error(&err))?
             } else {
@@ -146,7 +146,7 @@ pub async fn update(
     }
 
     let mut was_confidential = false;
-    if !principal.is_admin {
+    if !principal.is_admin() {
         if payload.display_name.is_some() {
             return Err(Problem::from_error(&crate::error::Error::InvalidArgument(
                 "only the admin may rename a project".to_string(),
@@ -183,13 +183,14 @@ pub async fn update(
 
     // An agent tightening a project is a signal the human should see; the
     // admin's own change is the control they just used, so it says nothing.
-    if !principal.is_admin && !was_confidential && project.confidential {
+    if !principal.is_admin() && !was_confidential && project.confidential {
         let event = crate::store::events::NewEvent {
             project_id: project.id.clone(),
             kind: "signal".to_string(),
             summary: format!(
                 "{} made {} confidential",
-                principal.actor, project.display_name
+                principal.writer(None).actor(),
+                project.display_name
             ),
             payload: Some(serde_json::json!({ "action": "made_confidential" })),
             needs_action: false,
@@ -199,7 +200,7 @@ pub async fn update(
         if let Err(err) = crate::store::events::append(
             &state.db,
             state.config.events_per_project.per_project,
-            &principal.actor,
+            &principal.writer(None),
             None,
             event,
         )
@@ -229,13 +230,13 @@ pub async fn stats(
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
-    let visible = match (&project, principal.is_admin) {
+    let visible = match (&project, principal.is_admin()) {
         (Some(_), true) => true,
         (Some(p), false) => {
             if !p.confidential {
                 true
-            } else if let Some(agent_id) = principal.agent_id.as_deref() {
-                crate::store::identity::has_grant(&state.db, agent_id, &p.id)
+            } else if let Some(member) = principal.member() {
+                crate::store::identity::has_grant(&state.db, member, &p.id)
                     .await
                     .map_err(|err| Problem::from_error(&err))?
             } else {

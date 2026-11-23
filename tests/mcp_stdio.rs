@@ -154,7 +154,7 @@ fn proxy_mode_without_a_hub_exits_78_and_creates_no_data_dir() {
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(
-            stderr.contains("no hub configured: set HUB_URL or [client].url"),
+            stderr.contains("no hub configured: set HUB_URL"),
             "the refusal says what to set: {stderr}"
         );
         assert!(

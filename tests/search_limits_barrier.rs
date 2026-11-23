@@ -5,7 +5,6 @@ use agent_hub::limits::SEARCH_BODY_BYTES_MAX;
 use agent_hub::store::artifacts::{self, NewArtifact};
 use agent_hub::store::projects;
 use agent_hub::store::search::{self, SearchDoc};
-use agent_hub::store::sessions;
 use turso::Value;
 
 mod common;
@@ -23,7 +22,7 @@ async fn search_body_truncation_is_enforced_at_indexing_boundary() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Large Report",
             description: "",
@@ -129,7 +128,7 @@ async fn fork_search_docs_match_source_snapshot() {
     let state = open("b3-fork-snap").await;
     let _ = projects::create(&state.db, "proj", "Project").await;
 
-    let source = sessions::start(&state.db, "proj", "source", "agent-one")
+    let source = common::seed::start_session(&state.db, "proj", "source", "agent-one")
         .await
         .expect("start source");
 
@@ -163,10 +162,9 @@ async fn fork_search_docs_match_source_snapshot() {
     .expect("index doc");
 
     // Fork the session
-    let fork_id = "01FORKED_TEST".to_string();
-    let forked = sessions::insert_fork(&state.db, &source, "forked-sess", "agent-two", &fork_id)
+    let forked = common::seed::fork_session(&state.db, &source, "forked-sess", "agent-two")
         .await
-        .expect("insert fork");
+        .expect("fork");
 
     // Verify the forked search_docs has the copied key
     let mut rows = conn

@@ -20,7 +20,7 @@ async fn open(dir: &std::path::Path) -> turso::Database {
 
 fn public<'a>(title: &'a str, content: &'a [u8]) -> NewArtifact<'a> {
     NewArtifact {
-        actor: "agent-one",
+        writer: common::seed::lasting_writer("agent-one"),
         project_id: "proj",
         title,
         description: "",
@@ -75,7 +75,7 @@ async fn concurrent_updates_get_distinct_versions() {
         artifacts::update(
             &db,
             &dir,
-            "agent-one",
+            common::seed::lasting_writer("agent-one"),
             &artifact.id,
             b"second draft",
             EnvelopeUpdate::Keep,
@@ -85,7 +85,7 @@ async fn concurrent_updates_get_distinct_versions() {
         artifacts::update(
             &db,
             &dir,
-            "agent-one",
+            common::seed::lasting_writer("agent-one"),
             &artifact.id,
             b"third draft",
             EnvelopeUpdate::Keep,
@@ -140,7 +140,7 @@ async fn update_adds_a_version_and_refreshes_search() {
     let updated = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"second draft",
         EnvelopeUpdate::Keep,
@@ -182,7 +182,7 @@ async fn a_protected_artifact_is_not_searchable_by_body() {
         &db,
         &dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Secret report",
             kind: "html",
@@ -261,7 +261,7 @@ async fn an_update_replays_on_its_idempotency_key() {
     let first = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"second",
         EnvelopeUpdate::Keep,
@@ -273,7 +273,7 @@ async fn an_update_replays_on_its_idempotency_key() {
     let second = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"another",
         EnvelopeUpdate::Keep,
@@ -363,7 +363,7 @@ async fn a_stale_base_version_conflicts_and_force_overwrites() {
     let stale = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"v2-stale",
         EnvelopeUpdate::Keep,
@@ -386,7 +386,7 @@ async fn a_stale_base_version_conflicts_and_force_overwrites() {
     let forced = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"v2-forced",
         EnvelopeUpdate::Keep,
@@ -406,7 +406,7 @@ async fn a_stale_base_version_conflicts_and_force_overwrites() {
     let fresh = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"v3",
         EnvelopeUpdate::Keep,
@@ -438,7 +438,7 @@ async fn a_version_read_returns_the_version_bytes_and_metadata() {
     artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"second",
         EnvelopeUpdate::Keep,
@@ -530,7 +530,7 @@ async fn versions_carry_their_own_envelopes() {
     artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"ciphertext-two",
         EnvelopeUpdate::Set(rotated_envelope.clone()),
@@ -559,7 +559,7 @@ async fn delete_removes_history_blobs_and_index_then_replays_fresh() {
     artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"second",
         EnvelopeUpdate::Keep,
@@ -569,7 +569,7 @@ async fn delete_removes_history_blobs_and_index_then_replays_fresh() {
     .await
     .expect("update");
 
-    let deleted = artifacts::delete(&db, &dir, "agent-one", &artifact.id)
+    let deleted = artifacts::delete(&db, &dir, &common::seed::writer("agent-one"), &artifact.id)
         .await
         .expect("delete");
     assert_eq!(deleted.id, artifact.id);
@@ -647,7 +647,7 @@ async fn a_share_pins_the_current_version_and_refuses_an_unknown_one() {
     artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"second",
         EnvelopeUpdate::Keep,
@@ -801,7 +801,7 @@ async fn a_blank_markdown_title_falls_back_to_the_first_heading() {
             content: b"intro\n\n# Real Title\n\nbody",
             description: "",
             label: None,
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             envelope: None,
             session_id: None,
@@ -824,7 +824,7 @@ async fn a_conflicting_update_leaves_no_blob_behind() {
     let stale = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"v2-stale",
         EnvelopeUpdate::Keep,
@@ -866,7 +866,7 @@ async fn a_replayed_write_leaves_no_extra_blob() {
     artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"second",
         EnvelopeUpdate::Keep,
@@ -878,7 +878,7 @@ async fn a_replayed_write_leaves_no_extra_blob() {
     artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"another",
         EnvelopeUpdate::Keep,
@@ -907,7 +907,7 @@ async fn sequential_updates_keep_every_version_blob() {
     let second = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"second",
         EnvelopeUpdate::Keep,
@@ -919,7 +919,7 @@ async fn sequential_updates_keep_every_version_blob() {
     let third = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"third",
         EnvelopeUpdate::Keep,
@@ -982,7 +982,7 @@ async fn publish_and_update_return_the_metadata_they_committed() {
     let updated = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &published.id,
         b"<h1>more hits</h1>",
         EnvelopeUpdate::Keep,
@@ -1026,7 +1026,7 @@ async fn an_update_writes_its_blob_before_taking_the_write_lock() {
             artifacts::update(
                 &db,
                 &dir,
-                "agent-one",
+                &common::seed::writer("agent-one"),
                 &id,
                 b"second",
                 EnvelopeUpdate::Keep,
@@ -1111,7 +1111,7 @@ async fn project_delete_drops_version_rows() {
     artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"v2",
         EnvelopeUpdate::Keep,
@@ -1147,7 +1147,7 @@ async fn opening_the_hub_clears_content_left_by_an_interrupted_update() {
     artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &report.id,
         b"second draft",
         EnvelopeUpdate::Keep,
@@ -1262,7 +1262,7 @@ async fn an_update_publishes_a_version_in_the_clear_when_it_says_so() {
     let inherited = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"more ciphertext",
         EnvelopeUpdate::Keep,
@@ -1276,7 +1276,7 @@ async fn an_update_publishes_a_version_in_the_clear_when_it_says_so() {
     let cleared = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"in the clear",
         EnvelopeUpdate::Clear,
@@ -1330,7 +1330,7 @@ async fn update_can_clear_label_with_explicit_none_or_empty_string() {
     let v2 = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &published.id,
         b"v2",
         EnvelopeUpdate::Keep,
@@ -1350,7 +1350,7 @@ async fn update_can_clear_label_with_explicit_none_or_empty_string() {
     let v3 = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &published.id,
         b"v3",
         EnvelopeUpdate::Keep,
@@ -1370,7 +1370,7 @@ async fn update_can_clear_label_with_explicit_none_or_empty_string() {
     let v4 = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &published.id,
         b"v4",
         EnvelopeUpdate::Keep,
@@ -1390,7 +1390,7 @@ async fn update_can_clear_label_with_explicit_none_or_empty_string() {
     let v5 = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &published.id,
         b"v5",
         EnvelopeUpdate::Keep,
@@ -1409,7 +1409,7 @@ async fn update_can_clear_label_with_explicit_none_or_empty_string() {
     let v6 = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &published.id,
         b"v6",
         EnvelopeUpdate::Keep,
@@ -1435,7 +1435,7 @@ async fn artifact_records_publishing_actor_and_retains_across_updates() {
         &db,
         &dir,
         NewArtifact {
-            actor: "creator-agent",
+            writer: &common::seed::writer("creator-agent"),
             project_id: "proj",
             title: "Actor Test",
             description: "",
@@ -1466,7 +1466,7 @@ async fn artifact_records_publishing_actor_and_retains_across_updates() {
     let updated = artifacts::update(
         &db,
         &dir,
-        "modifier-agent",
+        &common::seed::writer("modifier-agent"),
         &published.id,
         b"<h1>v2</h1>",
         EnvelopeUpdate::Keep,
@@ -1505,18 +1505,42 @@ async fn store_listing_and_reads_carry_thread_counts() {
     assert_eq!(read1.comments_open, 0);
 
     // 3 comments on art1: 1 resolved, 2 open
-    let (c1, _) =
-        comments::add_comment(&db, &art1.id, "agent-one", "first", None, None, None, None)
-            .await
-            .expect("c1");
-    let (_c2, _) =
-        comments::add_comment(&db, &art1.id, "agent-one", "second", None, None, None, None)
-            .await
-            .expect("c2");
-    let (_c3, _) =
-        comments::add_comment(&db, &art1.id, "agent-one", "third", None, None, None, None)
-            .await
-            .expect("c3");
+    let (c1, _) = comments::add_comment(
+        &db,
+        &art1.id,
+        &common::seed::writer("agent-one"),
+        "first",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("c1");
+    let (_c2, _) = comments::add_comment(
+        &db,
+        &art1.id,
+        &common::seed::writer("agent-one"),
+        "second",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("c2");
+    let (_c3, _) = comments::add_comment(
+        &db,
+        &art1.id,
+        &common::seed::writer("agent-one"),
+        "third",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("c3");
     comments::set_comment_done(&db, &c1.id, true)
         .await
         .expect("done");
@@ -1525,7 +1549,7 @@ async fn store_listing_and_reads_carry_thread_counts() {
     let art1_v2 = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &art1.id,
         b"v2",
         EnvelopeUpdate::Keep,
@@ -1554,10 +1578,18 @@ async fn store_listing_and_reads_carry_thread_counts() {
     assert_eq!(got.comments_open, 2);
 
     // 1 comment on art2, then deleted
-    let (c_del, _) =
-        comments::add_comment(&db, &art2.id, "agent-one", "temp", None, None, None, None)
-            .await
-            .expect("c_del");
+    let (c_del, _) = comments::add_comment(
+        &db,
+        &art2.id,
+        &common::seed::writer("agent-one"),
+        "temp",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("c_del");
     comments::delete_comment(&db, &c_del.id)
         .await
         .expect("delete");
@@ -1582,9 +1614,18 @@ async fn store_listing_query_measurement() {
             .await
             .expect("publish");
         if i % 3 == 0 {
-            comments::add_comment(&db, &art.id, "agent-one", "note", None, None, None, None)
-                .await
-                .expect("comment");
+            comments::add_comment(
+                &db,
+                &art.id,
+                &common::seed::writer("agent-one"),
+                "note",
+                None,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("comment");
         }
     }
 
@@ -1606,6 +1647,8 @@ async fn store_listing_query_measurement() {
 async fn an_update_keeps_the_publishing_session_lineage() {
     let dir = TempDir::new("artifact-lineage-update");
     let db = open(dir.path()).await;
+    common::seed::session_with_id(&db, "proj", "sess-a").await;
+    common::seed::session_with_id(&db, "proj", "sess-b").await;
 
     let mut published = public("Report", b"<h1>first</h1>");
     published.session_id = Some("sess-a");
@@ -1617,7 +1660,7 @@ async fn an_update_keeps_the_publishing_session_lineage() {
         &db,
         dir.path(),
         None,
-        "agent-two",
+        &common::seed::writer("agent-two"),
         &artifact.id,
         b"<h1>second</h1>",
         EnvelopeUpdate::Keep,
@@ -1661,7 +1704,7 @@ async fn squash_versions_keeps_the_target_and_later_versions() {
     artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"second",
         EnvelopeUpdate::Keep,
@@ -1673,7 +1716,7 @@ async fn squash_versions_keeps_the_target_and_later_versions() {
     artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"third",
         EnvelopeUpdate::Keep,
@@ -1716,7 +1759,7 @@ async fn squash_versions_refuses_a_live_version() {
     let live = artifacts::draft(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"live",
         EnvelopeUpdate::Keep,

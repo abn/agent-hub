@@ -23,10 +23,8 @@ fn event(project_id: &str, kind: &str, summary: &str) -> NewEvent {
     }
 }
 
-fn principal(actor: &str, agent_id: &str) -> Principal {
-    let mut principal = Principal::for_member(agent_id, "", CredentialState::Active);
-    principal.actor = actor.to_string();
-    principal
+fn principal(member: &str) -> Principal {
+    Principal::for_member(member, "", CredentialState::Active)
 }
 
 fn admin() -> Principal {
@@ -49,7 +47,7 @@ async fn forbidden(
 #[tokio::test]
 async fn the_admin_reaches_everything() {
     let db = fresh("policy-admin").await;
-    let agent = identity::create_agent(&db, "agent", "Agent")
+    let agent = identity::create_member(&db, "agent", "Agent")
         .await
         .expect("create");
     projects::create(&db, "shared", "Shared")
@@ -77,16 +75,16 @@ async fn the_admin_reaches_everything() {
 #[tokio::test]
 async fn an_authenticated_agent_reads_and_writes_open_projects_and_own_space() {
     let db = fresh("policy-open").await;
-    let me = identity::create_agent(&db, "me", "Me")
+    let me = identity::create_member(&db, "me", "Me")
         .await
         .expect("create me");
-    let other = identity::create_agent(&db, "other", "Other")
+    let other = identity::create_member(&db, "other", "Other")
         .await
         .expect("create other");
     projects::create(&db, "shared", "Shared")
         .await
         .expect("shared");
-    let who = principal("me", "me");
+    let who = principal("me");
 
     authorize(&db, &who, "shared", Access::Read)
         .await
@@ -118,13 +116,13 @@ async fn an_authenticated_agent_reads_and_writes_open_projects_and_own_space() {
 #[tokio::test]
 async fn a_confidential_project_requires_an_explicit_grant() {
     let db = fresh("policy-confidential").await;
-    let _agent = identity::create_agent(&db, "agent", "Agent")
+    let _agent = identity::create_member(&db, "agent", "Agent")
         .await
         .expect("create agent");
     projects::create_with_confidential(&db, "secret", "Secret", true)
         .await
         .expect("secret");
-    let who = principal("agent", "agent");
+    let who = principal("agent");
 
     assert!(forbidden(&db, &who, "secret", Access::Read).await);
     assert!(forbidden(&db, &who, "secret", Access::Write).await);
@@ -151,18 +149,42 @@ async fn search_and_inbox_respect_the_confined_set() {
     let db = fresh("policy-scoping").await;
     projects::create(&db, "p1", "One").await.expect("p1");
     projects::create(&db, "p2", "Two").await.expect("p2");
-    events::append(&db, 0, "agent", None, event("p1", "signal", "alpha one"))
-        .await
-        .expect("append p1");
-    events::append(&db, 0, "agent", None, event("p2", "signal", "alpha two"))
-        .await
-        .expect("append p2");
-    events::append(&db, 0, "agent", None, event("p1", "finished", "done p1"))
-        .await
-        .expect("finished p1");
-    events::append(&db, 0, "agent", None, event("p2", "finished", "done p2"))
-        .await
-        .expect("finished p2");
+    events::append(
+        &db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("p1", "signal", "alpha one"),
+    )
+    .await
+    .expect("append p1");
+    events::append(
+        &db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("p2", "signal", "alpha two"),
+    )
+    .await
+    .expect("append p2");
+    events::append(
+        &db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("p1", "finished", "done p1"),
+    )
+    .await
+    .expect("finished p1");
+    events::append(
+        &db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("p2", "finished", "done p2"),
+    )
+    .await
+    .expect("finished p2");
 
     let query = SearchQuery {
         text: "alpha".to_string(),
@@ -212,7 +234,7 @@ async fn a_confined_search_is_not_starved_by_higher_ranked_projects() {
         events::append(
             &db,
             0,
-            "agent",
+            &common::seed::writer("agent"),
             None,
             event(
                 "other",
@@ -226,7 +248,7 @@ async fn a_confined_search_is_not_starved_by_higher_ranked_projects() {
     events::append(
         &db,
         0,
-        "agent",
+        &common::seed::writer("agent"),
         None,
         event("mine", "signal", "needle in my project"),
     )
@@ -259,15 +281,21 @@ async fn a_confined_search_keeps_relevance_order() {
     events::append(
         &db,
         0,
-        "agent",
+        &common::seed::writer("agent"),
         None,
         event("mine", "signal", "needle needle needle needle"),
     )
     .await
     .expect("relevant event");
-    events::append(&db, 0, "agent", None, event("mine", "signal", "needle"))
-        .await
-        .expect("newer but less relevant event");
+    events::append(
+        &db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("mine", "signal", "needle"),
+    )
+    .await
+    .expect("newer but less relevant event");
 
     let query = SearchQuery {
         text: "needle".to_string(),
@@ -302,7 +330,7 @@ async fn visibility_lists_the_reachable_projects() {
     }
 
     let db = fresh("policy-visibility").await;
-    let agent = identity::create_agent(&db, "agent", "Agent")
+    let agent = identity::create_member(&db, "agent", "Agent")
         .await
         .expect("create");
     projects::create(&db, "shared", "Shared")
@@ -317,7 +345,7 @@ async fn visibility_lists_the_reachable_projects() {
         Visibility::All
     );
 
-    let who = principal("agent", "agent");
+    let who = principal("agent");
     let visible = visibility(&db, &who).await.expect("agent");
     match visible {
         Visibility::Only(mut ids) => {
@@ -355,7 +383,6 @@ async fn visibility_lists_the_reachable_projects() {
 async fn a_hit_shows_nothing_of_a_row_in_another_project() {
     use agent_hub::store::artifacts::{self, NewArtifact};
     use agent_hub::store::search::{SearchDoc, index_doc};
-    use agent_hub::store::sessions;
 
     let dir = common::temp::TempDir::new("policy-search-fields");
     let db = common::store::open(&dir).await;
@@ -365,20 +392,20 @@ async fn a_hit_shows_nothing_of_a_row_in_another_project() {
     let hidden_event = events::append(
         &db,
         0,
-        "spy-agent",
+        &common::seed::writer("spy-agent"),
         None,
         event("secret", "finished", "whispered plan"),
     )
     .await
     .expect("append");
-    let hidden_session = sessions::start(&db, "secret", "covert-run", "spy-agent")
+    let hidden_session = common::seed::start_session(&db, "secret", "covert-run", "spy-agent")
         .await
         .expect("start");
     let hidden_artifact = artifacts::publish(
         &db,
         &dir,
         NewArtifact {
-            actor: "spy-agent",
+            writer: &common::seed::writer("spy-agent"),
             project_id: "secret",
             title: "dossier",
             description: "",

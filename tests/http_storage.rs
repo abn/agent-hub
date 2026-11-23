@@ -124,7 +124,7 @@ async fn a_data_directory_that_cannot_be_measured_is_reported_as_unknown() {
 #[tokio::test]
 async fn ending_a_session_moves_its_bytes_into_what_a_prune_would_reclaim() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     let brain_bytes = write_brain(&state, &session).await;
@@ -144,7 +144,7 @@ async fn ending_a_session_moves_its_bytes_into_what_a_prune_would_reclaim() {
             + before["by_kind"]["events"].as_i64().expect("events")
     );
 
-    sessions::end(&state.db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&state.db, &session.id, "agent-one", None)
         .await
         .expect("end");
     state.notify();
@@ -163,11 +163,11 @@ async fn ending_a_session_moves_its_bytes_into_what_a_prune_would_reclaim() {
 #[tokio::test]
 async fn a_pruned_session_leaves_the_report_at_once() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     write_brain(&state, &session).await;
-    sessions::end(&state.db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&state.db, &session.id, "agent-one", None)
         .await
         .expect("end");
     state.notify();
@@ -189,7 +189,7 @@ async fn a_pruned_session_leaves_the_report_at_once() {
 #[tokio::test]
 async fn a_write_invalidates_the_memo_rather_than_waiting_it_out() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     assert_eq!(usage(&state).await["total_bytes"], 0);
@@ -244,11 +244,11 @@ async fn call(state: &AppState, method: &str, uri: &str) -> (StatusCode, Value) 
 
 /// An ended session in a project, with a brain file behind it.
 async fn ended_session(state: &AppState, project: &str, name: &str) -> sessions::Session {
-    let session = sessions::start(&state.db, project, name, "agent-one")
+    let session = common::seed::start_session(&state.db, project, name, "agent-one")
         .await
         .expect("start");
     write_brain(state, &session).await;
-    sessions::end(&state.db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&state.db, &session.id, "agent-one", None)
         .await
         .expect("end");
     session
@@ -262,7 +262,7 @@ async fn pruning_a_project_takes_its_ended_sessions_and_leaves_the_rest() {
     }
     let first = ended_session(&state, "proj", "nightly").await;
     let second = ended_session(&state, "proj", "backfill").await;
-    let running = sessions::start(&state.db, "proj", "live", "agent-two")
+    let running = common::seed::start_session(&state.db, "proj", "live", "agent-two")
         .await
         .expect("start");
     let elsewhere = ended_session(&state, "other", "nightly").await;
@@ -394,7 +394,7 @@ async fn the_sweep_commits_every_session_a_batch_pruned() {
 async fn pruning_a_project_with_nothing_ended_removes_nothing() {
     let state = state().await;
     let _ = agent_hub::store::projects::create(&state.db, "proj", "Project").await;
-    sessions::start(&state.db, "proj", "live", "agent-one")
+    common::seed::start_session(&state.db, "proj", "live", "agent-one")
         .await
         .expect("start");
 
@@ -453,7 +453,7 @@ async fn home_carries_the_counts_its_summary_line_and_cards_show() {
     let brain_bytes = agent_hub::brain::file_bytes(&state.data_dir.join(&ended.brain_path));
     // One agent with two live sessions, and a second agent with one.
     for name in ["live", "second"] {
-        let session = sessions::start(&state.db, "proj", name, "agent-two")
+        let session = common::seed::start_session(&state.db, "proj", name, "agent-two")
             .await
             .expect("start");
         state
@@ -462,7 +462,7 @@ async fn home_carries_the_counts_its_summary_line_and_cards_show() {
             .await
             .expect("touch");
     }
-    let other = sessions::start(&state.db, "proj", "live", "agent-three")
+    let other = common::seed::start_session(&state.db, "proj", "live", "agent-three")
         .await
         .expect("start");
     state
@@ -504,16 +504,18 @@ async fn home_carries_the_counts_its_summary_line_and_cards_show() {
 #[tokio::test]
 async fn an_agent_that_has_gone_quiet_is_not_counted_as_active() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     let conn = state.db.connect().expect("connect");
-    conn.execute(
+    for sql in [
         "UPDATE sessions SET last_activity = '2026-09-16T00:00:00Z' WHERE id = ?1",
-        vec![turso::Value::Text(session.id.clone())],
-    )
-    .await
-    .expect("age the activity");
+        "UPDATE session_participants SET last_seen_at = '2026-09-16T00:00:00Z' WHERE session_id = ?1",
+    ] {
+        conn.execute(sql, vec![turso::Value::Text(session.id.clone())])
+            .await
+            .expect("age the activity");
+    }
 
     let (_, body) = call(&state, "GET", "/api/v1/home").await;
     assert_eq!(
@@ -531,7 +533,7 @@ async fn project_stats_count_what_the_header_and_the_tab_row_show() {
         .expect("create project");
 
     // One live session, one ended, one pruned, plus a session elsewhere.
-    let live = sessions::start(&state.db, "proj", "live", "agent-one")
+    let live = common::seed::start_session(&state.db, "proj", "live", "agent-one")
         .await
         .expect("start");
     state
@@ -544,7 +546,7 @@ async fn project_stats_count_what_the_header_and_the_tab_row_show() {
     prune::prune_session(&state.db, &gone.id)
         .await
         .expect("prune");
-    let elsewhere = sessions::start(&state.db, "other", "live", "agent-two")
+    let elsewhere = common::seed::start_session(&state.db, "other", "live", "agent-two")
         .await
         .expect("start");
     state
@@ -602,7 +604,7 @@ async fn an_active_window_beyond_the_calendar_does_not_take_the_read_surfaces_do
     // timestamp is worse than one that counts nobody.
     let state = state_with_window(std::time::Duration::MAX).await;
     let _ = agent_hub::store::projects::create(&state.db, "proj", "Project").await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     state
@@ -700,7 +702,7 @@ async fn signal_in(state: &AppState, project_id: &str, summary: &str) {
     agent_hub::store::events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         agent_hub::store::events::NewEvent {
             project_id: project_id.to_string(),
@@ -722,12 +724,12 @@ async fn storage_rows_and_home_events_name_their_project_as_the_projects_list_do
     agent_hub::store::projects::create(&state.db, "homelab", "Home Lab")
         .await
         .expect("project");
-    let agent = agent_hub::store::identity::create_agent(&state.db, "scout", "Scout")
+    let agent = agent_hub::store::identity::create_member(&state.db, "scout", "Scout")
         .await
         .expect("agent");
     let personal = agent.personal_project_id.clone();
     for project in ["homelab", personal.as_str()] {
-        let session = sessions::start(&state.db, project, "run", "scout")
+        let session = common::seed::start_session(&state.db, project, "run", "scout")
             .await
             .expect("start");
         write_brain(&state, &session).await;
@@ -818,11 +820,11 @@ async fn a_project_emptied_by_a_prune_keeps_its_row_until_undo_fills_it_again() 
     agent_hub::store::projects::create(&state.db, "nightly", "Nightly")
         .await
         .expect("project");
-    let session = sessions::start(&state.db, "nightly", "run", "agent-one")
+    let session = common::seed::start_session(&state.db, "nightly", "run", "agent-one")
         .await
         .expect("start");
     let brain_bytes = write_brain(&state, &session).await;
-    sessions::end(&state.db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&state.db, &session.id, "agent-one", None)
         .await
         .expect("end");
     state.notify();
@@ -873,7 +875,7 @@ async fn a_row_counts_its_events_and_the_rows_sum_to_the_kinds() {
     agent_hub::store::events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         agent_hub::store::events::NewEvent {
             project_id: "alpha".to_string(),
@@ -889,7 +891,7 @@ async fn a_row_counts_its_events_and_the_rows_sum_to_the_kinds() {
     .expect("append");
     signal_in(&state, "beta", "one").await;
     signal_in(&state, "beta", "three").await;
-    let session = sessions::start(&state.db, "beta", "run", "agent-one")
+    let session = common::seed::start_session(&state.db, "beta", "run", "agent-one")
         .await
         .expect("start");
     write_brain(&state, &session).await;
@@ -1041,7 +1043,7 @@ async fn weights_held_for_a_project_that_is_gone_list_nothing_for_it() {
     agent_hub::store::events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         agent_hub::store::events::NewEvent {
             project_id: "doomed".to_string(),

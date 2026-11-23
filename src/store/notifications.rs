@@ -13,18 +13,6 @@ use crate::author::ParticipantKey;
 use crate::error::Result;
 use crate::store::inbox::AskedIn;
 
-/// The newest notification event one agent has been shown for one session
-/// scope, if any. The empty session is the scope of items asked outside any
-/// session.
-pub async fn cursor(db: &Database, agent: &str, session_id: &str) -> Result<Option<String>> {
-    let conn = super::connect(db)?;
-    cursor_on(&conn, agent, session_id).await
-}
-
-async fn cursor_on(conn: &Connection, agent: &str, session_id: &str) -> Result<Option<String>> {
-    key_cursor_on(conn, &ParticipantKey::from_label(agent), session_id).await
-}
-
 async fn key_cursor_on(
     conn: &Connection,
     key: &ParticipantKey,
@@ -49,47 +37,6 @@ async fn key_cursor_on(
         },
         None => Ok(None),
     }
-}
-
-/// Advance one agent's cursor for one session scope to an event it has been
-/// shown.
-///
-/// The cursor never moves backwards, and an empty id moves nothing, so an
-/// empty read leaves the cursor alone. The read and the write share an
-/// immediate transaction, so a cursor cannot step over an event committed
-/// between them.
-///
-/// A session scope keeps a cursor only while the session is active: delivery
-/// that finishes after the session ended or was pruned writes nothing, so the
-/// cleanup of that session is not undone by a late settle.
-pub async fn advance(db: &Database, agent: &str, session_id: &str, event_id: &str) -> Result<()> {
-    if event_id.is_empty() {
-        return Ok(());
-    }
-    let tx = super::begin_write(db).await?;
-    if !session_id.is_empty() && !session_is_active(&tx, session_id).await? {
-        return Ok(());
-    }
-    let current = cursor_on(&tx, agent, session_id).await?;
-    if current.as_deref().is_some_and(|seen| event_id <= seen) {
-        return Ok(());
-    }
-    let key = ParticipantKey::from_label(agent);
-    tx.execute(
-        "INSERT OR REPLACE INTO notify_cursors(member_id, agent, session_id, last_seen_event_id, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        vec![
-            Value::Text(key.member),
-            Value::Text(key.agent),
-            Value::Text(session_id.to_string()),
-            Value::Text(event_id.to_string()),
-            Value::Text(super::now_rfc3339()),
-        ],
-    )
-    .await
-    .map_err(super::engine)?;
-    tx.commit().await.map_err(super::engine)?;
-    Ok(())
 }
 
 pub(crate) async fn session_is_active(conn: &Connection, session_id: &str) -> Result<bool> {

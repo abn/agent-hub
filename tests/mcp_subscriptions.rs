@@ -106,43 +106,63 @@ fn a_subscription_is_the_callers_own_and_nobody_elses() {
     let data_dir = TempDir::new("subs-ownership");
     common::seed::seed_project(data_dir.path(), "p1");
     common::seed::block_on(async {
-        use agent_hub::store::subscriptions;
+        use agent_hub::author::ParticipantKey;
+        use agent_hub::store::subscriptions::{self, NewSubscription};
 
+        let key = |member: &str| ParticipantKey {
+            member: member.to_string(),
+            agent: "cli".to_string(),
+        };
         let db = common::store::open(data_dir.path()).await;
         let kinds = vec!["signal".to_string()];
-        let id = subscriptions::create(&db, "agent-a", Some("p1"), &kinds, "")
-            .await
-            .expect("create the subscription");
+        let id = subscriptions::register(
+            &db,
+            &key("agent-a"),
+            &NewSubscription {
+                session_id: None,
+                project_id: Some("p1"),
+                kinds: &kinds,
+                last_seen_event_id: "",
+                author: Default::default(),
+                exclude_self: false,
+                about_self: false,
+            },
+        )
+        .await
+        .expect("create the subscription")
+        .id;
 
-        let owned = subscriptions::list(&db, "agent-a").await.expect("list");
+        let owned = subscriptions::list_for(&db, &key("agent-a"), None)
+            .await
+            .expect("list");
         assert_eq!(owned.len(), 1, "the caller owns its subscription");
         assert_eq!(owned[0].id, id);
         assert_eq!(owned[0].kinds, kinds);
         assert_eq!(owned[0].project_id.as_deref(), Some("p1"));
         assert!(
-            subscriptions::list(&db, "agent-b")
+            subscriptions::list_for(&db, &key("agent-b"), None)
                 .await
                 .expect("list")
                 .is_empty(),
-            "another agent sees no subscription of this one"
+            "another participant sees no subscription of this one"
         );
 
         // The owner is part of the delete predicate, so an id belonging to
-        // another agent reads the same as one that never existed.
+        // another participant reads the same as one that never existed.
         assert!(
-            !subscriptions::delete(&db, "agent-b", &id)
+            !subscriptions::delete_for(&db, &key("agent-b"), &id)
                 .await
-                .expect("delete as another agent"),
-            "another agent cannot remove it"
+                .expect("delete as another participant"),
+            "another participant cannot remove it"
         );
         assert!(
-            subscriptions::delete(&db, "agent-a", &id)
+            subscriptions::delete_for(&db, &key("agent-a"), &id)
                 .await
                 .expect("delete"),
             "the owner can remove it"
         );
         assert!(
-            subscriptions::list(&db, "agent-a")
+            subscriptions::list_for(&db, &key("agent-a"), None)
                 .await
                 .expect("list")
                 .is_empty(),
@@ -179,7 +199,7 @@ fn human_comment(data_dir: &std::path::Path, artifact_id: &str, title: &str) {
         let (comment, _) = agent_hub::store::comments::add_comment(
             &db,
             artifact_id,
-            "human",
+            &common::seed::writer("human"),
             "A note",
             None,
             None,
@@ -197,7 +217,7 @@ fn human_comment(data_dir: &std::path::Path, artifact_id: &str, title: &str) {
                 title,
             },
             &comment.id,
-            "human",
+            &common::seed::writer("human"),
         )
         .await;
     });
@@ -241,7 +261,7 @@ fn an_about_self_subscription_reports_comments_on_the_agents_own_artifact_only()
             &db,
             data_dir.path(),
             agent_hub::store::artifacts::NewArtifact {
-                actor: "someone-else",
+                writer: &common::seed::writer("someone-else"),
                 project_id: "p1",
                 title: "Theirs",
                 kind: "html",
@@ -311,7 +331,7 @@ fn exclude_self_drops_the_agents_own_comment() {
 }
 
 #[tokio::test]
-async fn a_populated_store_one_version_behind_keeps_its_subscriptions_on_upgrade() {
+async fn a_populated_older_store_keeps_its_subscriptions_on_upgrade() {
     use agent_hub::store::schema::MIGRATIONS;
 
     let data_dir = TempDir::new("subs-upgrade");
@@ -326,7 +346,9 @@ async fn a_populated_store_one_version_behind_keeps_its_subscriptions_on_upgrade
     .await
     .expect("schema_version table");
     let newest = MIGRATIONS.last().expect("migrations").version;
-    for migration in MIGRATIONS.iter().filter(|m| m.version < newest) {
+    // A store from before per-session cursors, so the upgrade carries its
+    // subscriptions and its one cursor through every step since.
+    for migration in MIGRATIONS.iter().filter(|m| m.version < 27) {
         conn.execute_batch(migration.ddl)
             .await
             .expect("apply migration");
@@ -344,6 +366,15 @@ async fn a_populated_store_one_version_behind_keeps_its_subscriptions_on_upgrade
     )
     .await
     .expect("a subscription from before the upgrade");
+    // The owners are agents the store knows, so the upgrade places each as a
+    // member of its own rather than stopping on an owner it cannot place.
+    conn.execute(
+        "INSERT INTO agents(id, display_name, created_at)
+         VALUES ('agent-a', 'A', '2020-01-01T00:00:00Z'), ('agent-b', 'B', '2020-01-01T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("the owners");
     conn.execute(
         "INSERT INTO projects(id, display_name, created_at) VALUES ('p1', 'P', '2020-01-01T00:00:00Z')",
         (),
@@ -369,18 +400,25 @@ async fn a_populated_store_one_version_behind_keeps_its_subscriptions_on_upgrade
     let version = agent_hub::store::migrate(&db).await.expect("migrate");
     assert_eq!(version, newest);
 
-    let kept = agent_hub::store::subscriptions::list(&db, "agent-a")
+    let migrated = |member: &str| agent_hub::author::ParticipantKey {
+        member: member.to_string(),
+        agent: String::new(),
+    };
+    let kept = agent_hub::store::subscriptions::list_for(&db, &migrated("agent-a"), None)
         .await
         .expect("list");
     assert_eq!(kept.len(), 1);
     let kept = &kept[0];
     assert_eq!(kept.id, "sub-old");
-    assert_eq!(
-        kept.kinds,
-        vec!["signal".to_string(), "finished".to_string()]
-    );
+    let mut kinds = kept.kinds.clone();
+    kinds.sort();
+    assert_eq!(kinds, vec!["finished".to_string(), "signal".to_string()]);
     assert_eq!(kept.project_id.as_deref(), Some("p1"));
-    assert_eq!(kept.actor_filter.as_deref(), Some("seeder"));
+    assert!(
+        !kept.author_filter.is_empty(),
+        "the old actor filter is kept: {:?}",
+        kept.author_filter
+    );
     assert!(kept.exclude_self);
     assert_eq!(kept.last_seen_event_id, "evt-9");
     assert!(!kept.about_self, "an old subscription filters nothing new");
@@ -389,22 +427,42 @@ async fn a_populated_store_one_version_behind_keeps_its_subscriptions_on_upgrade
         "an old subscription serves every session of its actor"
     );
 
-    use agent_hub::store::notifications::cursor;
+    let cursor = |member: &'static str, session: &'static str| {
+        let db = db.clone();
+        async move {
+            let conn = db.connect().expect("connect");
+            let mut rows = conn
+                .query(
+                    "SELECT last_seen_event_id FROM notify_cursors
+                      WHERE member_id = ?1 AND session_id = ?2",
+                    vec![
+                        turso::Value::Text(member.to_string()),
+                        turso::Value::Text(session.to_string()),
+                    ],
+                )
+                .await
+                .expect("query");
+            match rows.next().await.expect("row") {
+                Some(row) => match row.get_value(0).expect("value") {
+                    turso::Value::Text(id) => Some(id),
+                    _ => None,
+                },
+                None => None,
+            }
+        }
+    };
     assert_eq!(
-        cursor(&db, "agent-a", "").await.expect("cursor").as_deref(),
+        cursor("agent-a", "").await.as_deref(),
         Some("evt-7"),
         "the attention cursor keeps its place for items asked outside a session"
     );
     assert_eq!(
-        cursor(&db, "agent-a", "sess-old")
-            .await
-            .expect("cursor")
-            .as_deref(),
+        cursor("agent-a", "sess-old").await.as_deref(),
         Some("evt-7"),
         "each existing session starts where the actor stood, so nothing is delivered twice"
     );
     assert_eq!(
-        cursor(&db, "agent-b", "sess-theirs").await.expect("cursor"),
+        cursor("agent-b", "sess-theirs").await,
         None,
         "an actor with no cursor gets none"
     );
@@ -515,41 +573,59 @@ fn a_subscription_binds_to_the_active_session_and_ending_it_removes_the_row() {
 
 #[tokio::test]
 async fn pruning_a_session_removes_its_subscriptions_and_cursors() {
+    use agent_hub::author::ParticipantKey;
     use agent_hub::brain::BrainStore;
-    use agent_hub::store::subscriptions::{self, Filters};
-    use agent_hub::store::{notifications, prune, sessions};
+    use agent_hub::store::prune;
+    use agent_hub::store::subscriptions::{self, NewSubscription};
 
     let dir = TempDir::new("subs-prune");
     let db = common::store::open(&dir).await;
     agent_hub::store::projects::create(&db, "p1", "Project")
         .await
         .expect("project");
-    let doomed = sessions::start(&db, "p1", "doomed", "agent-a")
+    let doomed = common::seed::start_session(&db, "p1", "doomed", "agent-a")
         .await
         .expect("start");
-    let kept = sessions::start(&db, "p1", "kept", "agent-a")
+    let kept = common::seed::start_session(&db, "p1", "kept", "agent-a")
         .await
         .expect("start");
+    let key = ParticipantKey {
+        member: "agent-a".to_string(),
+        agent: "cli".to_string(),
+    };
     let kinds = vec!["signal".to_string()];
     for session in [&doomed, &kept] {
-        subscriptions::create_with_filters(
+        subscriptions::register(
             &db,
-            "agent-a",
-            Some(&session.id),
-            Some("p1"),
-            &kinds,
-            "",
-            Filters::default(),
+            &key,
+            &NewSubscription {
+                session_id: Some(&session.id),
+                project_id: Some("p1"),
+                kinds: &kinds,
+                last_seen_event_id: "",
+                author: Default::default(),
+                exclude_self: false,
+                about_self: false,
+            },
         )
         .await
         .expect("subscribe");
-        notifications::advance(&db, "agent-a", &session.id, "evt-3")
-            .await
-            .expect("advance");
     }
-    notifications::advance(&db, "agent-a", "", "evt-1")
-        .await
-        .expect("advance");
+    // Starting a session seeded each one's attention cursor; a session-less
+    // cursor is set beside them.
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "INSERT OR REPLACE INTO notify_cursors(member_id, agent, session_id, last_seen_event_id, updated_at)
+         VALUES ('agent-a', 'cli', ?1, 'evt-3', '2020-01-01T00:00:00Z'),
+                ('agent-a', 'cli', ?2, 'evt-3', '2020-01-01T00:00:00Z'),
+                ('agent-a', 'cli', '', 'evt-1', '2020-01-01T00:00:00Z')",
+        vec![
+            turso::Value::Text(doomed.id.clone()),
+            turso::Value::Text(kept.id.clone()),
+        ],
+    )
+    .await
+    .expect("cursors");
 
     BrainStore::new(dir.join("sessions"))
         .open("p1", &doomed.id)
@@ -558,7 +634,7 @@ async fn pruning_a_session_removes_its_subscriptions_and_cursors() {
         .put("/kv/note", b"x")
         .await
         .expect("put");
-    sessions::end(&db, &doomed.id, "agent-a", None, None)
+    common::seed::end_session(&db, &doomed.id, "agent-a", None)
         .await
         .expect("end");
     prune::prune_session(&db, &doomed.id).await.expect("prune");
@@ -579,27 +655,33 @@ async fn pruning_a_session_removes_its_subscriptions_and_cursors() {
         .expect("age the tombstone");
     assert_eq!(prune::sweep(&db, &dir).await.expect("sweep"), 1);
 
-    let left = subscriptions::list(&db, "agent-a").await.expect("list");
+    let left = subscriptions::list_for(&db, &key, None)
+        .await
+        .expect("list");
     assert_eq!(left.len(), 1, "{left:?}");
     assert_eq!(left[0].session_id.as_deref(), Some(kept.id.as_str()));
-    assert_eq!(
-        notifications::cursor(&db, "agent-a", &doomed.id)
-            .await
-            .expect("cursor"),
-        None
-    );
-    assert_eq!(
-        notifications::cursor(&db, "agent-a", &kept.id)
-            .await
-            .expect("cursor")
-            .as_deref(),
-        Some("evt-3")
-    );
-    assert_eq!(
-        notifications::cursor(&db, "agent-a", "")
-            .await
-            .expect("cursor")
-            .as_deref(),
-        Some("evt-1")
-    );
+    let cursor = |session: String| {
+        let db = db.clone();
+        async move {
+            let conn = db.connect().expect("connect");
+            let mut rows = conn
+                .query(
+                    "SELECT last_seen_event_id FROM notify_cursors
+                      WHERE member_id = 'agent-a' AND agent = 'cli' AND session_id = ?1",
+                    vec![turso::Value::Text(session)],
+                )
+                .await
+                .expect("query");
+            match rows.next().await.expect("row") {
+                Some(row) => match row.get_value(0).expect("value") {
+                    turso::Value::Text(id) => Some(id),
+                    _ => None,
+                },
+                None => None,
+            }
+        }
+    };
+    assert_eq!(cursor(doomed.id.clone()).await, None);
+    assert_eq!(cursor(kept.id.clone()).await.as_deref(), Some("evt-3"));
+    assert_eq!(cursor(String::new()).await.as_deref(), Some("evt-1"));
 }

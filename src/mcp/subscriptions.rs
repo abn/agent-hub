@@ -530,62 +530,20 @@ fn event_by(event: &events::Event, filter: &AuthorFilter) -> bool {
 }
 
 /// Whether the participant itself wrote the event: its member and its agent.
-/// A row with no author record is the participant's when its actor key is the
-/// member.
+/// Embedded stdio writes as the `local` member.
 fn event_is_by(event: &events::Event, key: &ParticipantKey) -> bool {
-    let filter = AuthorFilter {
-        member: Some(key.member.clone()),
-        agent: Some(key.agent.clone()),
-        ..AuthorFilter::default()
+    let member = match event.author.kind {
+        crate::author::AuthorKind::Local => Some(crate::author::LOCAL_MEMBER),
+        _ => event.author.member.as_deref(),
     };
-    let Ok(row) = serde_json::to_value(event) else {
-        return false;
-    };
-    if row.get("author").is_some_and(Value::is_object) {
-        super::author_matches(&row, &filter)
-    } else {
-        event.actor == key.member
-    }
+    member == Some(key.member.as_str()) && event.author.agent.as_deref() == Some(key.agent.as_str())
 }
 
 /// Whether an event's payload names the participant in its `audience`: its
 /// session is among the audience's sessions, or it is among its participants
-/// (an entry with no agent names every agent of its member). An older audience
-/// of bare labels names the member.
+/// (an entry with no agent names every agent of its member).
 fn names_participant(event: &events::Event, session: Option<&str>, key: &ParticipantKey) -> bool {
-    let Some(audience) = event
-        .payload
-        .as_ref()
-        .and_then(|payload| payload.get("audience"))
-    else {
-        return false;
-    };
-    if let Some(labels) = audience.as_array() {
-        return labels
-            .iter()
-            .any(|named| named.as_str() == Some(key.member.as_str()));
-    }
-    let in_session = session.is_some_and(|session| {
-        audience
-            .get("sessions")
-            .and_then(Value::as_array)
-            .is_some_and(|sessions| sessions.iter().any(|id| id.as_str() == Some(session)))
-    });
-    let named = audience
-        .get("participants")
-        .and_then(Value::as_array)
-        .is_some_and(|participants| {
-            participants.iter().any(|entry| {
-                let text = |field: &str| entry.get(field).and_then(Value::as_str);
-                text("member").is_some_and(|member| {
-                    key.matches(&ParticipantKey {
-                        member: member.to_string(),
-                        agent: text("agent").unwrap_or_default().to_string(),
-                    })
-                })
-            })
-        });
-    in_session || named
+    crate::store::migrate::Audience::of(event.payload.as_ref()).names(session, Some(key))
 }
 
 /// Whether a project is in the caller's visible set.
@@ -776,11 +734,53 @@ mod tests {
         }
     }
 
+    /// The writer a test row is appended under: the named member's
+    /// command-line agent.
+    fn as_member(member: &str) -> crate::author::Writer {
+        caller(member, false).writer(None)
+    }
+
+    /// The delivery key of the named member's command-line agent.
+    fn key_of(member: &str) -> ParticipantKey {
+        ParticipantKey {
+            member: member.to_string(),
+            agent: crate::agent_name::CLI.to_string(),
+        }
+    }
+
+    /// Register a subscription for a participant.
+    #[allow(clippy::too_many_arguments)]
+    async fn subscribe_as(
+        state: &AppState,
+        key: &ParticipantKey,
+        session_id: Option<&str>,
+        project_id: Option<&str>,
+        kinds: &[String],
+        cursor: &str,
+        author: AuthorFilter,
+        exclude_self: bool,
+    ) -> crate::error::Result<subscriptions::Registered> {
+        subscriptions::register(
+            &state.db,
+            key,
+            &subscriptions::NewSubscription {
+                session_id,
+                project_id,
+                kinds,
+                last_seen_event_id: cursor,
+                author,
+                exclude_self,
+                about_self: false,
+            },
+        )
+        .await
+    }
+
     async fn append(state: &AppState, kind: &str, summary: &str) -> String {
         crate::store::events::append(
             &state.db,
             0,
-            "seeder",
+            &as_member("seeder"),
             None,
             crate::store::events::NewEvent {
                 project_id: "p1".to_string(),
@@ -811,9 +811,19 @@ mod tests {
         )
         .await
         .expect("cursor");
-        subscriptions::create(&state.db, &principal.actor, Some("p1"), &kinds, &cursor)
-            .await
-            .expect("create")
+        subscribe_as(
+            state,
+            &principal.participant().expect("a participant"),
+            None,
+            Some("p1"),
+            &kinds,
+            &cursor,
+            AuthorFilter::default(),
+            false,
+        )
+        .await
+        .expect("create")
+        .id
     }
 
     /// Drain what the caller may read in one session scope, moving the cursors.
@@ -909,7 +919,7 @@ mod tests {
         let principal = caller("agent-a", false);
         let id = subscribe(&state, &principal, "signal").await;
         assert!(
-            subscriptions::delete(&state.db, &principal.actor, &id)
+            subscriptions::delete_for(&state.db, &key_of("agent-a"), &id)
                 .await
                 .expect("delete")
         );
@@ -938,18 +948,27 @@ mod tests {
             .expect("confidential");
 
         let principal = caller("agent-a", false);
-        crate::store::identity::create_agent(&state.db, "agent-a", "Agent A")
+        crate::store::identity::create_member(&state.db, "agent-a", "Agent A")
             .await
             .expect("create agent");
         let kinds = parse_kinds("signal").expect("kinds");
-        subscriptions::create(&state.db, &principal.actor, None, &kinds, "")
-            .await
-            .expect("create");
+        subscribe_as(
+            &state,
+            &key_of("agent-a"),
+            None,
+            None,
+            &kinds,
+            "",
+            AuthorFilter::default(),
+            false,
+        )
+        .await
+        .expect("create");
 
         crate::store::events::append(
             &state.db,
             0,
-            "seeder",
+            &as_member("seeder"),
             None,
             crate::store::events::NewEvent {
                 project_id: "secret".to_string(),
@@ -966,7 +985,7 @@ mod tests {
         crate::store::events::append(
             &state.db,
             0,
-            "seeder",
+            &as_member("seeder"),
             None,
             crate::store::events::NewEvent {
                 project_id: "p1".to_string(),
@@ -999,19 +1018,28 @@ mod tests {
                 .expect("posture");
         }
         let principal = caller("agent-a", false);
-        crate::store::identity::create_agent(&state.db, "agent-a", "Agent A")
+        crate::store::identity::create_member(&state.db, "agent-a", "Agent A")
             .await
             .expect("create agent");
         let kinds = parse_kinds("signal").expect("kinds");
-        subscriptions::create(&state.db, &principal.actor, None, &kinds, "")
-            .await
-            .expect("create");
+        subscribe_as(
+            &state,
+            &key_of("agent-a"),
+            None,
+            None,
+            &kinds,
+            "",
+            AuthorFilter::default(),
+            false,
+        )
+        .await
+        .expect("create");
 
         for _ in 0..DRAIN_LIMIT {
             crate::store::events::append(
                 &state.db,
                 0,
-                "seeder",
+                &as_member("seeder"),
                 None,
                 crate::store::events::NewEvent {
                     project_id: "secret".to_string(),
@@ -1063,17 +1091,18 @@ mod tests {
         )
         .await
         .expect("cursor");
-        let id = subscriptions::create_with_filters(
-            &state.db,
-            &principal.actor,
+        let id = subscribe_as(
+            &state,
+            &principal.participant().expect("a participant"),
             None,
             Some("p1"),
             &kinds,
             &cursor,
-            subscriptions::Filters {
-                actor: Some("seeder"),
-                ..Default::default()
+            AuthorFilter {
+                member: Some("seeder".to_string()),
+                ..AuthorFilter::default()
             },
+            false,
         )
         .await
         .expect("create");
@@ -1082,7 +1111,7 @@ mod tests {
         crate::store::events::append(
             &state.db,
             0,
-            &principal.actor,
+            &principal.writer(None),
             None,
             crate::store::events::NewEvent {
                 project_id: "p1".to_string(),
@@ -1099,7 +1128,7 @@ mod tests {
         crate::store::events::append(
             &state.db,
             0,
-            "seeder",
+            &as_member("seeder"),
             None,
             crate::store::events::NewEvent {
                 project_id: "p1".to_string(),
@@ -1147,17 +1176,15 @@ mod tests {
         )
         .await
         .expect("cursor");
-        subscriptions::create_with_filters(
-            &state.db,
-            &principal.actor,
+        subscribe_as(
+            &state,
+            &principal.participant().expect("a participant"),
             None,
             Some("p1"),
             &kinds,
             &cursor,
-            subscriptions::Filters {
-                exclude_self: true,
-                ..Default::default()
-            },
+            AuthorFilter::default(),
+            true,
         )
         .await
         .expect("create");
@@ -1165,7 +1192,7 @@ mod tests {
         crate::store::events::append(
             &state.db,
             0,
-            &principal.actor,
+            &principal.writer(None),
             None,
             crate::store::events::NewEvent {
                 project_id: "p1".to_string(),
@@ -1182,7 +1209,7 @@ mod tests {
         crate::store::events::append(
             &state.db,
             0,
-            "seeder",
+            &as_member("seeder"),
             None,
             crate::store::events::NewEvent {
                 project_id: "p1".to_string(),
@@ -1205,10 +1232,20 @@ mod tests {
     }
 
     async fn begin_session(state: &AppState, actor: &str, name: &str) -> String {
-        crate::store::sessions::start(&state.db, "p1", name, actor)
-            .await
-            .expect("start a session")
-            .id
+        crate::store::sessions::start_session(
+            &state.db,
+            &crate::store::sessions::StartRequest {
+                project_id: "p1",
+                session_name: name,
+                writer: &as_member(actor),
+                exclusive: false,
+                fork_from: None,
+            },
+        )
+        .await
+        .expect("start a session")
+        .session
+        .id
     }
 
     /// Ask a question as `actor` and have the human answer it, so it sits in
@@ -1224,7 +1261,7 @@ mod tests {
             &crate::limits::InboxCaps::disabled(),
             0,
             crate::store::questions::NewQuestion {
-                actor,
+                writer: &as_member(actor),
                 project_id: "p1",
                 subject,
                 body: Some("Please."),
@@ -1237,9 +1274,16 @@ mod tests {
         )
         .await
         .expect("post a question");
-        crate::store::questions::answer(&state.db, 0, "human", &id, "yes", None)
-            .await
-            .expect("answer it");
+        crate::store::questions::answer(
+            &state.db,
+            0,
+            &crate::author::Writer::human(),
+            &id,
+            "yes",
+            None,
+        )
+        .await
+        .expect("answer it");
         id
     }
 
@@ -1359,33 +1403,62 @@ mod tests {
             .await
             .expect("create project");
         let session = begin_session(&state, "agent-a", "work").await;
-        crate::store::sessions::end(&state.db, &session, "agent-a", Some("agent-a"), None)
+        crate::store::sessions::end_session(&state.db, &[], &session, &as_member("agent-a"), None)
             .await
             .expect("end");
 
-        crate::store::notifications::advance(&state.db, "agent-a", &session, "evt")
-            .await
-            .expect("advance");
-        crate::store::notifications::advance(&state.db, "agent-a", "no-such-session", "evt")
-            .await
-            .expect("advance");
-        for scope in [session.as_str(), "no-such-session"] {
-            assert_eq!(
-                crate::store::notifications::cursor(&state.db, "agent-a", scope)
-                    .await
-                    .expect("cursor"),
-                None,
-                "no cursor row for {scope}"
-            );
-        }
-        crate::store::notifications::advance(&state.db, "agent-a", "", "evt")
-            .await
-            .expect("advance");
-        assert_eq!(
-            crate::store::notifications::cursor(&state.db, "agent-a", "")
+        // A participant that never drained there settles a first page late.
+        let late = ParticipantKey {
+            member: "agent-a".to_string(),
+            agent: "opencode".to_string(),
+        };
+        let settle = |session_id: &str| crate::store::notifications::Settle {
+            key: late.clone(),
+            session_id: session_id.to_string(),
+            from: None,
+            to: Some("evt".to_string()),
+            backlog: Vec::new(),
+        };
+        let cursor = async |session_id: &str| -> Option<String> {
+            let conn = crate::store::connect(&state.db).expect("connect");
+            let mut rows = conn
+                .query(
+                    "SELECT last_seen_event_id FROM notify_cursors
+                      WHERE member_id = ?1 AND agent = ?2 AND session_id = ?3",
+                    vec![
+                        turso::Value::Text(late.member.clone()),
+                        turso::Value::Text(late.agent.clone()),
+                        turso::Value::Text(session_id.to_string()),
+                    ],
+                )
                 .await
-                .expect("cursor")
-                .as_deref(),
+                .expect("query");
+            match rows
+                .next()
+                .await
+                .expect("row")?
+                .get_value(0)
+                .expect("value")
+            {
+                turso::Value::Text(id) => Some(id),
+                _ => None,
+            }
+        };
+        for scope in [session.as_str(), "no-such-session"] {
+            assert!(
+                crate::store::notifications::settle(&state.db, &settle(scope))
+                    .await
+                    .expect("settle")
+            );
+            assert_eq!(cursor(scope).await, None, "no cursor row for {scope}");
+        }
+        assert!(
+            crate::store::notifications::settle(&state.db, &settle(""))
+                .await
+                .expect("settle")
+        );
+        assert_eq!(
+            cursor("").await.as_deref(),
             Some("evt"),
             "the session-less scope has no session to check"
         );
@@ -1399,39 +1472,49 @@ mod tests {
             .expect("create project");
         let session = begin_session(&state, "agent-a", "work").await;
         let kinds = vec!["signal".to_string()];
-        let filters = subscriptions::Filters::default();
-        subscriptions::create_with_filters(
-            &state.db,
-            "agent-a",
+        subscribe_as(
+            &state,
+            &key_of("agent-a"),
             Some(&session),
             None,
             &kinds,
             "",
-            filters,
+            AuthorFilter::default(),
+            false,
         )
         .await
         .expect("bound subscription");
-        subscriptions::create_with_filters(&state.db, "agent-a", None, None, &kinds, "", filters)
-            .await
-            .expect("session-less subscription");
+        subscribe_as(
+            &state,
+            &key_of("agent-a"),
+            None,
+            None,
+            &kinds,
+            "",
+            AuthorFilter::default(),
+            false,
+        )
+        .await
+        .expect("session-less subscription");
 
-        crate::store::sessions::end(&state.db, &session, "agent-a", None, None)
+        crate::store::sessions::end_session(&state.db, &[], &session, &as_member("agent-a"), None)
             .await
             .expect("end");
 
-        let left = subscriptions::list(&state.db, "agent-a")
+        let left = subscriptions::list_for(&state.db, &key_of("agent-a"), None)
             .await
             .expect("list");
         assert_eq!(left.len(), 1, "only the session-less one remains");
         assert_eq!(left[0].session_id, None);
-        let refused = subscriptions::create_with_filters(
-            &state.db,
-            "agent-a",
+        let refused = subscribe_as(
+            &state,
+            &key_of("agent-a"),
             Some(&session),
             None,
             &kinds,
             "",
-            filters,
+            AuthorFilter::default(),
+            false,
         )
         .await
         .expect_err("an ended session takes no subscription");
@@ -1446,17 +1529,15 @@ mod tests {
             .expect("create project");
         let principal = caller("agent-a", false);
         let kinds = vec!["signal".to_string()];
-        subscriptions::create_with_filters(
-            &state.db,
-            "agent-a",
+        subscribe_as(
+            &state,
+            &key_of("agent-a"),
             None,
             Some("p1"),
             &kinds,
             "",
-            subscriptions::Filters {
-                exclude_self: true,
-                ..Default::default()
-            },
+            AuthorFilter::default(),
+            true,
         )
         .await
         .expect("create");
@@ -1464,7 +1545,7 @@ mod tests {
             crate::store::events::append(
                 &state.db,
                 0,
-                "agent-a",
+                &as_member("agent-a"),
                 None,
                 crate::store::events::NewEvent {
                     project_id: "p1".to_string(),
@@ -1495,7 +1576,7 @@ mod tests {
             .collect();
         assert_eq!(titles, vec!["theirs"], "the next peek reaches the match");
         assert!(
-            !subscriptions::list(&state.db, "agent-a")
+            !subscriptions::list_for(&state.db, &key_of("agent-a"), None)
                 .await
                 .expect("list")[0]
                 .last_seen_event_id
@@ -1512,17 +1593,15 @@ mod tests {
             .expect("create project");
         let principal = caller("agent-a", false);
         let kinds = vec!["signal".to_string()];
-        subscriptions::create_with_filters(
-            &state.db,
-            "agent-a",
+        subscribe_as(
+            &state,
+            &key_of("agent-a"),
             None,
             Some("p1"),
             &kinds,
             "",
-            subscriptions::Filters {
-                exclude_self: true,
-                ..Default::default()
-            },
+            AuthorFilter::default(),
+            true,
         )
         .await
         .expect("create");
@@ -1535,17 +1614,23 @@ mod tests {
             thread_id: None,
             session_id: None,
         };
-        crate::store::events::append(&state.db, 0, "agent-a", None, mine("mine"))
+        crate::store::events::append(&state.db, 0, &as_member("agent-a"), None, mine("mine"))
             .await
             .expect("append");
         let theirs = append(&state, "signal", "theirs").await;
-        crate::store::events::append(&state.db, 0, "agent-a", None, mine("mine again"))
-            .await
-            .expect("append");
+        crate::store::events::append(
+            &state.db,
+            0,
+            &as_member("agent-a"),
+            None,
+            mine("mine again"),
+        )
+        .await
+        .expect("append");
 
         let read = super::super::notifications::read(&state, &principal, None, None).await;
         read.settle_skips(&state).await;
-        let held = subscriptions::list(&state.db, "agent-a")
+        let held = subscriptions::list_for(&state.db, &key_of("agent-a"), None)
             .await
             .expect("list");
         assert!(
@@ -1567,18 +1652,27 @@ mod tests {
                 .await
                 .expect("posture");
         }
-        crate::store::identity::create_agent(&state.db, "agent-a", "Agent A")
+        crate::store::identity::create_member(&state.db, "agent-a", "Agent A")
             .await
             .expect("create agent");
         let principal = caller("agent-a", false);
         let kinds = vec!["signal".to_string()];
-        subscriptions::create(&state.db, "agent-a", None, &kinds, "")
-            .await
-            .expect("create");
+        subscribe_as(
+            &state,
+            &key_of("agent-a"),
+            None,
+            None,
+            &kinds,
+            "",
+            AuthorFilter::default(),
+            false,
+        )
+        .await
+        .expect("create");
         crate::store::events::append(
             &state.db,
             0,
-            "seeder",
+            &as_member("seeder"),
             None,
             crate::store::events::NewEvent {
                 project_id: "secret".to_string(),
@@ -1597,7 +1691,7 @@ mod tests {
         assert!(peeked.entries.is_empty());
         peeked.settle_skips(&state).await;
         assert!(
-            subscriptions::list(&state.db, "agent-a")
+            subscriptions::list_for(&state.db, &key_of("agent-a"), None)
                 .await
                 .expect("list")[0]
                 .last_seen_event_id

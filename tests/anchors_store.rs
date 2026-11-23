@@ -32,7 +32,7 @@ async fn source(db: &TestDb, project: &str, session_id: &str, summary: &str) -> 
     events::append(
         db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: project.to_string(),
@@ -60,7 +60,7 @@ fn anchor_request(source_ids: Vec<String>) -> anchors::AnchorRequest {
 #[tokio::test]
 async fn an_anchor_round_trips_and_resume_reads_after_it() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("session");
     let first = source(&db, "proj", &session.id, "plan written").await;
@@ -110,7 +110,7 @@ async fn an_anchor_round_trips_and_resume_reads_after_it() {
 #[tokio::test]
 async fn an_anchor_refuses_a_source_from_another_project() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("session");
     let outside = source(&db, "other", &session.id, "not here").await;
@@ -132,7 +132,7 @@ async fn an_anchor_refuses_a_source_from_another_project() {
 #[tokio::test]
 async fn any_participant_anchors_a_shared_session_but_not_an_ended_one() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("session");
 
@@ -148,7 +148,7 @@ async fn any_participant_anchors_a_shared_session_but_not_an_ended_one() {
     .expect("a session has no owner, so another participant anchors it");
     assert_eq!(anchor.owner, "agent-two");
 
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     let ended = sessions::get(&db, &session.id)
@@ -171,7 +171,7 @@ async fn any_participant_anchors_a_shared_session_but_not_an_ended_one() {
 #[tokio::test]
 async fn a_human_score_cites_the_anchor_and_appears_on_resume() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("session");
     let anchor =
@@ -207,10 +207,10 @@ async fn a_human_score_cites_the_anchor_and_appears_on_resume() {
 #[tokio::test]
 async fn a_score_refuses_an_anchor_from_another_session() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("session");
-    let other = sessions::start(&db, "proj", "other", "agent-one")
+    let other = common::seed::start_session(&db, "proj", "other", "agent-one")
         .await
         .expect("other session");
     let anchor = anchors::append_anchor(&db, 0, &agent(), None, &other, anchor_request(Vec::new()))
@@ -238,7 +238,7 @@ async fn a_score_refuses_an_anchor_from_another_session() {
 #[tokio::test]
 async fn an_agent_cannot_write_a_score() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("session");
     let anchor =
@@ -267,7 +267,7 @@ async fn an_agent_cannot_write_a_score() {
 #[tokio::test]
 async fn an_anchor_replay_survives_the_session_ending() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("session");
     let first = anchors::append_anchor(
@@ -280,7 +280,7 @@ async fn an_anchor_replay_survives_the_session_ending() {
     )
     .await
     .expect("anchor");
-    sessions::end(&db, &session.id, "agent-one", Some("agent-one"), None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
 
@@ -300,10 +300,10 @@ async fn an_anchor_replay_survives_the_session_ending() {
 #[tokio::test]
 async fn one_key_in_two_sessions_writes_two_anchors() {
     let db = open().await;
-    let one = sessions::start(&db, "proj", "nightly", "agent-one")
+    let one = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("first");
-    let two = sessions::start(&db, "proj", "other", "agent-one")
+    let two = common::seed::start_session(&db, "proj", "other", "agent-one")
         .await
         .expect("second");
 
@@ -334,7 +334,7 @@ async fn one_key_in_two_sessions_writes_two_anchors() {
 #[tokio::test]
 async fn a_score_replay_writes_one_event() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("session");
     let anchor =
@@ -372,13 +372,13 @@ async fn a_score_replay_writes_one_event() {
 #[tokio::test]
 async fn an_anchor_cannot_cite_an_audit_event() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("session");
     let audit = events::append(
         &db,
         0,
-        "hub",
+        &common::seed::writer("hub"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -410,7 +410,7 @@ async fn an_anchor_cannot_cite_an_audit_event() {
 #[tokio::test]
 async fn resume_reports_a_full_page_as_complete() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("session");
     anchors::append_anchor(&db, 0, &agent(), None, &session, anchor_request(Vec::new()))

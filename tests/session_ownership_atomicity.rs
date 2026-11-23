@@ -160,12 +160,13 @@ impl TestFleet {
             .expect("create project");
         let mut tokens = Vec::new();
         for agent in agents {
-            identity::create_agent(&db, agent, agent)
+            identity::create_member(&db, agent, agent)
                 .await
                 .expect("create agent");
             tokens.push(
-                identity::issue_token(&db, agent)
+                identity::issue_member_token(&db, agent)
                     .await
+                    .map(|(issued, _)| issued)
                     .expect("issue token")
                     .token,
             );

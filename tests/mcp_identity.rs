@@ -91,10 +91,10 @@ async fn an_agent_reaches_open_projects_and_confidential_projects_require_grant(
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    let strict = identity::create_agent(&db, "strict", "Strict")
+    let strict = identity::create_member(&db, "strict", "Strict")
         .await
         .expect("create strict");
-    identity::create_agent(&db, "trust", "Trust")
+    identity::create_member(&db, "trust", "Trust")
         .await
         .expect("create trust");
     projects::create(&db, "shared", "Shared")
@@ -106,30 +106,38 @@ async fn an_agent_reaches_open_projects_and_confidential_projects_require_grant(
     identity::add_grant(&db, "trust", "confidential")
         .await
         .expect("grant for trust");
-    let strict_token = identity::issue_token(&db, "strict")
+    let strict_token = identity::issue_member_token(&db, "strict")
         .await
+        .map(|(issued, _)| issued)
         .expect("strict token")
         .token;
-    let trust_token = identity::issue_token(&db, "trust")
+    let trust_token = identity::issue_member_token(&db, "trust")
         .await
+        .map(|(issued, _)| issued)
         .expect("trust token")
         .token;
     events::append(
         &db,
         0,
-        "human",
+        &common::seed::writer("human"),
         None,
         signal("confidential", "needle in confidential"),
     )
     .await
     .expect("confidential event");
-    events::append(&db, 0, "human", None, signal("shared", "needle in shared"))
-        .await
-        .expect("shared event");
     events::append(
         &db,
         0,
-        "human",
+        &common::seed::writer("human"),
+        None,
+        signal("shared", "needle in shared"),
+    )
+    .await
+    .expect("shared event");
+    events::append(
+        &db,
+        0,
+        &common::seed::writer("human"),
         None,
         signal(&strict.personal_project_id, "needle in personal"),
     )
@@ -376,21 +384,22 @@ async fn artifact_history_and_delete_are_concealed_from_strangers() {
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    let strict = identity::create_agent(&db, "strict", "Strict")
+    let strict = identity::create_member(&db, "strict", "Strict")
         .await
         .expect("create strict");
     projects::create_with_confidential(&db, "vault", "Vault", true)
         .await
         .expect("vault project");
-    let strict_token = identity::issue_token(&db, "strict")
+    let strict_token = identity::issue_member_token(&db, "strict")
         .await
+        .map(|(issued, _)| issued)
         .expect("strict token")
         .token;
     let foreign = artifacts::publish(
         &db,
         &data_dir,
         NewArtifact {
-            actor: "human",
+            writer: &common::seed::writer("human"),
             project_id: "vault",
             title: "Shared notes",
             description: "",
@@ -408,7 +417,7 @@ async fn artifact_history_and_delete_are_concealed_from_strangers() {
         &db,
         &data_dir,
         NewArtifact {
-            actor: "strict",
+            writer: &common::seed::writer("strict"),
             project_id: &strict.personal_project_id,
             title: "Own notes",
             description: "",
@@ -516,21 +525,22 @@ async fn comment_mutations_are_concealed_from_strangers() {
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    let _strict = identity::create_agent(&db, "strict", "Strict")
+    let _strict = identity::create_member(&db, "strict", "Strict")
         .await
         .expect("create strict");
     projects::create_with_confidential(&db, "vault", "Vault", true)
         .await
         .expect("vault project");
-    let strict_token = identity::issue_token(&db, "strict")
+    let strict_token = identity::issue_member_token(&db, "strict")
         .await
+        .map(|(issued, _)| issued)
         .expect("strict token")
         .token;
     let foreign = artifacts::publish(
         &db,
         &data_dir,
         NewArtifact {
-            actor: "human",
+            writer: &common::seed::writer("human"),
             project_id: "vault",
             title: "Shared notes",
             description: "",
@@ -548,7 +558,7 @@ async fn comment_mutations_are_concealed_from_strangers() {
     let (comment, _) = comments::add_comment(
         &db,
         &foreign,
-        "human",
+        &common::seed::writer("human"),
         "Needs work.",
         None,
         None,
@@ -621,14 +631,15 @@ async fn an_agent_does_not_reach_the_hub_audit_trail() {
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    let watched = identity::create_agent(&db, "watched", "Watched")
+    let watched = identity::create_member(&db, "watched", "Watched")
         .await
         .expect("create watched");
-    identity::create_agent(&db, "watcher", "Watcher")
+    identity::create_member(&db, "watcher", "Watcher")
         .await
         .expect("create watcher");
-    let watcher_token = identity::issue_token(&db, "watcher")
+    let watcher_token = identity::issue_member_token(&db, "watcher")
         .await
+        .map(|(issued, _)| issued)
         .expect("watcher token")
         .token;
     // Ordinary work in the same project, so the assertions below separate
@@ -636,7 +647,7 @@ async fn an_agent_does_not_reach_the_hub_audit_trail() {
     events::append(
         &db,
         0,
-        "human",
+        &common::seed::writer("human"),
         None,
         signal(&watched.personal_project_id, "ordinary watched work"),
     )
@@ -716,13 +727,13 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    identity::create_agent(&db, "one", "One")
+    identity::create_member(&db, "one", "One")
         .await
         .expect("create one");
-    identity::create_agent(&db, "two", "Two")
+    identity::create_member(&db, "two", "Two")
         .await
         .expect("create two");
-    let strict = identity::create_agent(&db, "strict", "Strict")
+    let strict = identity::create_member(&db, "strict", "Strict")
         .await
         .expect("create strict");
     projects::create(&db, "shared", "Shared")
@@ -737,16 +748,19 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
     identity::add_grant(&db, "two", "secret")
         .await
         .expect("grant two");
-    let one_token = identity::issue_token(&db, "one")
+    let one_token = identity::issue_member_token(&db, "one")
         .await
+        .map(|(issued, _)| issued)
         .expect("token")
         .token;
-    let two_token = identity::issue_token(&db, "two")
+    let two_token = identity::issue_member_token(&db, "two")
         .await
+        .map(|(issued, _)| issued)
         .expect("token")
         .token;
-    let strict_token = identity::issue_token(&db, "strict")
+    let strict_token = identity::issue_member_token(&db, "strict")
         .await
+        .map(|(issued, _)| issued)
         .expect("token")
         .token;
     drop(db);
@@ -773,6 +787,7 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
             "path": "/fs/runbook.md",
             "content": "restart the node from the console",
             "store": "project",
+            "project_id": "secret",
         }),
     );
     assert_eq!(
@@ -794,7 +809,7 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
         &two_token,
         &two,
         "brain_get",
-        json!({"path": "/fs/runbook.md", "store": "project"}),
+        json!({"path": "/fs/runbook.md", "store": "project", "project_id": "secret"}),
     );
     assert!(
         read.raw.contains("restart the node from the console"),
@@ -810,6 +825,7 @@ async fn a_project_knowledge_base_is_shared_by_its_agents_and_closed_to_others()
             "path": "/fs/runbook.md",
             "content": "restart the node from the console, then check the feed",
             "store": "project",
+            "project_id": "secret",
         }),
     );
     assert_eq!(
@@ -961,16 +977,16 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    identity::create_agent(&db, "one", "One")
+    identity::create_member(&db, "one", "One")
         .await
         .expect("create one");
-    identity::create_agent(&db, "two", "Two")
+    identity::create_member(&db, "two", "Two")
         .await
         .expect("create two");
-    identity::create_agent(&db, "strict", "Strict")
+    identity::create_member(&db, "strict", "Strict")
         .await
         .expect("create strict");
-    identity::create_agent(&db, "holder", "Holder")
+    identity::create_member(&db, "holder", "Holder")
         .await
         .expect("create holder");
     projects::create_with_confidential(&db, "shared", "Shared", true)
@@ -985,20 +1001,24 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
     identity::add_grant(&db, "holder", "shared")
         .await
         .expect("read grant");
-    let one_token = identity::issue_token(&db, "one")
+    let one_token = identity::issue_member_token(&db, "one")
         .await
+        .map(|(issued, _)| issued)
         .expect("token")
         .token;
-    let two_token = identity::issue_token(&db, "two")
+    let two_token = identity::issue_member_token(&db, "two")
         .await
+        .map(|(issued, _)| issued)
         .expect("token")
         .token;
-    let strict_token = identity::issue_token(&db, "strict")
+    let strict_token = identity::issue_member_token(&db, "strict")
         .await
+        .map(|(issued, _)| issued)
         .expect("token")
         .token;
-    let holder_token = identity::issue_token(&db, "holder")
+    let holder_token = identity::issue_member_token(&db, "holder")
         .await
+        .map(|(issued, _)| issued)
         .expect("token")
         .token;
     drop(db);
@@ -1196,7 +1216,7 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         json!({"path": "/kv/plan", "session": {"session_id": session_id.clone()}}),
     );
     assert!(
-        granted.raw.contains("drain the queue"),
+        granted.raw.contains("drain, then restart"),
         "a read grant reaches the session brain: {}",
         granted.raw
     );
@@ -1210,7 +1230,7 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         json!({"query": "drain", "scope": "global", "session_id": session_id.clone()}),
     );
     assert!(
-        found.raw.contains("drain the queue"),
+        found.raw.contains("drain, then restart"),
         "a search narrowed to one session finds its content: {}",
         found.raw
     );
@@ -1222,7 +1242,7 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         json!({"query": "drain", "scope": "global", "session_id": session_id.clone()}),
     );
     assert!(
-        !denied.raw.contains("drain the queue"),
+        !denied.raw.contains("drain"),
         "a session in an unreachable project is not searchable: {}",
         denied.raw
     );
@@ -1238,34 +1258,34 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
 #[tokio::test]
 async fn search_hit_fields_stay_inside_what_the_agent_may_see() {
     use agent_hub::store::search::{SearchDoc, index_doc};
-    use agent_hub::store::sessions;
 
     let data_dir = TempDir::new("search-fields");
     let db = open_engine(&data_dir.join("hub.db"))
         .await
         .expect("open engine");
     migrate(&db).await.expect("migrate");
-    let strict = identity::create_agent(&db, "strict", "Strict")
+    let strict = identity::create_member(&db, "strict", "Strict")
         .await
         .expect("create strict");
     let own = strict.personal_project_id.clone();
     projects::create_with_confidential(&db, "hidden-vault", "Secret Plans", true)
         .await
         .expect("hidden project");
-    let token = identity::issue_token(&db, "strict")
+    let token = identity::issue_member_token(&db, "strict")
         .await
+        .map(|(issued, _)| issued)
         .expect("token")
         .token;
 
     let mut finished = signal(&own, "needle in personal");
     finished.kind = "finished".to_string();
-    events::append(&db, 0, "strict", None, finished)
+    events::append(&db, 0, &common::seed::writer("strict"), None, finished)
         .await
         .expect("own event");
     events::append(
         &db,
         0,
-        "spy-agent",
+        &common::seed::writer("spy-agent"),
         None,
         signal("hidden-vault", "needle in hiding"),
     )
@@ -1275,7 +1295,7 @@ async fn search_hit_fields_stay_inside_what_the_agent_may_see() {
         &db,
         &data_dir,
         NewArtifact {
-            actor: "spy-agent",
+            writer: &common::seed::writer("spy-agent"),
             project_id: "hidden-vault",
             title: "needle dossier",
             description: "",
@@ -1289,12 +1309,13 @@ async fn search_hit_fields_stay_inside_what_the_agent_may_see() {
     )
     .await
     .expect("hidden artifact");
-    let own_session = sessions::start(&db, &own, "own-run", "strict")
+    let own_session = common::seed::start_session(&db, &own, "own-run", "strict")
         .await
         .expect("own session");
-    let hidden_session = sessions::start(&db, "hidden-vault", "covert-run", "spy-agent")
-        .await
-        .expect("hidden session");
+    let hidden_session =
+        common::seed::start_session(&db, "hidden-vault", "covert-run", "spy-agent")
+            .await
+            .expect("hidden session");
     let conn = db.connect().expect("connect");
     for (project, session) in [
         (own.as_str(), &own_session),

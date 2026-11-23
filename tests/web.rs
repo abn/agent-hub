@@ -167,7 +167,7 @@ async fn storage_usage_sums_every_stored_version() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "homelab",
             title: "Report",
             description: "",
@@ -185,7 +185,7 @@ async fn storage_usage_sums_every_stored_version() {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &published.id,
         b"1234567890",
         EnvelopeUpdate::Keep,
@@ -198,7 +198,7 @@ async fn storage_usage_sums_every_stored_version() {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &published.id,
         b"123",
         EnvelopeUpdate::Keep,
@@ -869,7 +869,7 @@ async fn serves_artifact_content_for_the_viewer() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "human",
+            writer: &common::seed::writer("human"),
             project_id: "proj",
             title: "Note",
             kind: "markdown",
@@ -915,7 +915,7 @@ async fn serves_artifact_content_for_the_viewer() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "human",
+            writer: &common::seed::writer("human"),
             project_id: "proj",
             title: "Secret",
             kind: "markdown",
@@ -1209,7 +1209,7 @@ async fn public_artifact_page_loads_for_the_embed() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "human",
+            writer: &common::seed::writer("human"),
             project_id: "proj",
             title: "Page",
             kind: "html",
@@ -1256,7 +1256,7 @@ async fn comments_store_round_trip_behind_the_drawer() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "human",
+            writer: &common::seed::writer("human"),
             project_id: "proj",
             title: "Note",
             kind: "markdown",
@@ -1274,7 +1274,7 @@ async fn comments_store_round_trip_behind_the_drawer() {
     let (comment, replayed) = comments::add_comment(
         &state.db,
         &published.id,
-        "human",
+        &common::seed::writer("human"),
         "Looks good",
         None,
         None,
@@ -1381,7 +1381,7 @@ async fn protected_artifact_serves_the_locked_host_shell() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "human",
+            writer: &common::seed::writer("human"),
             project_id: "proj",
             title: "Secret",
             kind: "markdown",

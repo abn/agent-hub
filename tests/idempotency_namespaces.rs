@@ -27,7 +27,7 @@ async fn signal_cannot_replay_question_id() {
         &CAPS,
         0,
         NewQuestion {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             subject: "Should we proceed?",
             body: None,
@@ -45,7 +45,7 @@ async fn signal_cannot_replay_question_id() {
     let s_id = events::append(
         &db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         Some("shared-key"),
         NewEvent {
             project_id: "proj".to_string(),
@@ -78,7 +78,7 @@ async fn resolved_question_refuses_second_answer() {
         &CAPS,
         0,
         NewQuestion {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             subject: "Need guidance",
             body: None,
@@ -93,14 +93,28 @@ async fn resolved_question_refuses_second_answer() {
     .expect("post question");
 
     // First answer resolves the question
-    let _ans1 = questions::answer(&db, 0, "human", &q_id, "Proceed with option A", None)
-        .await
-        .expect("first answer");
+    let _ans1 = questions::answer(
+        &db,
+        0,
+        &common::seed::writer("human"),
+        &q_id,
+        "Proceed with option A",
+        None,
+    )
+    .await
+    .expect("first answer");
 
     // Second distinct answer must be refused
-    let err = questions::answer(&db, 0, "human", &q_id, "Actually do option B", None)
-        .await
-        .expect_err("second answer on resolved question must be rejected");
+    let err = questions::answer(
+        &db,
+        0,
+        &common::seed::writer("human"),
+        &q_id,
+        "Actually do option B",
+        None,
+    )
+    .await
+    .expect_err("second answer on resolved question must be rejected");
 
     assert_eq!(
         err.code(),
@@ -119,7 +133,7 @@ async fn decision_key_cannot_replay_across_different_approvals() {
         &db,
         &CAPS,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -138,7 +152,7 @@ async fn decision_key_cannot_replay_across_different_approvals() {
         &db,
         &CAPS,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -154,12 +168,29 @@ async fn decision_key_cannot_replay_across_different_approvals() {
     .expect("post approval 2");
 
     // Decide approval 1 with key "dec-key"
-    let d1 = questions::decide(&db, 0, "human", &app1, true, Some("ok 1"), Some("dec-key"))
-        .await
-        .expect("decide approval 1");
+    let d1 = questions::decide(
+        &db,
+        0,
+        &common::seed::writer("human"),
+        &app1,
+        true,
+        Some("ok 1"),
+        Some("dec-key"),
+    )
+    .await
+    .expect("decide approval 1");
 
     // Attempt to decide approval 2 with the same key "dec-key"
-    let res = questions::decide(&db, 0, "human", &app2, true, Some("ok 2"), Some("dec-key")).await;
+    let res = questions::decide(
+        &db,
+        0,
+        &common::seed::writer("human"),
+        &app2,
+        true,
+        Some("ok 2"),
+        Some("dec-key"),
+    )
+    .await;
 
     // In unfixed code, it looked up "decision" + "dec-key" without checking approval_id
     // and returned d1 (the answer from approval 1), leaving approval 2 untouched!
@@ -182,7 +213,7 @@ async fn artifact_publish_key_does_not_suppress_update() {
         &db,
         &dir,
         agent_hub::store::artifacts::NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Artifact Title",
             description: "",
@@ -202,7 +233,7 @@ async fn artifact_publish_key_does_not_suppress_update() {
     let res = agent_hub::store::artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &art1.id,
         b"version 2 content",
         agent_hub::store::artifacts::EnvelopeUpdate::Keep,
@@ -232,7 +263,7 @@ async fn signal_key_cannot_resolve_question_without_answer() {
     let sig_id = events::append(
         &db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         Some("sig-key"),
         NewEvent {
             project_id: "proj".to_string(),
@@ -253,7 +284,7 @@ async fn signal_key_cannot_resolve_question_without_answer() {
         &CAPS,
         0,
         NewQuestion {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             subject: "A question",
             body: None,
@@ -268,7 +299,15 @@ async fn signal_key_cannot_resolve_question_without_answer() {
     .expect("post question");
 
     // Attempt to answer the question using the same idempotency key "sig-key"
-    let ans_id = questions::answer(&db, 0, "human", &q_id, "The answer", Some("sig-key")).await;
+    let ans_id = questions::answer(
+        &db,
+        0,
+        &common::seed::writer("human"),
+        &q_id,
+        "The answer",
+        Some("sig-key"),
+    )
+    .await;
 
     // In unfixed code: questions::answer replayed the signal id and marked the question resolved!
     // The answer ID must NOT equal the signal ID!
@@ -293,7 +332,7 @@ async fn answer_key_cannot_replay_across_different_questions() {
         &CAPS,
         0,
         NewQuestion {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             subject: "One",
             body: None,
@@ -311,7 +350,7 @@ async fn answer_key_cannot_replay_across_different_questions() {
         &CAPS,
         0,
         NewQuestion {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             subject: "Two",
             body: None,
@@ -328,7 +367,7 @@ async fn answer_key_cannot_replay_across_different_questions() {
     let _ = questions::answer(
         &db,
         0,
-        "human",
+        &common::seed::writer("human"),
         &q1,
         "Answer one",
         Some("shared-answer-key"),
@@ -339,7 +378,7 @@ async fn answer_key_cannot_replay_across_different_questions() {
     let err = questions::answer(
         &db,
         0,
-        "human",
+        &common::seed::writer("human"),
         &q2,
         "Answer two",
         Some("shared-answer-key"),

@@ -44,9 +44,16 @@ fn answer_question(data_dir: &Path, question_id: &str) {
             .await
             .expect("open engine");
         agent_hub::store::migrate(&db).await.expect("migrate");
-        agent_hub::store::questions::answer(&db, 0, "human", question_id, "Yes, ship it", None)
-            .await
-            .expect("answer");
+        agent_hub::store::questions::answer(
+            &db,
+            0,
+            &common::seed::writer("human"),
+            question_id,
+            "Yes, ship it",
+            None,
+        )
+        .await
+        .expect("answer");
     });
 }
 
@@ -57,9 +64,17 @@ fn decide_approval(data_dir: &Path, approval_id: &str) {
             .await
             .expect("open engine");
         agent_hub::store::migrate(&db).await.expect("migrate");
-        agent_hub::store::questions::decide(&db, 0, "human", approval_id, true, None, None)
-            .await
-            .expect("decide");
+        agent_hub::store::questions::decide(
+            &db,
+            0,
+            &common::seed::writer("human"),
+            approval_id,
+            true,
+            None,
+            None,
+        )
+        .await
+        .expect("decide");
     });
 }
 

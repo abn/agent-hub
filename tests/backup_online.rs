@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use agent_hub::app::AppState;
 use agent_hub::http::router;
-use agent_hub::store::{artifacts, events, identity, projects, sessions};
+use agent_hub::store::{artifacts, events, identity, projects};
 use axum::http::StatusCode;
 use serde_json::Value;
 use tower::ServiceExt;
@@ -35,7 +35,7 @@ async fn hub(tag: &str, backups: &Path) -> TestState {
     projects::create(&state.db, PROJECT, "Homelab")
         .await
         .expect("create the project");
-    identity::create_agent(&state.db, AGENT, "Backup Agent")
+    identity::create_member(&state.db, AGENT, "Backup Agent")
         .await
         .expect("create the agent");
     state
@@ -47,7 +47,7 @@ async fn seed(state: &AppState) -> String {
     events::append(
         &state.db,
         0,
-        AGENT,
+        &common::seed::writer(AGENT),
         None,
         events::NewEvent {
             project_id: PROJECT.to_string(),
@@ -62,7 +62,7 @@ async fn seed(state: &AppState) -> String {
     .await
     .expect("append an event");
 
-    let session = sessions::start(&state.db, PROJECT, "night-shift", AGENT)
+    let session = common::seed::start_session(&state.db, PROJECT, "night-shift", AGENT)
         .await
         .expect("start a session");
     let brain = state
@@ -99,7 +99,7 @@ async fn publish(state: &AppState, title: &str, content: &[u8]) -> artifacts::Ar
         &state.db,
         &state.data_dir,
         artifacts::NewArtifact {
-            actor: AGENT,
+            writer: &common::seed::writer(AGENT),
             project_id: PROJECT,
             title,
             description: "",
@@ -308,7 +308,7 @@ async fn writes_during_the_backup_leave_it_consistent() {
             events::append(
                 &feed.db,
                 0,
-                AGENT,
+                &common::seed::writer(AGENT),
                 None,
                 events::NewEvent {
                     project_id: PROJECT.to_string(),
@@ -360,9 +360,14 @@ async fn writes_during_the_backup_leave_it_consistent() {
         while !halt.load(Ordering::Relaxed) {
             let artifact = publish(&blobs, &format!("churn {n}"), format!("v{n}").as_bytes()).await;
             if n.is_multiple_of(2) {
-                artifacts::delete(&blobs.db, &blobs.data_dir, AGENT, &artifact.id)
-                    .await
-                    .expect("delete during the backup");
+                artifacts::delete(
+                    &blobs.db,
+                    &blobs.data_dir,
+                    &common::seed::writer(AGENT),
+                    &artifact.id,
+                )
+                .await
+                .expect("delete during the backup");
             }
             n += 1;
         }
@@ -410,7 +415,7 @@ async fn a_live_write_during_the_backup_keeps_each_blob_with_its_row() {
             artifacts::draft(
                 &live.db,
                 &live.data_dir,
-                AGENT,
+                &common::seed::writer(AGENT),
                 &id,
                 "x".repeat(n).as_bytes(),
                 artifacts::EnvelopeUpdate::Keep,
@@ -461,8 +466,9 @@ async fn a_live_write_during_the_backup_keeps_each_blob_with_its_row() {
 async fn a_non_admin_token_is_refused() {
     let backups = TempDir::new("online-refused-backups");
     let state = hub("online-refused", &backups).await;
-    let agent_token = identity::issue_token(&state.db, AGENT)
+    let agent_token = identity::issue_member_token(&state.db, AGENT)
         .await
+        .map(|(issued, _)| issued)
         .expect("issue a token")
         .token;
 
