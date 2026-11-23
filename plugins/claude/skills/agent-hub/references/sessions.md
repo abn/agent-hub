@@ -5,148 +5,161 @@
 `session_brief(project_id)` is the first read in a project. `previous_session`
 is your most recent other session there, with the handoff note it left and its
 `recovery_path`, so `brain_get(recovery_path, session: {session_id})` reads the
-detail it points at. Call it before `session_start`: it never counts the
-session your connection is working as the previous one, so after a resume it
-would name the session before the one you resumed.
+detail it points at. Call it before `session_start`, so a resumed session is
+still the previous one.
 
-## Sessions and the brain
+## Sessions are shared
 
-`session_start` takes a `project_id` and a `session_name` and returns a
-`session_id`, the namespaces to address the brain with, and `recovery_path`,
-the file where a session leaves the note that orients whoever comes next. It
-also returns `handoff`: the note the previous owner left when it ended the
-session, so a resume reads what its predecessor wrote without a further call.
-`session_start` returns no feed cursor of its own: `feed_read` keeps your cursor
-per project on the server and advances it on every read, so a resumed session
-continues where it stopped without carrying the `next_since` itself. The
-brain is the session's server-side working state, one AgentFS file per
+A session is a shared space of work. It belongs to no one: any participant
+joins it by name, and nothing is handed over. Two agents on one branch both
+join `feat-redesign` and write as two participants. Two instances of the same
+agent on one member in one session are the same participant.
+
+A participant is one agent of one member in one session. Every write records
+all three, and the hub shows them joined: `laptop · claude-code · feat-redesign`.
+
+Name a session for people: a branch, a worktree or a topic, reusable, with
+letters, digits, `_` and `-`, at most 64 characters per segment, and a slash-separated child name at most 128 in all. A name that is a UUID or a
+ULID is refused with `session_name_opaque`.
+
+## Naming the session on a call
+
+Every tool except `session_start` and `enrol` takes `session`. It is one of:
+
+| Shape | Means |
+|---|---|
+| `"feat-redesign"` | the session of that name, in the call's project |
+| `{"name": "feat-redesign", "project_id": "homelab"}` | the same, in a named project |
+| `{"session_id": "..."}` | one session by id |
+
+`{}` or a project alone is refused with `session_invalid`. When you give an id
+and also a name or project, they must match the session, or the call is refused
+with `session_mismatch`. An id the hub does not know is `session_unknown`.
+
+A plugin adds `session` to your hub calls for you. Without one, pass it
+yourself on every write. A write to a session that does not exist creates it
+and joins you. A write with no `session` records member and agent only, and
+anything addressed to you arrives on the member-and-agent cursor instead of a
+session's. A write to `store: "session"` with no `session` is refused with
+`session_required`.
+
+Reads take the same argument. `brain_get`, `brain_list` and `brain_history`
+read any session you may read in a project, yours or not, and a read never
+creates anything. A bare name with no project resolves among the live sessions
+you take part in: exactly one matches, or the call is refused with
+`session_ambiguous`.
+
+A write names a project's session only when the write is in that project. A
+write to another project records no session, and the result says so:
+`"session": null, "session_note": "other_project"`.
+
+## Starting, resuming, leaving, ending
+
+`session_start(project_id, session_name)` joins the session, creating it when it
+is new, and returns a `session_id`, the namespaces to address the brain with,
+`recovery_path`, the file where a participant leaves the note that orients
+whoever comes next, and `handoff`: the note left when the session ended, so a
+resume reads what its predecessor wrote without a further call. An ended session
+named again is reopened.
+
+`session_start(..., exclusive: true)` refuses a name already in use, live or
+ended, with `conflict` and `session_name_taken`, and `details.session_id`
+names it. Use it when you must not share. A plugin does, to name a subagent's
+session.
+
+| Call | Effect |
+|---|---|
+| `session_leave(session)` | you stop being a live participant. Nothing ends for the others, and your next call joins again |
+| `session_end(session, handoff?)` | the session is ended for everyone, and its live children end with it. Any participant may |
+
+Leave when you stop and others may carry on. End when the work is done, and
+leave the note first: `handoff` keeps up to 4096 characters on the session and
+in the human's feed. The note is not stored in the brain. Put the detail in the
+brain under `recovery_path` and keep the note a pointer. The human can end a
+session too.
+
+A session is live while it is active and a participant has made a call
+recently and has not left.
+
+## The brain
+
+The brain is the session's server-side working state, one AgentFS file per
 session, reached only through the brain tools; there is no file path to hold.
-It survives same-session compaction and a resume of the same name, and is
-garbage-collected when the human prunes the session. Keys live under `/kv/`,
-files under `/fs/`. One brain value is capped at 4 MiB and one knowledge base
-page at 1 MiB; a larger write is refused with `payload_too_large` and stores
-nothing.
+Every participant reads and writes it. It survives same-session compaction and a
+resume of the same name, and is garbage-collected when the human prunes the
+session. Keys live under `/kv/`, files under `/fs/`. One brain value is capped
+at 4 MiB and one knowledge base page at 1 MiB; a larger write is refused with
+`payload_too_large` and stores nothing.
 
-A session belongs to the agent that started it. A session name is yours: the
-same name under another agent is a different session with its own brain, so
-two agents that happen to pick `nightly` never share working state. Only the
-owner ends a session. If the name you ask for is held by a session the human
-has pruned, the call is refused with `conflict` and a `pruned_session_id=`
-tail, because the human can still undo that prune; start under another name or
-ask for the undo.
+Every version of a session brain is kept, and `brain_history` and
+`brain_revert` take `store: "session"`. The hub serialises writes. To keep two
+participants from overwriting each other:
 
-`brain_get` and `brain_list` take an optional `session` and read another
-session's brain: either `{session_id}`, or `{agent, name}` with a `project_id`
-that defaults to your active session's project. Anyone who may read a project
-may read the brains of the sessions in it, so an agent can see what a sibling
-is working from, and reading needs no session of your own. A read never creates
-anything. A session the human has pruned is `not_found` while it can still be
-restored, and after that it reads like any session that never existed.
+- pass `if_version` from your last read, and a different current version is
+  refused with `conflict` and `stale_base`, with `details.version` the current
+  one;
+- without `if_version`, a put, delete or revert of a key whose last write came
+  from a different participant is refused the same way. Your own last write
+  needs no base.
 
-A write names your own session, or takes the one your connection is working:
-`brain_put` and `brain_delete` take an optional `session`, by `{session_id}` or
-by `{agent, name}`, and write the session it names. That is how a one-shot call
-writes, since it holds no connection to keep a session active on. Another
-agent's session is refused with `forbidden` and an `owner=` tail: two agents
-writing one working-state file clobber each other, which is the whole reason a
-session has one owner. Knowledge meant for another agent belongs in the project
-knowledge base, which is built to be written by everyone. With no `session`
-named, the write is your connection's active session, and a connection with
-none is a `conflict`.
+On `stale_base`, read the key again, merge, and write with the new version.
 
-## Compaction and subagents
+If the name you ask for is held by a session the human has pruned, the call is
+refused with `session_pruned`, because the human can still undo that prune:
+start under another name or ask for the undo.
+
+## Children
+
+A subagent works in its own session named `<parent>/<task>`, for example
+`feat-redesign/review-a1b2c3d4`. The plugin names it, not the model. A child's
+brain is its own, so the parent's brain is untouched.
+
+- A `/` is accepted only when every prefix is a live session in the same
+  project. Otherwise: `session_parent_missing`, and the message names a flat
+  name to use instead.
+- Ending a parent ends its live children. Pruning a parent prunes them.
+- Reopening a child needs a live parent.
+
+Without a plugin, a subagent you start yourself passes its child's `session`
+on every call.
+
+## Compaction
 
 Anchor before a long step with `session_anchor`, and after a compaction read
-`session_resume` for the latest anchor and the events after it. A session lease
-belongs to one connection: a second connection, such as a plugin's, can write
-the session by naming it, but it is your own connection that has to call
-`session_start` to work it without naming. A subagent shares its parent's
-session and never starts one; see `harness.md`.
+`session_resume` for the latest anchor and the events after it.
 
-## Picking up another agent's work
+## Forking another session
 
-When an agent stops, crashes, or is running something you want to branch from,
-you take the work yourself. The human is not involved.
+To branch from work you want to keep separate, fork it. The source is not
+touched and keeps working.
 
 ```
 session_list(project_id: "homelab", status: "ended")
 session_start(project_id: "homelab", session_name: "migration",
-              from: {agent: "deploy-bot", name: "nightly"})
+              from: {name: "nightly"})
 ```
 
-`from` names one session, the same shape as a cross-session read:
-`{session_id}`, or `{agent, name}` with a `project_id` that defaults to the
-project of the call. **The hub decides what picking up means**, because you
-cannot tell from outside whether that session is still running:
+`from` is `{session_id}`, or `{name, project_id?}` with a project that defaults
+to the call's. The new session's brain is a copy of the source as it stands, and
+later writes stay on their own side. The result's `forked_from` names the
+source. A fork is never the way to carry on: to continue the same session, join it by name.
 
-- the source has **ended**: the hub **adopts** it. You get the same
-  `session_id`, the same brain, and its handoff note. Nothing is copied, and
-  the previous owner no longer holds it.
-- the source is still **active**: the hub **forks** it. You get a new
-  `session_id` whose brain is a copy of the source as it stands, and the
-  source's owner keeps working undisturbed. Later writes on either side stay
-  on their own side.
-
-The result says which happened:
-
-```
-pickup: {mode: "adopt" | "fork", from_session_id, from_agent, handoff,
-         source_active, note?}
-```
-
-A fork carries `source_active: true` and a `note` naming who holds the
-original. Read it: it means that agent is still working from the same state
-and the same handoff note you now have, so coordinate through the feed or pick
-other work rather than doing the same thing twice.
-
-`pickup` is `null` on an ordinary start or resume. Any agent that may write the
-project may adopt an ended session there; picking up work is not a privilege
-the human hands out. What is refused, and why:
-
-- the name you asked for is already yours and live: `conflict` with
-  `existing_session_id=`, so call again with another name.
-- somebody else picked the ended session up a moment before you: no refusal.
-  The session is active again under them, so you get a fork of it, and the
-  result says so as above.
-- the source was pruned: `conflict` with `session_id=`. The human can restore
-  it with undo; the hub will not do that for you.
-- the source is in another project: `invalid_argument`. A brain is
-  project-scoped.
-
-A session can also leave you. If the human ends or reassigns it and another
-agent picks it up, your next write is a `conflict` that names the new owner.
-Call `session_start` again: your own name gives you a fresh session, and
-`from` gives you a copy of where the work now stands.
-
-The owner of a session is the identity the hub saw when it was started: the
-token's agent over HTTP or through the stdio proxy, or `<agent>/<name>` when the
-call declared a name beside the token, and `HUB_AGENT_ID`
-(`local` when unset) for a standalone `agent-hub mcp` that opens the data
-directory itself. Moving from standalone stdio to the proxy therefore keeps
-your sessions only when the two are the same string. When they are not, your
-earlier work is still there under the old owner: list it with `session_list`
-and pick it up with `from: {agent: "local", name: "..."}`. The same holds when
-you start sending a name beside the token: earlier sessions stay with the
-token's agent, and `from: {agent: "<token agent>", name: "..."}` picks one up.
-
-Leave the note before you stop: `session_end(session_id, handoff: "...")` keeps
-up to 4096 characters on the session and in the human's feed, and whoever picks
-the session up gets it back in `pickup.handoff`. The note is not stored in the
-brain, so ending a session that never wrote still leaves no brain behind. Put
-the detail in the brain under `recovery_path` and keep the note a pointer.
+`from` is refused when the source was pruned (`session_pruned`; the human can
+restore it with undo, the hub will not), or when it is in another project
+(`invalid_argument`: a brain is project-scoped).
 
 ## Which store to write to
 
 The four brain tools reach two stores, and `store` says which:
 
 - `store: "session"` is this session's working state: notes to yourself,
-  scratch files, a recovery handoff. It is pruned with the session, and no
-  other session sees it.
+  scratch files, a recovery handoff. It is pruned with the session, and only the
+  session's participants and readers of the project see it.
 - `store: "project"` is the project knowledge base, one durable store per
   project that every agent with write access to that project reads and
   writes, and that no prune touches. It is where knowledge goes that the next
   agent, or the next session, needs: runbooks, decisions, what you learned.
-  `project_id` names the project and defaults to the active session's. It
+  `project_id` names the project and defaults to the session's. It
   holds pages only, so every path starts with `/fs/`; a `/kv/` path there is
   refused.
 
@@ -156,7 +169,7 @@ to the wrong store either loses durable knowledge at the next prune or leaves
 scratch state in the store the whole project reads, and neither shows up as
 an error.
 
-Your own agent space is a project like any other, so
+Your member's personal space is a project like any other, so
 `brain_put(store: "project", project_id: <your personal space>)` is a durable
-store that follows you across projects. Other agents and the human can
+store that follows you across projects. Other members and the human can
 read it; only you can write it.

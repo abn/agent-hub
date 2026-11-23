@@ -16,7 +16,7 @@ same engine.
 ```mermaid
 flowchart LR
   subgraph store["Hub store, one database"]
-    tables["projects, events, artifacts, artifact_versions, comments, inbox, cursors, sessions, agents, tokens, grants, search_docs"]
+    tables["projects, events, artifacts, artifact_versions, comments, inbox, cursors, sessions, participants, members, tokens, grants, search_docs"]
   end
   subgraph files["AgentFS files, the same engine"]
     brain["session brain file, per session: key-value, audit log, filesystem"]
@@ -34,21 +34,23 @@ inbox, which is global.
 
 | Table | Holds |
 |---|---|
-| `projects` | Slug id, display name, an optional owning agent (a personal space is a project an agent owns), creation time, confidential status, lifecycle status (`active` or `deleting`), the artifact password policy, reserved retention hints, and a JSON settings column for what comes later. |
-| `events` | The feed: time-ordered, append-only, addressable. Kind, actor, a one-line summary, a JSON payload, an action flag, a thread link for question and answer, and the session the write happened during when one was open. |
-| `artifacts` | Artifact metadata. Title, description, version label, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, the blob path, the creator actor, and the optional session id recording author lineage. |
+| `projects` | Slug id, display name, an optional owning member (a personal space is a project a member owns), creation time, confidential status, lifecycle status (`active` or `deleting`), the artifact password policy, reserved retention hints, and a JSON settings column for what comes later. |
+| `events` | The feed: time-ordered, append-only, addressable. Kind, the author record (below), a one-line summary, a JSON payload, an action flag, a thread link for question and answer, and the session the write happened during when one was open. |
+| `artifacts` | Artifact metadata. Title, description, version label, kind (HTML or markdown), current version, timestamps, the encryption envelope when the artifact is protected, the blob path, the author record, and the optional session id recording author lineage. |
 | `artifact_versions` | One immutable row per artifact version: the same display metadata plus the per-version envelope, size, blob path, and timestamp, so any version stays addressable. |
-| `comments` | Discussion on artifacts: author, body, an optional point or quote anchor with its version, resolution state, and a delete-token hash. |
+| `comments` | Discussion on artifacts: the author record, body, an optional point or quote anchor with its version, resolution state, and a delete-token hash. |
 | `inbox` | The human's global queue, a thin projection over events: status (`unread`, `read`, `action`, `waiting`, `resolved`), assignee, update time, and, when the asking agent set one, a deadline (`expires_at`, an RFC 3339 UTC stamp to the second) and the outcome at it (`on_expiry`: `approve`, `decline` or `close`), indexed on the deadline for the sweep. |
 | `project_feed_cursors` | One row per project: the newest feed event the human has seen there, and when it was recorded. There is one human operator, so the project is the key. |
 | `feed_dismissals` | One row per event the human has dismissed from a project's feed: the event, its project, and when it was dismissed. It is view state, not deletion: the event, its inbox row and its search document stay, and agents still read it. |
-| `agent_feed_cursors` | One row per agent and project: the newest feed event that agent has read there, so `feed_read` with no `since` resumes where the agent stopped without the agent carrying a cursor. |
-| `agent_notify_cursors` | One row per agent and session: the newest resolved item delivered in the notification trailer on a tool result, so each item is delivered once. The empty session is the cursor for items asked outside any session, so two sessions of one agent each keep their own place. A session scope keeps a row only while its session is active. |
-| `notify_subscriptions` | One row per standing subscription: the agent, the event kinds it asked for, an optional project scope, whether it keeps only events that name the agent (`about_self`), the session it is bound to (none for one that serves every session of the agent, removed when that session ends or is pruned), and the newest event it has been told about. The cursor starts at the newest matching event, so nothing before the subscription is replayed. |
-| `sessions` | Session metadata: project, the agent-supplied session name, the agent that owns it, status, the brain file path, timestamps, a soft-delete marker, the handoff note its owner left, and the session it was adopted or forked from. A live name is unique per owner inside a project. State itself lives in the brain file. |
-| `agents` | Agent identity, display name, and the id of the agent's personal space. |
-| `agent_tokens` | Token hashes bound to an agent, with last use and revocation. An agent has one live token at a time; issuing a new one revokes the previous token in the same transaction. |
-| `grants` | An agent and a project: access to a confidential project, with no read or write levels. The [operating model](/architecture/operating-model.md) states who may reach what. |
+| `feed_cursors` | One row per project, member and agent: the newest feed event that participant has read there, so `feed_read` with no `since` resumes where it stopped without carrying a cursor. |
+| `notify_cursors` | One row per member, agent and session: the newest resolved item delivered in the notification trailer on a tool result, so each item is delivered once to each participant. The empty session is the cursor for items asked outside any session. A participant joining a session starts at the session's floor, so a reply posted before its first call still reaches it. |
+| `notify_subscriptions` | One row per standing subscription: the member and agent, the event kinds it asked for, an optional project scope, whether it keeps only events that name the participant (`about_self`), an optional author filter, the session it is bound to (none for one that serves every session of the participant, removed when that session ends or is pruned), and the newest event it has been told about. The cursor starts at the newest matching event, so nothing before the subscription is replayed. |
+| `sessions` | Session metadata: project, the session name, an optional parent for a child session, status, the brain file path, timestamps, a soft-delete marker, the handoff note, who started it, and the session it was forked from. A live name is unique inside a project. State itself lives in the brain file. |
+| `session_participants` | One row per session, member and agent: when it joined, when it was last seen, and when it left. A session is live while a participant that has not left was seen inside the activity window. |
+| `session_aliases` | The ids of sessions the upgrade merged into another, so an old id still resolves. |
+| `members` | Member identity, display name, state (`active` or `pending`), the enrolment context (note, source, agent, operating system, host), and the id of the member's personal space. |
+| `member_tokens` | Token hashes bound to a member, with last use and revocation. A member has one live token at a time; issuing a new one revokes the previous token in the same transaction. |
+| `grants` | A member and a project: access to a confidential project, with no read or write levels. The [operating model](/architecture/operating-model.md) states who may reach what. |
 | `search_docs` | The search corpus: one row per indexed document (feed, artifact, session brain path, or knowledge base page) with a full-text index over title and body. |
 
 The event id is a time-ordered ULID, which makes feed paging and addressable
@@ -69,16 +71,32 @@ answer `options`, so a question needs no table of its own.
 
 An event also names the session it was written during, indexed, so a session
 detail screen counts what the session produced without reading a payload. The
-column is wider than the lifecycle events: an agent's signals, questions and
+column is wider than the lifecycle events: a participant's signals, questions and
 approvals carry it too. Pruning is not wider for it. A prune still removes only
 the session's own lifecycle events, because storage acts on sessions and never
 on feed events or artifacts, and the work a session left in the feed outlives
 the session. Artifacts record the session they were published during, indexed by
 session, linking artifact lineage to the originating session; an update leaves
-that lineage alone, as it leaves `actor` alone. Artifacts also record the
-publishing agent identity (`actor`) derived
-from the authenticated principal, which remains untouched across subsequent
-updates.
+that lineage alone, as it leaves `actor` alone. Artifacts also record
+the publishing author, derived from the authenticated principal, which remains
+untouched across subsequent updates.
+
+### The author record
+
+Every row that a write produces records who wrote it as a typed record, never a
+string to parse. It has four kinds:
+
+| Kind | Holds | Read as |
+|---|---|---|
+| participant | member, agent, and session when there was one | `laptop · claude-code · feat-redesign` |
+| human | nothing | "you" |
+| local | the agent and session, for embedded stdio | the member shown as "local" |
+| legacy | the old label, verbatim | the label, with no parts |
+
+Rows written before the identity change are legacy, or participant where the
+upgrade could place their owner. A separate `origin` marks the hub's own acts, as
+when a question's deadline resolves it. The old actor string stays on the row as
+an opaque key, which is never displayed or parsed.
 
 An inbox status carries two independent things, and the human's read verb
 touches only one of them. `unread` and `read` are the read axis: the human
@@ -130,31 +148,31 @@ backlog the human cannot clear in one gesture. A project created afterwards has
 no cursor, and its first events are new, which is the same rule read forward.
 
 Identity is a first-class table rather than a field on a token, so the server
-sets the `actor` on every event and a request cannot forge another agent. The
+sets the author on every event and a request cannot forge another member. The
 identity model and grants are described in
-[the token is the identity](/adr/0021-the-token-is-the-identity.md). An agent
-holds one token at a time. Multiple live tokens per agent is to be evaluated:
+[the token is the identity](/adr/0021-the-token-is-the-identity.md), now held by
+a member (see [ADR 0039](/adr/0039-members-agents-and-sessions.md)). A member
+holds one token at a time. Multiple live tokens per member is to be evaluated:
 it is not being built and is not refused, but would need tracking per-token
 device or client labels and last-used timestamps.
 
-Identity changes are audited. Creating an agent, issuing or revoking its token,
+Identity changes are audited. Creating a member, issuing or revoking its token,
 and adding or removing a grant each append a `system` event to the affected
 project's feed, in the same transaction as the change, so a change and its
-record cannot diverge. Agent-scoped changes land in the agent's
+record cannot diverge. Member-scoped changes land in the member's
 personal space; a grant lands in the project it opens. The trail is the human's
 to read: a `system` event is left out of the search corpus, and an agent's feed
 read never returns one, whatever kinds it asks for. The admin reads it through
 the project feed route, by kind.
 
-A session's last activity means activity. Every tool call that resolves the
-caller's active session touches it, whether it writes a brain, posts a signal
-or asks the human, coalesced so a busy agent writes the timestamp at most once
-a minute. An agent counts as active while it owns a live session touched inside
+A session's last activity means activity. Every tool call that resolves a live
+session touches it, and joins the caller as a participant, whether it writes a brain, posts a signal
+or asks the human, coalesced so a busy participant writes the timestamp at most once
+a minute. A session is live while a participant that has not left was seen inside
 the active window. The touch is bookkeeping: a store too busy to take it never
-fails the call that triggered it. An agent with two sessions
-counts once, an agent with no session never counts, and a token last used a
-moment ago is not the same thing: `agents.last_seen_at` answers that question
-and is not this one.
+fails the call that triggered it. The app counts live sessions,
+not agents, and a token last used a moment ago is not the same thing:
+`members.last_seen_at` answers that question and is not this one.
 
 Retention is deliberately a per-layer concept. The schema carries
 `created_at`, `last_activity`, a `retention` column, and room for an
@@ -183,30 +201,31 @@ There is one AgentFS file per session. It hosts three things in one file:
   plans, temporary outputs, and handoff documents.
 
 A brain is arbitrary session-scoped state, not a curated subset. Its life is
-session-bound: it belongs to the agent that started the session, survives
-same-session compaction and resume of that name by its owner, can be adopted or
-forked by another agent, and is removed only when the human prunes the session.
+session-bound: it belongs to the session, which belongs to no one participant, survives
+same-session compaction and a resume of that name, can be forked by anyone, and
+is removed only when the human prunes the session.
 Durable knowledge leaves it only by explicit promotion.
 
-A brain is written only by the agent that owns its session, whether through that
-session's active connection or by naming it, and read by anyone who may read
-the session's project. Session end and reassignment are atomic
-guarded transitions in the store; once ended, active leases clear and brain
-mutations under the file lock are refused. The single writer is what keeps one working
-state coherent; the open read is what lets a fleet of agents see what a sibling
-is working from. Reads never create a brain file, so a session that wrote
-nothing leaves nothing on disk, and a pruned session is unreadable from the
-moment it is marked.
+A brain is written by any participant of its session and read by anyone who may
+read the session's project. Writes carry a base: a write against a version that
+changed since the writer read it, or an unbased overwrite of a key another
+participant last wrote, is refused as stale. Every version is kept. A session's
+end is an atomic guarded transition in the store; once ended, brain mutations
+under the file lock are refused, and a prune and an end hold a per-session gate
+exclusively so a write in flight finishes first. The single writer is what keeps
+one working state coherent; the open read is what lets a fleet of agents see
+what a sibling is working from. Reads never create a brain file, so a session
+that wrote nothing leaves nothing on disk, and a pruned session is unreadable
+from the moment it is marked.
 
-Ownership moves two ways, and the hub picks which from the source's state.
-Adopting an ended session moves the owner and nothing else: the id, the file
-and every search row stay as they are. Forking a running one copies the file
-under the source session's write lock through the engine to guarantee snapshot
-consistency, which takes the audit log with it, and writes a second set
-of search rows under the new session id; the source is not told and not
-touched. Either way the lineage is recorded on the row, and it stays recorded
-after the source is pruned, where the surfaces render it as a session that is
-gone rather than repairing it.
+A child session, `<parent>/<task>`, has its own brain and ends and prunes with
+its parent. Forking copies a session's file under the source's write lock
+through the engine to guarantee snapshot consistency, which takes the audit log
+with it, and writes a second set of search rows under the new session id; the
+source is not told and not touched. The lineage is recorded on the row, and it
+stays recorded after the source is pruned, where the surfaces render it as a
+session that is gone rather than repairing it. Lineage recorded under the old
+ownership model stays as history.
 
 The handoff note a session leaves when it ends lives on the session row and in
 the feed event, never in the brain: a session that never wrote must not get a
@@ -230,14 +249,14 @@ removed only when the project is deleted, together with its pages' search rows.
 Pages are indexed as their own corpus family, so a search can ask the shared
 knowledge base a question without every session brain answering first.
 
-Every agent with write access to the project may write every page, which is
+Every member with write access to the project may write every page, which is
 what a shared store means. A write can carry the version it is based on, a
 content hash of the bytes the writer read, and the hub applies it only while
 the stored content still hashes to that value; the comparison and the write
 happen under the same writer lock, so two writers holding one version cannot
-both win. An agent's personal space is a project, so it gets a knowledge base
-like any other: a durable store the agent alone writes, and every agent and the
-human can read.
+both win. A member's personal space is a project, so it gets a knowledge base
+like any other: a durable store the member alone writes, and every other member
+and the human can read.
 
 Every write to a page is one row in the file's own append-only tool call log:
 the operation, the canonical path, the actor the hub authenticated, the time
@@ -253,7 +272,7 @@ by version token, so identical bytes are kept once. The wrapper writes it under
 the writer lock once the page write lands and before its log row, so a refused
 write keeps nothing and a row never names a version the file lacks. A page's
 history is its log rows joined to that table, and a
-revert writes kept bytes back as a new write. Session brains keep no versions.
+revert writes kept bytes back as a new write. Session brains keep every version too.
 The operator forgets a page's history by deleting its kept bytes, all but the
 page's current ones, and recording in `hub_page_forgotten` the newest row it
 was forgotten through, so those rows read as not kept. A knowledge base's size
@@ -265,7 +284,7 @@ routes over it are in
 
 ## Multi-writer stores
 
-Agents write through the wrapper, never the file. The hub process is the single
+Participants write through the wrapper, never the file. The hub process is the single
 writer per file, so it serialises writers with a per-file lock; writers to
 distinct files never block each other.
 The same lock orders the many writers a project knowledge base has by design,

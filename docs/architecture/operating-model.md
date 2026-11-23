@@ -22,12 +22,12 @@ one tenant, the operator, and the agents are theirs.
 
 The boundaries guard against mistakes and bad behaviour inside one household,
 not against a determined adversary or another tenant. A caller that already
-holds a valid token is inside the trust boundary; the token is an identity, and
-the server records it as the actor.
+holds a valid token is inside the trust boundary; the token belongs to a member,
+and the server records the member, the agent and the session on every write.
 
 > [!IMPORTANT]
 > A token is an identity, not a credential that narrows access by itself. A
-> caller that already holds one is trusted to act as its agent, so the
+> caller that already holds one is trusted to act as its member, so the
 > boundaries below are guardrails on that actor, not isolation between actors.
 
 The platform is therefore open by default. There are no accounts, no sign-in,
@@ -38,9 +38,9 @@ deployment does not have.
 
 ## Who may reach a project
 
-- Every agent token reaches **every ordinary project**, to read and to write,
+- Every member token reaches **every ordinary project**, to read and to write,
   and its **own personal space**. Ordinary projects need no grant.
-- An agent may **not write another agent's personal space**.
+- A member may **not write another member's personal space**.
 - A **confidential project requires a grant**. A grant is **access or no
   access**: there are no read and write levels.
 - Global reads are confined to the projects a caller can see, so a search or
@@ -52,9 +52,9 @@ in [REST API](/reference/rest-api.md).
 
 ## Creating, and locking
 
-- Any agent may **create projects**, including confidential ones. Confidential
+- Any member may **create projects**, including confidential ones. Confidential
   builds a grant gate, not a creation gate.
-- An agent may **make a project confidential**. Only the operator, through the
+- A member may **make a project confidential**. Only the operator, through the
   admin token, may **make it public again**. The asymmetry is the guardrail: an
   agent can tighten, only the human can loosen.
 - Project ids are **not secret**. Because creation is open, creating an id that
@@ -66,7 +66,7 @@ Some operations belong to the operator alone, not because agents cannot be
 trusted with projects, but because they are the operator's controls:
 
 - prune and its undo, and forgetting a knowledge base page's history;
-- creating and revoking agent tokens;
+- creating and revoking member tokens;
 - managing grants;
 - making a confidential project public;
 - deleting a project;
@@ -77,26 +77,34 @@ Everything else an agent needs is available to it under the rules above.
 ## The two surfaces
 
 The **REST API is the operator's control surface**, and it accepts the admin
-token. The **MCP server is the agent surface**, and it accepts agent tokens. A
+token. The **MCP server is the agent surface**, and it accepts member tokens. A
 route being admin-only is about which surface owns it, not a claim that agents
 may not touch projects; agents reach projects over MCP, and they may create and
 list the ones they can see over REST as well.
 
-## Declared names
+## Members, agents and sessions
 
-Several agents may share one token. Each can send a name in `X-Agent-Id`, and
-the hub then attributes its work to `<token agent>/<name>`. The name never
-decides what a caller may reach: the token's agent does, so a name grants
-nothing and switches no agent. The admin token ignores it. See
-[the decision](/adr/0036-declared-names-beside-a-token.md).
+A **member** is what holds a token and was approved to join, usually one
+machine. The **agent** is the program doing the work, such as `claude-code` or
+`opencode`; the hub reads it from the client's handshake, and a header can
+override it. A **session** is a shared space of work that any participant joins
+by name. Several agents share one member, and every write records its member,
+its agent and its session as three fields.
+
+None of the three grants anything. What a caller reaches is decided by its
+member's token: the agent name and the session select nothing and switch no
+member. The admin token ignores them. A second member on one machine is for work
+that must not share a token, such as a confidential project. See
+[the decision](/adr/0039-members-agents-and-sessions.md).
 
 ## Loopback
 
-On a loopback bind the hub may resolve a principal without a token: an agent
-declares its identity through `X-Agent-Id`, and the control surface resolves
-to the admin when no admin token is configured. Every process on that machine
-is already the operator, so nothing crosses a trust boundary. Any bind past
-loopback requires a token for every caller.
+On a loopback bind the hub may resolve a principal without a token: the caller
+is the member `loopback`, and the agent comes from its handshake. The control
+surface resolves to the admin when no admin token is configured. Every process
+on that machine is already the operator, so nothing crosses a trust boundary.
+Any bind past loopback requires a token for every caller, or an approved
+enrolment.
 
 ## Artifacts and links
 

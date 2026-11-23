@@ -1,14 +1,14 @@
 ---
 type: Guide
 title: Sessions and brains
-description: See who is working, read a session brain, and reassign or end a session
+description: See who is working, read a session brain, and end a session
 tags: [user, sessions]
 status: stable
 ---
 
 # Sessions and brains
 
-A session is one agent's run inside one project. Its brain is the working state
+A session is a shared space of work inside one project. Its brain is the working state
 the hub keeps for it on the node, one file per session, so the agent's context
 survives a compaction, a restart, or a move to another machine. This page is
 what you see and do with sessions from the app; the agent's side is
@@ -16,35 +16,37 @@ what you see and do with sessions from the app; the agent's side is
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../assets/screens/sessions-desktop-dark.png">
-  <img src="../../assets/screens/sessions-desktop-light.png" alt="The sessions index, grouped by project, with owners and handoffs.">
+  <img src="../../assets/screens/sessions-desktop-light.png" alt="The sessions index, grouped by project, with participants and handoffs.">
 </picture>
 
 ## The sessions list
 
 Sessions are grouped into **Active** and **Ended**, with counts. The ended
 header carries **Prune all** with the bytes it would free. Each row carries the
-session id and its working name, a state dot with the status in words, the
-owner, a relative time, and the brain size. The whole row is pressable.
+session id and its working name, a state dot with the status in words, who
+took part, a relative time, and the brain size. A subagent's `<parent>/<task>`
+session shows folded under its parent. The whole row is pressable.
 
-A session belongs to the agent that started it, and a name is unique per owner
-inside a project: two agents that both pick `nightly` get two sessions and two
-brains, and each resumes its own.
+A session belongs to no one, and a name is unique inside a project: two agents
+that both pick `nightly` share one session and one brain, each as its own
+participant. Every write shows who wrote it, as the session with the agent and
+the member beside it.
 
 ## The session detail
 
 Opening a session shows:
 
-- the **anchor card** above the brain tree: the owner's last phase boundary. It
+- the **anchor card** above the brain tree: the last phase boundary a participant left. It
   carries the phase, the summary, the next steps, the sources it rests on, and
   the latest score. A found source opens the event in the project's feed; a
   source that no longer resolves keeps its id and reads as missing. A session
   with no anchor says so in one line and offers no score control;
-- the **handoff note** its last owner left when it ended the session, shown in
+- the **handoff note** a participant left when it ended the session, shown in
   the header rather than behind a disclosure;
 - the **brain tree**, its `kv/` keys and `fs/` files, expandable, with long file
   paths kept on one line;
-- the **lineage**: whether the work was adopted or forked, from which session
-  and agent, and whether that source has since been pruned.
+- the **lineage**: whether the session was forked, from which session, and whether
+  that source has since been pruned. A session merged on upgrade says so.
 
 The stage control row carries a **Resume** and a **Brain** link pair. Resume
 lists the events after the anchor, oldest first, each one opening the event in
@@ -70,20 +72,16 @@ appended to the feed as a `score` event, and it never changes the run or the
 anchor. Agents read scores and cannot write one. A refused score stays in the
 dialog with the hub's reason.
 
-## Ending, pruning, and reassigning
+## Ending and pruning
 
 - **End session** marks it ended and takes an optional handoff note, the short
-  pointer to the detail the agent left in its brain. Only the owner, or you, may
-  end a session.
+  pointer to the detail the agent left in its brain. Any participant, or you, may
+  end a session, and it ends for every participant and for its children.
 - **Prune session** removes an ended session's brain. It is confirmed, then
   reversible from the toast for 30 seconds. A project's knowledge base is never
   touched. Pruning a single session stays on this screen;
   [Storage and pruning](/guides/human/storage-and-prune.md) covers the batch
   prune.
-- **Reassign** moves a running session to another agent, from a menu of the
-  hub's agents, behind a confirmation that names the agent. It is your move for
-  an agent that is not coming back; agents pick work up themselves and ask
-  nobody.
 
 > [!NOTE]
 > A brain is session-bound. Durable knowledge leaves it only by explicit
@@ -92,7 +90,7 @@ dialog with the hub's reason.
 
 ## You should now see
 
-Every session in the project, active or ended, with its owner, its handoff note,
+Every session in the project, active or ended, with its participants, its handoff note,
 and its lineage, and the brain behind any one of them readable in place. A
 session that anchored shows its anchor card and the events after it, and you can
 score the run from the card.

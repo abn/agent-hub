@@ -13,7 +13,7 @@ artifact_update(artifact_id, content, envelope?, base_version?, force?, label?, 
 artifact_draft(artifact_id, content, envelope?)
 artifact_get(artifact_id, version?)
 artifact_versions(artifact_id)
-artifact_list(project_id, session?)
+artifact_list(project_id, session_id?)
 artifact_delete(artifact_id)
 comment_post(artifact_id, body, anchor?, anchor_version?, idempotency_key?)
 comment_list(artifact_id)

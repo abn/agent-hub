@@ -46,22 +46,29 @@ shows the agent, and exit `2` is what wakes an idle session. See
 
 ### Events
 
-| Event | Meaning | Claude Code | Antigravity |
-|---|---|---|---|
-| `session-start` | a session begins, resumes, or restarts after compaction | `SessionStart` | no event |
-| `prompt` | the next model call | `UserPromptSubmit` | `PreInvocation` |
-| `pre-compact` | the harness is about to compact | `PreCompact` | no event |
-| `subagent-start` | a subagent begins | `SubagentStart` | no event |
-| `session-end` | the session closes | `SessionEnd` | no event |
+| Event | Meaning | Claude Code | Antigravity | OpenCode (in process) |
+|---|---|---|---|---|
+| `session-start` | a session begins, resumes, or restarts after compaction | `SessionStart` | no event | `session.created`, and the first `context` call of a session it has not met |
+| `prompt` | the next model call | `UserPromptSubmit` | `PreInvocation` | the `prompt` hook |
+| `pre-compact` | the harness is about to compact | `PreCompact` | no event | the `compaction` hook; `session.compaction.ended` writes the block back |
+| `pre-tool-use` | a hub tool is about to run | `PreToolUse`, for tools matching `mcp__.*agent-hub.*__.*` | no event | the `execute.before` tool hook |
+| `subagent-start` | a subagent begins | `SubagentStart` | no event | `session.created` for a session with a parent |
+| `subagent-stop` | a subagent ends | `SubagentStop` | no event | `session.deleted` for a session with a parent |
+| `session-end` | the session closes | `SessionEnd` | no event | `session.deleted` |
+
+Claude Code also runs `agent-hub watch` from its `Stop` hook, with
+`asyncRewake`, to wake an idle session. See
+[Waking an idle agent](#waking-an-idle-agent).
 
 An event a harness never raises is still accepted, and answers with the no-op.
 
-The Antigravity plugin sets the hook `timeout` in its `hooks.json` to `20000`.
-The unit was not measured. Read as milliseconds it is 20 seconds, above the
-hook's own 10 second deadline plus 1 second grace. Read as seconds it is never
-reached, because the hook exits first. A value of `10` would kill every hook
-after 10 milliseconds in the first reading, and race the hook's own deadline in
-the second.
+Time limits. The Claude Code manifest sets `timeout` to 5 seconds on
+`PreToolUse`, `SubagentStop` and `SessionEnd`, and to 3600 seconds on the
+`Stop` watcher; the other Claude hooks set none. Those three short hooks run
+under a 3 second deadline of their own, so they end before the harness cuts
+them off. The Antigravity manifest sets the `PreInvocation` hook `timeout` to
+`20`, in seconds. The deadlines each event holds itself to are under
+[What each event does](#what-each-event-does).
 
 Antigravity has no session-start event. Its startup is a `prompt` with no local
 state for the conversation, or with `invocation_num` 0, and it gets the full
@@ -84,6 +91,8 @@ Each harness's stdin JSON is mapped to one neutral input before any logic runs.
 | `prompt` | the user's prompt text, on `prompt` |
 | `invocation_num` | the model-call counter, where the harness supplies one |
 | `agent_type` | the subagent's type, on `subagent-start` |
+| `agent_id` | the harness's id for a subagent, on `subagent-start`, `subagent-stop` and on `pre-tool-use` inside a subagent; absent for the main thread |
+| `tool_name`, `tool_input` | the tool and its arguments, on `pre-tool-use` |
 
 The neutral output is two optional strings.
 
@@ -99,8 +108,9 @@ The neutral output is two optional strings.
 | Claude `session-start` | `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":<context>}}` |
 | Claude `prompt` | the same object with `"hookEventName":"UserPromptSubmit"` |
 | Claude `subagent-start` | the same object with `"hookEventName":"SubagentStart"` |
+| Claude `pre-tool-use` | `{"hookSpecificOutput":{"hookEventName":"PreToolUse","updatedInput":<input plus session>}}`, or `{}` when nothing is injected. It never carries a `permissionDecision`, so the call's permission outcome is the one the harness would have reached |
 | Claude `pre-compact` | `compaction_instructions` as plain stdout, no JSON |
-| Claude `session-end` | `{}` |
+| Claude `subagent-stop`, `session-end` | `{}` |
 | Antigravity `prompt` | `{"injectSteps":[{"ephemeralMessage":<context>}]}` |
 | Antigravity, any other event | `{}` |
 
@@ -112,41 +122,30 @@ carrying an empty string.
 Settings resolve in this order, and the first non-empty value wins. An empty
 value counts as unset.
 
-1. for `--harness claude`, `CLAUDE_PLUGIN_OPTION_HUB_URL`, `CLAUDE_PLUGIN_OPTION_HUB_TOKEN`
-   and `CLAUDE_PLUGIN_OPTION_AGENT_NAME`
-2. `HUB_*` environment variables
-3. the client settings in [Configuration](/reference/configuration.md)
+Hooks resolve the hub, the member and the token with the same resolver as
+`agent-hub mcp` and `agent-hub token`, so a hook and the model's MCP connection
+never act as different members. [Configuration](/reference/configuration.md)
+has the rule. In short, in order:
 
-The plugin options come first because they are what the Claude plugin's own MCP
-entry sends. A `HUB_*` variable left in the shell that launched Claude Code
-therefore cannot move the hooks to another hub, token or agent name than the
-model's tools use. `HUB_*` applies only where the option is empty.
+1. for `--harness claude`, the hub URL pinned by the plugin
+   (`CLAUDE_PLUGIN_OPTION_HUB_URL`)
+2. `HUB_URL`, `HUB_MEMBER` and `HUB_TOKEN`, the last only with its own `HUB_URL`
+3. the project's `.agent-hub.toml` (`url`, `member`), whose pairing counts only
+   once the user trusts it
+4. the client settings and `[[credential]]` entries in `config.toml`
 
-The url and the token come from the same source, the first one that has a url.
-Each `config.toml` is a source of its own, in the order of the client settings,
-and none of them is merged with another. A token from a lower source is never
-sent to the url of a higher one, so a plugin option cannot send a configured
-user's token to another host. Both pieces are needed together: a source with a
-url and no token reaches the hub with none. A config file that cannot be read
-or parsed is skipped, so it never blocks a configuration that is complete
-without it; it is reported only when no source has a url. A config file is read
-only when it is a regular file, so a FIFO in its place cannot hold the hook.
+A source that names a different URL than the pinned one adds the context line
+`.agent-hub.toml names <url2>; the plugin is set to <url1>`, and a token is
+never sent to a URL other than the one it was stored for. When no token resolves,
+the hooks still run and the block says why: no token, a pending token, a token
+the hub refused, an untrusted pairing, several members and none selected, or an
+unreachable hub. The block's header line shows the participant the hub saw.
 
-The agent name for `--harness claude` is `CLAUDE_PLUGIN_OPTION_AGENT_NAME`,
-then `HUB_AGENT_ID`, then `agent_id` in the client settings, and defaults to
-`claude`. For `--harness antigravity` it is `HUB_AGENT_ID` and otherwise
-`antigravity`; `agent_id` in the client settings is not read, because the
-plugin's MCP entry fixes the name to `antigravity` and the hooks must act as the
-same agent. The name is sent as `X-Agent-Id`, so the hub records the work as
-`<token agent>/<name>`. A name the hub would refuse beside a token is left off.
-
-A session the hooks start belongs to the agent that started it, so the hooks and
-the model's MCP connection have to share one name, or answers to the model's
-questions never reach the hook's watcher and prompts. When the name the hooks
-resolved differs from the one the harness's MCP connection uses, the session
-block carries one line after the header:
-`Note: the hooks run as agent name <name>, this harness's MCP connection as <name>.`
-It appears when `HUB_AGENT_ID` overrides the Antigravity name.
+The agent is the program, so the hooks send `X-Agent-Id: claude-code` for
+`--harness claude` and `antigravity` for `--harness antigravity`, matching what
+those clients name themselves in their handshake. `HUB_AGENT_ID` overrides it.
+Hooks no longer act under a name of their own beside the token, so there is no
+note about a differing name.
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -163,10 +162,10 @@ The first rule that yields a project wins.
 | Step | Source | Notes |
 |---|---|---|
 | 1 | `HUB_PROJECT` | used as given when it matches `[A-Za-z0-9_-]+` and is at most 64 characters |
-| 2 | the `.agent-hub` file at the git top level | first line, trimmed; used as given when it matches `[A-Za-z0-9_-]+` and is at most 64 characters; an empty file is skipped; ids are not secret |
+| 2 | the `.agent-hub.toml` file at the git top level | its `project` key, used as given when it matches `[A-Za-z0-9_-]+` and is at most 64 characters; a file with no `project` is skipped; ids are not secret. A `token` key is an error |
 | 3 | the repository name of the git `origin` URL | only if a project with that id exists |
 | 4 | the name of the git top-level directory | only if a project with that id exists |
-| 5 | the agent's personal project | plus one context line: ``no project matched; write `.agent-hub` to pin one`` |
+| 5 | the member's personal project | plus one context line: ``no project matched; write `.agent-hub.toml` to pin one`` |
 
 Outside a git repository steps 2 to 4 are skipped and the personal project is
 used; the working directory never stands in for the top level. Nothing is
@@ -177,7 +176,7 @@ Explicit values are never slugged. An explicit value that does not match
 the context lines gain
 `ignored <source> "<value>": not [A-Za-z0-9_-]{1,64}`, with the value flattened
 as a title is and cut to 64 characters, `...` included. `<source>` is
-`HUB_PROJECT`, `.agent-hub` or
+`HUB_PROJECT`, `.agent-hub.toml` or
 `HUB_SESSION`. Context lines are joined with a newline in the order project
 rejections, the personal project line, session rejection.
 
@@ -201,24 +200,31 @@ values, not bytes or UTF-16 units.
 |---|---|---|
 | 1 | `HUB_SESSION` | the value as given, when it matches `[A-Za-z0-9_-]+` and is at most 64 characters |
 | 2 | the git branch | the branch slug, unless it is `main`, `master`, detached, or empty after slugging |
-| 3 | the harness session | `<harness>-<short id>` |
+| 3 | the linked worktree | the slug of the worktree's directory name |
+| 4 | the day | `<agent>-<YYYY-MM-DD>`, the same name `whoami` suggests |
 
-The short id is the first 8 characters of `harness_session_id` after every
-character outside `[A-Za-z0-9_-]` is removed. When fewer than 8 characters
-remain, it is the first 8 hexadecimal characters of the SHA-256 of the original
-id, taken over its UTF-8 bytes.
+A leftover `.agent-hub` file is ignored, and the context line says the release
+reads `.agent-hub.toml`.
+
+A subagent's session is named `<parent>/<type>-<id8>`: the parent's session name, a
+`/`, the subagent's type slugged to 24 characters, and the first 8 letters and
+digits of the harness's id for it. The hub decides collisions: the hook starts a
+new child with `session_start(exclusive: true)`, and on `session_name_taken` tries
+`-2` to `-9`, then the type with the whole slugged child id. A child id the hook
+state already maps resumes its own name without `exclusive`.
 
 Session names always match `[A-Za-z0-9_-]{1,64}`. A branch name with a slash, such as
 `feat/login-flow`, becomes `feat-login-flow`. Branch naming gives one brain per
-line of work, so a restart or a new instance on the branch resumes it, while
-`main` and detached checkouts get a brain per conversation instead of one pile.
+line of work, so a restart or a new instance on the branch joins it, while
+`main` and detached checkouts get a session per worktree or per day instead of one
+pile. Every instance that resolves the same name is one participant of one session.
 
 ## Local state
 
 Per-session state lives under `$XDG_STATE_HOME/agent-hub/hooks/<harness>/<harness_session_id>.json`,
 with `$XDG_STATE_HOME` defaulting to `~/.local/state`. It is never in the system
 temporary directory. The file records the resolved project and session names,
-the hub session id, the actor, the prompt count, the time of the last peek
+the hub session id, the member and agent, the child session each subagent id maps to, the prompt count, the time of the last peek
 (`last_peek_ms`), the time of the last wake (`last_wake_ms`) and the time of the
 last start or configuration that failed (`start_failed_ms`). Times are epoch
 milliseconds. The wake cooldown reads `last_wake_ms`, so it holds across watcher
@@ -248,18 +254,28 @@ never touched.
 | `session-start` | `whoami`, the project list (only when the project is not pinned and the directory is a git repository), `session_brief`, `session_start`, `brain_get` of the knowledge base index, `notify_subscribe` for `comment,page` with `about_self` bound to the session (an upsert), then one `notify_wait(0)` for the session. All on one connection, with the items every result reported as pending collected | the `agent-hub` block |
 | `prompt` | one `GET /api/v1/me/pending` for the session. Only when it reports items, a connection and `notify_wait(0, session)` | `Pending:` lines, or the no-op when nothing waits |
 | `pre-compact` | `brain_put` of `/kv/harness/precompact` in the session store | the compaction instructions |
-| `subagent-start` | none | the instruction not to start a session |
-| `session-end` | the state is removed first, which stops the session's watcher, then `session_end`, unless another live instance shares the hub session | the no-op |
+| `pre-tool-use` | none. It reads the state file only, with no network. If `tool_input.session` is absent or null, it adds `session: {project_id, name}`: the child session for an `agent_id` the state maps, otherwise the parent's. A subagent with no confirmed child is left alone, never put under the parent's. It never touches a `session_start` call | `updatedInput` only, or the no-op |
+| `subagent-start` | `session_start` of the child with `exclusive: true` (steps in Session naming), mapping `agent_id` to the child | context telling the subagent its session and that its hub calls carry it |
+| `subagent-stop` | `session_leave` of the child. The child's mapping is dropped only once the hub has taken the leave | the no-op |
+| `session-end` | the state is removed first, which stops the session's watcher, then `session_leave` of the parent session and of any subagent that never stopped. It never calls `session_end` | the no-op |
 
-Two instances of a harness on one branch share one hub session. `session-end`
-therefore skips `session_end` when another state file of the same harness names
-the same hub session id and was written within the last 24 hours: that instance
-still uses the session, and ending it would delete its subscriptions. A file
-older than that is a crashed instance's leftover and does not count. The last
-instance to end closes the session. A prompt whose peek the hub refuses because
-the session has ended, which another client of the session may have done, clears
-the stored hub session id and starts the session again, as a prompt on a
-conversation with none does, and so is held to the same once-a-minute limit.
+Two instances of a harness on one branch are one participant of one session, so
+`session-end` leaves and the other instance goes on: the participant stays live
+while any instance keeps calling, and the next call by either joins again. Ending
+a session is a decision for the participants and the human, never the hook's. A
+prompt whose peek the hub refuses because the session has ended, which another
+participant may have done, clears the stored hub session id and starts the
+session again, as a prompt on a conversation with none does, and so is held to the
+same once-a-minute limit.
+
+A session is left, never ended. A leave the hub did not take is an owed leave:
+it is recorded before it is tried, in a plugin state file beside the session
+states and never with a token, and it is dropped only when the hub has taken it.
+Any later hook other than `pre-tool-use` retries the leaves that are due, before
+its own event runs: at most once every 5 seconds for each leave, within a 2
+second budget, and 5 tries in all, after which the leave is given up. A hub that
+does not answer ends the pass, so a down hub costs one wait. The OpenCode plugin
+keeps the same record in its own state and retries on a later prompt.
 
 A prompt with nothing pending makes exactly one request. A prompt on a session
 that has no hub session id, because its start failed or never ran, starts the
@@ -282,12 +298,13 @@ prints the instructions.
 
 Every hub call has a 5 second budget, and a call while a session starts has 10.
 Each invocation also has one absolute deadline that no call, open or close
-outlasts: 15 seconds for `session-start` and 10 for every other event. A start
+outlasts: 15 seconds for `session-start`, 3 for `pre-tool-use`, `subagent-stop`
+and `session-end`, and 10 for every other event. A start
 renders what it has when the deadline comes, unless the session itself was not
 started, which fails it. Git runs as a child with its own 4 second share of the
 start, and one that overruns is killed and reaped. Its output is drained by a
 reader that starts with the child, and the wait for that reader also ends at the
-deadline, so a process that git leaves holding its pipe cannot hold the hook. The `.agent-hub` file is read only when it
+deadline, so a process that git leaves holding its pipe cannot hold the hook. The `.agent-hub.toml` file is read only when it
 is a regular file, opened without waiting, and only its first 4 KiB.
 
 Stdin is read until it closes, until what has arrived is one complete JSON
@@ -306,15 +323,15 @@ characters, counted as Unicode scalar values.
 Everything in the block that came from the hub is data, and none of it may end
 the block or start another. Every such field is flattened to one line, the way a
 title is, and any `<agent-hub` or `</agent-hub` in it, in any letter case,
-becomes `<agent_hub` or `</agent_hub`. The fields are the project, session
-and actor names, the session id, the anchor phase and age, and every brief,
+becomes `<agent_hub` or `</agent_hub`. The fields are the project, session,
+member and agent names, the session id, the anchor phase and age, and every brief,
 anchor, handoff, knowledge base and pending line. A knowledge base line
 therefore loses its indentation.
 
 ```text
 <agent-hub>
-project agent-hub | session feat-login-flow (s_01J8) | you are dev/claude
-Bind your hub connection now: session_start(project_id: "agent-hub", session_name: "feat-login-flow").
+project agent-hub | session feat-login-flow (s_01J8) | you are laptop · claude-code
+Pass session: {"project_id": "agent-hub", "name": "feat-login-flow"} on hub calls (the plugin adds it).
 Do not call session_brief; this block is the brief.
 Since your last look: 3 answers, 2 comments on your artifacts, 1 page changed.
 Last anchor (phase "plugins design", 2h ago):
@@ -330,7 +347,7 @@ Pending:
 
 | Part | Rule |
 |---|---|
-| Header | a header line, any context lines, then the bind line and the `Do not call` line; the session id and its parentheses are omitted when it is not yet known; names print as resolved, never cut |
+| Header | a header line, any context lines, then the bind line (`Pass session: ... on hub calls (the plugin adds it).` where the plugin rewrites calls, `... on every hub call.` on Antigravity) and the `Do not call` line; the session id and its parentheses are omitted when it is not yet known; names print as resolved, never cut |
 | Context lines | the lines project and session resolution produced (`ignored ...`, `no project matched ...`), directly after the header line and before the bind line, in resolution order; never removed by the cap |
 | Brief | the first 12 lines supplied |
 | Anchor | one `Last anchor (phase "<phase>", <age>):` line, then the first 10 lines supplied |
@@ -363,7 +380,7 @@ title is cut to 120 characters after that, ending in `...` when cut.
 A notice may wake an idle agent only when `HUB_WAKE` allows it. Each item the
 hub returns from a peek or a trailer carries `direct`, computed by the server:
 true for an attention item, meaning an answer or decision on the caller's own
-question or approval, or when the payload audience contains the caller's actor.
+question or approval, or when the payload audience contains the caller's session or participant.
 Clients never compute it.
 
 | `HUB_WAKE` | Wakes on |

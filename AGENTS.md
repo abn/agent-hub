@@ -18,7 +18,7 @@ any access rule.
 ## Invariants
 
 - **Open by default; boundaries guard against mistakes, not tenants.** One
-  operator, their agents, one node. Every agent token reads and writes every
+  operator, their agents, one node. Every member token reads and writes every
   ordinary project and its own personal space. A confidential project needs a
   grant, and a grant is access or no access, with no read or write levels. The
   admin boundary is privilege, not use: prune and undo, token and grant
@@ -39,15 +39,18 @@ any access rule.
   agent with project write. Agents never touch a file directly: they speak
   MCP, and the wrapper is the single writer per file.
 - **Embedded stdio is supported with isolation.** Embedded stdio mode runs
-  standalone against the local data directory as the local admin when no
-  `HUB_URL` is configured. Two processes must never quietly share one store:
+  standalone against the local data directory as the local admin when
+  `agent-hub mcp --embedded` is passed. Two processes must never quietly share one store:
   running embedded stdio against a data directory that a serving hub already
-  holds fails at startup, and callers reach the running hub through the proxy
-  instead. Embedded mode is for local administrative operations and isolated
-  tool harnesses, not concurrent access to an active hub store.
-- **Session life is session-bound.** A session brain belongs to the agent that
-  started it. It survives same-session compaction and resume of the same named
-  session by its owner, can be adopted or forked by another agent, and is
+  holds fails at startup, and callers reach the running hub through
+  `agent-hub mcp`, which proxies by default. With no hub configured it exits
+  rather than opening a store. Embedded mode is for local administrative
+  operations and isolated tool harnesses, not concurrent access to an active hub
+  store.
+- **Session life is session-bound.** A session brain belongs to the session,
+  which belongs to no one: any participant joins it by name, and every write
+  records its member, agent and session. It survives same-session compaction and
+  a resume of the same named session, can be forked by another agent, and is
   garbage-collected on prune. The project knowledge base is outside session
   life: prune never touches it. Durable knowledge leaves a session brain only
   by explicit promotion to a feed event, an artifact, or the project knowledge

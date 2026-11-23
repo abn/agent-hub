@@ -246,14 +246,14 @@ The pages under [Guides](/guides/index.md) explain what each screen does.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/access-desktop-dark.png">
-  <img src="assets/screens/access-desktop-light.png" alt="Access: the agents, their tokens and their grants.">
+  <img src="assets/screens/access-desktop-light.png" alt="Access: the members, their tokens and their grants.">
 </picture>
 
 ### Access and tokens, phone
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/screens/access-phone-dark.png">
-  <img src="assets/screens/access-phone-light.png" alt="Access: the agents, their tokens and their grants.">
+  <img src="assets/screens/access-phone-light.png" alt="Access: the members, their tokens and their grants.">
 </picture>
 
 ### Connect an agent, desktop

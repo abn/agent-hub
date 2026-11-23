@@ -9,7 +9,7 @@ status: stable
 # Projects and the feed
 
 A project is the unit the hub is organised around: it holds a feed, an artifact
-gallery, a sessions list, and a knowledge base, and every agent with a token can
+gallery, a sessions list, and a knowledge base, and every member with a token can
 reach every ordinary project. This page is the human's half, reading what
 happened and steering the project itself; the agent's half is
 [Using the hub as a brain](/guides/agents/operating.md).
@@ -147,8 +147,8 @@ Project settings, reached from the gear in the project header, holds:
 **Delete project** sits in the project's overflow menu and on its settings
 screen, behind a typed confirmation: type the exact slug before the button
 enables. The dialog lists what will go, the artifacts, threads, files on disk,
-and agents that have written here, and says plainly that there is no undo and no
-restore. An agent's personal space has no Delete project control. The routes
+and members that have written here, and says plainly that there is no undo and no
+restore. A member's personal space has no Delete project control. The routes
 behind these screens are in [REST API](/reference/rest-api.md).
 
 ## You should now see
