@@ -401,7 +401,7 @@ export function readConfigFile(path, readFile = (p) => readFileSync(p, "utf8")) 
 // serialised through <target>.lock.break so a stale decision can never remove a
 // lock another process has taken since.
 
-const BREAK_STALE_MS = 10_000;
+const GUARD_STALE_MS = 60_000;
 
 const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
@@ -455,6 +455,20 @@ function createPrivate(path, text) {
   }
 }
 
+// True when the break guard's owner is provably gone: this host and the pid is
+// dead, another host past the stale age, or no owner file and an old directory
+// (a crash before the write).
+function guardGone(gate, { host, now, isAlive }) {
+  const owner = readOwner(gate);
+  try {
+    if (!owner) return now() - statSync(gate).mtimeMs > GUARD_STALE_MS;
+  } catch {
+    return true;
+  }
+  if (owner.host === host) return !isAlive(owner.pid);
+  return now() - owner.epoch > GUARD_STALE_MS;
+}
+
 // Breaks a stale lock. Only the holder of <dir>.break may rename or remove
 // <dir>, and it decides staleness again once it holds it. True when the lock is
 // gone and the caller may try to take it.
@@ -463,23 +477,24 @@ function tryBreak(dir, ctx) {
   if (state === "gone") return true;
   if (state === "held") return false;
   const gate = `${dir}.break`;
+  const mine = `${ctx.pid} ${ctx.host} ${ctx.now()}`;
   const take = () => {
     try {
       mkdirSync(gate);
-      return true;
     } catch (error) {
       if (error.code === "EEXIST") return false;
       throw error;
     }
+    try {
+      createPrivate(`${gate}/owner`, `${mine}\n`);
+    } catch (error) {
+      rmSync(gate, { recursive: true, force: true });
+      throw error;
+    }
+    return true;
   };
   if (!take()) {
-    let age = 0;
-    try {
-      age = ctx.now() - statSync(gate).mtimeMs;
-    } catch {
-      // released meanwhile: try once more below
-    }
-    if (age <= BREAK_STALE_MS) return false;
+    if (!guardGone(gate, ctx)) return false;
     rmSync(gate, { recursive: true, force: true });
     if (!take()) return false;
   }
@@ -487,6 +502,8 @@ function tryBreak(dir, ctx) {
     const again = lockState(dir, ctx);
     if (again === "gone") return true;
     if (again === "held") return false;
+    // Reaped by another breaker meanwhile: the decision is no longer ours.
+    if (readOwner(gate)?.line !== mine) return false;
     const aside = `${dir}.stale-${ctx.pid}-${randomBytes(4).toString("hex")}`;
     try {
       renameSync(dir, aside);
@@ -496,10 +513,13 @@ function tryBreak(dir, ctx) {
     rmSync(aside, { recursive: true, force: true });
     return true;
   } finally {
-    try {
-      rmdirSync(gate);
-    } catch {
-      // already gone
+    if (readOwner(gate)?.line === mine) {
+      try {
+        unlinkSync(`${gate}/owner`);
+        rmdirSync(gate);
+      } catch {
+        // already gone
+      }
     }
   }
 }
