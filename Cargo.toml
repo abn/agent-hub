@@ -76,10 +76,20 @@ tailnet = ["dep:tailscale"]
 rustix = { version = "1.1.4", features = ["fs", "process", "system"] }
 
 # The volume's free space, the path a transcript handle names, a lock file's
-# identity and a process's start time, which the standard library does not
+# identity and a process's start time, the named event that stops a hub, an
+# elevation check, and the user PATH, which the standard library does not
 # expose on Windows.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_JobObjects",
+  "Win32_System_Registry",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

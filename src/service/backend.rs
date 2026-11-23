@@ -64,10 +64,10 @@ impl Backend for ServiceBackend {
             };
         }
         let kind = self.manager.kind();
-        let name = if kind == "launchd" {
-            "launchd agent"
-        } else {
-            "systemd user service"
+        let name = match kind {
+            "launchd" => "launchd agent",
+            "task" => "scheduled task",
+            _ => "systemd user service",
         };
         let state = match self.manager.state() {
             Ok(state) => state,

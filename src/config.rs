@@ -995,6 +995,46 @@ impl Setting {
     }
 }
 
+/// The user's home directory: `HOME`, and on Windows `USERPROFILE` when `HOME`
+/// is not set (Windows sets only the latter). Elsewhere `USERPROFILE` is never
+/// read.
+pub fn home_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    home_dir_for(env, cfg!(windows))
+}
+
+fn home_dir_for(env: &dyn Fn(&str) -> Option<String>, windows: bool) -> Option<String> {
+    let home = present(env("HOME"));
+    if windows {
+        home.or_else(|| present(env("USERPROFILE")))
+    } else {
+        home
+    }
+}
+
+/// The user config files in the order they are tried. On Windows the first is
+/// `%APPDATA%\agent-hub\config.toml`; `APPDATA` is never read elsewhere.
+fn user_config_candidates(env: &dyn Fn(&str) -> Option<String>, windows: bool) -> Vec<PathBuf> {
+    let mut user_candidates = Vec::new();
+    if windows && let Some(appdata) = present(env("APPDATA")) {
+        user_candidates.push(PathBuf::from(appdata).join("agent-hub").join("config.toml"));
+    }
+    let home = home_dir_for(env, windows);
+    if let Some(xdg) = present(env("XDG_CONFIG_HOME")) {
+        user_candidates.push(PathBuf::from(xdg).join("agent-hub").join("config.toml"));
+    } else if let Some(home) = &home {
+        user_candidates.push(
+            PathBuf::from(home)
+                .join(".config")
+                .join("agent-hub")
+                .join("config.toml"),
+        );
+    }
+    if let Some(home) = home {
+        user_candidates.push(PathBuf::from(home).join(".agent-hub").join("config.toml"));
+    }
+    user_candidates
+}
+
 /// Resolve candidate paths for config files.
 pub fn resolve_paths(
     env: &dyn Fn(&str) -> Option<String>,
@@ -1005,22 +1045,11 @@ pub fn resolve_paths(
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/etc/agent-hub/config.toml"));
 
-    let mut user_candidates = Vec::new();
-    if let Some(xdg) = present(env("XDG_CONFIG_HOME")) {
-        user_candidates.push(PathBuf::from(xdg).join("agent-hub").join("config.toml"));
-    } else if let Some(home) = present(env("HOME")) {
-        user_candidates.push(
-            PathBuf::from(&home)
-                .join(".config")
-                .join("agent-hub")
-                .join("config.toml"),
-        );
-    }
-    if let Some(home) = present(env("HOME")) {
-        user_candidates.push(PathBuf::from(home).join(".agent-hub").join("config.toml"));
-    }
-
-    (hub_config, system_path, user_candidates)
+    (
+        hub_config,
+        system_path,
+        user_config_candidates(env, cfg!(windows)),
+    )
 }
 
 /// Check if migration from old env-style `~/.agent-hub/config` is needed.
@@ -1028,7 +1057,7 @@ pub fn check_and_perform_migration(
     env: &dyn Fn(&str) -> Option<String>,
     user_candidates: &[PathBuf],
 ) {
-    let Some(home) = present(env("HOME")) else {
+    let Some(home) = home_dir(env) else {
         return;
     };
     let old_path = PathBuf::from(&home).join(".agent-hub").join("config");
@@ -1209,7 +1238,7 @@ pub struct ConfigReportRow {
 pub fn generate_config_rows(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<ConfigReportRow>> {
     let loaded = load_layered_configs(env)?;
     let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
-    let home = present(env("HOME"));
+    let home = home_dir(env);
 
     let defs: Vec<(&str, &str, &str, Option<&str>, bool)> = vec![
         ("hub", "bind", "HUB_BIND", Some("127.0.0.1:8080"), false),
@@ -1344,7 +1373,7 @@ pub fn print_config(env: &dyn Fn(&str) -> Option<String>) -> Result<()> {
 /// path the operator actually has.
 pub fn client_config_hint(env: &dyn Fn(&str) -> Option<String>) -> String {
     match user_config_target(env) {
-        Some(path) => format_path_display(&path, present(env("HOME")).as_deref()),
+        Some(path) => format_path_display(&path, home_dir(env).as_deref()),
         None => "config.toml".to_string(),
     }
 }
@@ -1354,7 +1383,7 @@ pub fn print_config_paths(env: &dyn Fn(&str) -> Option<String>) {
     let (hub_config, system_path, user_candidates) = resolve_paths(env);
     check_and_perform_migration(env, &user_candidates);
 
-    let home = present(env("HOME"));
+    let home = home_dir(env);
     let mut rows: Vec<(&str, String, &str)> = Vec::new();
 
     if let Some(path) = hub_config {
@@ -2511,5 +2540,91 @@ mod merge_tests {
             Err(_) => assert_eq!(std::fs::read_to_string(&file).unwrap(), text),
         }
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod windows_path_tests {
+    use super::{home_dir_for, user_config_candidates};
+    use std::path::PathBuf;
+
+    fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |key| {
+            pairs
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| (*value).to_string())
+        }
+    }
+
+    #[test]
+    fn home_falls_back_to_the_user_profile_on_windows_only() {
+        let profile = env(&[("USERPROFILE", "C:\\Users\\u")]);
+        assert_eq!(
+            home_dir_for(&profile, true).as_deref(),
+            Some("C:\\Users\\u")
+        );
+        assert_eq!(home_dir_for(&profile, false), None);
+        let both = env(&[("HOME", "/h"), ("USERPROFILE", "C:\\Users\\u")]);
+        assert_eq!(home_dir_for(&both, true).as_deref(), Some("/h"));
+        let empty = env(&[("HOME", ""), ("USERPROFILE", "C:\\Users\\u")]);
+        assert_eq!(
+            home_dir_for(&empty, true).as_deref(),
+            Some("C:\\Users\\u"),
+            "an empty HOME is unset"
+        );
+    }
+
+    #[test]
+    fn appdata_is_the_first_user_candidate_on_windows() {
+        let vars = env(&[
+            ("APPDATA", "C:\\Users\\u\\AppData\\Roaming"),
+            ("HOME", "/h"),
+        ]);
+        let found = user_config_candidates(&vars, true);
+        assert_eq!(
+            found.first(),
+            Some(
+                &PathBuf::from("C:\\Users\\u\\AppData\\Roaming")
+                    .join("agent-hub")
+                    .join("config.toml")
+            )
+        );
+        assert_eq!(
+            found.len(),
+            3,
+            "APPDATA, ~/.config and ~/.agent-hub: {found:?}"
+        );
+    }
+
+    #[test]
+    fn appdata_is_ignored_off_windows_and_the_unix_list_is_unchanged() {
+        let vars = env(&[("APPDATA", "/ignored"), ("HOME", "/h")]);
+        assert_eq!(
+            user_config_candidates(&vars, false),
+            vec![
+                PathBuf::from("/h/.config/agent-hub/config.toml"),
+                PathBuf::from("/h/.agent-hub/config.toml"),
+            ]
+        );
+        let xdg = env(&[("XDG_CONFIG_HOME", "/x"), ("HOME", "/h")]);
+        assert_eq!(
+            user_config_candidates(&xdg, false),
+            vec![
+                PathBuf::from("/x/agent-hub/config.toml"),
+                PathBuf::from("/h/.agent-hub/config.toml"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_windows_user_with_only_a_profile_gets_the_home_candidates() {
+        let vars = env(&[("USERPROFILE", "C:\\Users\\u")]);
+        let found = user_config_candidates(&vars, true);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(
+            found[1].ends_with(".agent-hub/config.toml")
+                || found[1].ends_with(".agent-hub\\config.toml")
+        );
     }
 }

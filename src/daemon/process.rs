@@ -1,7 +1,8 @@
 //! The plain-process backend: a hub with no service manager behind it.
 //!
 //! `start` spawns `agent-hub serve` detached and waits for it, `stop` signals
-//! the pid the lock holder's record names, and `logs` reads the log file. A service
+//! the pid the lock holder's record names (SIGTERM on Unix, the hub's named stop
+//! event on Windows), and `logs` reads the log file. A service
 //! backend replaces all of it when one is installed (see [`super::backend`]).
 
 use std::io::{Read, Write};
@@ -69,9 +70,6 @@ impl Backend for Process {
     }
 
     fn restart(&self, settings: &LifecycleSettings, options: &StopOptions) -> ExitCode {
-        if let Some(code) = unsupported_here("restart") {
-            return code;
-        }
         let stopped = self.stop(settings, options);
         if stopped != ExitCode::SUCCESS {
             return stopped;
@@ -80,9 +78,6 @@ impl Backend for Process {
     }
 
     fn start(&self, settings: &LifecycleSettings) -> ExitCode {
-        if let Some(code) = unsupported_here("start") {
-            return code;
-        }
         let data_dir = &settings.data_dir;
         if let Some(code) = wait_for_a_holder(data_dir) {
             return code;
@@ -175,9 +170,6 @@ impl Backend for Process {
     }
 
     fn stop(&self, settings: &LifecycleSettings, options: &StopOptions) -> ExitCode {
-        if let Some(code) = unsupported_here("stop") {
-            return code;
-        }
         let data_dir = &settings.data_dir;
         let record = match lock::inspect(data_dir) {
             Ok(Holder::Free) => {
@@ -376,20 +368,6 @@ fn refuse_embedded(record: &Record, verb: &str) -> ExitCode {
         record.pid
     );
     ExitCode::FAILURE
-}
-
-/// Process mode is not available on Windows yet: the verbs need the hub's pid
-/// and a stop signal that reach across a console boundary, which the Windows
-/// service provides. `status` and `logs` do not need either.
-fn unsupported_here(verb: &str) -> Option<ExitCode> {
-    if !cfg!(windows) {
-        return None;
-    }
-    eprintln!(
-        "agent-hub {verb}: running the hub as a plain background process is not supported on \
-         Windows; the Windows service provides start, stop and restart (agent-hub service)"
-    );
-    Some(ExitCode::from(69))
 }
 
 /// Whether the hub the record names answers `/readyz` with a 200.
@@ -638,7 +616,114 @@ fn signal_holder(data_dir: &Path, record: &Record, force: bool) -> Result<(), St
     }
 }
 
-#[cfg(not(unix))]
+/// Signal the process that holds `hub.lock`, after proving it is that process.
+///
+/// A graceful stop sets the process's named stop event (see
+/// [`agent_hub::app::stop_event`]), which drains the hub and folds the store
+/// the way SIGTERM does. `force` ends the process with `TerminateProcess`, no
+/// checkpoint. Either way the process is opened first and its creation time
+/// compared with the record's, then the lock and the record are read again: a
+/// pid that now belongs to another process is refused, never signalled.
+#[cfg(windows)]
+fn signal_holder(data_dir: &Path, record: &Record, force: bool) -> Result<(), String> {
+    use agent_hub::app::stop_event::StopEvent;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, FILETIME};
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
+        TerminateProcess,
+    };
+
+    let access = PROCESS_QUERY_LIMITED_INFORMATION | if force { PROCESS_TERMINATE } else { 0 };
+    // SAFETY: OpenProcess only reads its arguments; a null result is checked.
+    let raw = unsafe { OpenProcess(access, 0, record.pid) };
+    if raw.is_null() {
+        return match std::io::Error::last_os_error().raw_os_error() {
+            // No such process: it is gone, and the lock is released next.
+            Some(code) if code == ERROR_INVALID_PARAMETER as i32 => Ok(()),
+            Some(code) if code == ERROR_ACCESS_DENIED as i32 => Err(format!(
+                "pid {} belongs to another account; nothing was signalled",
+                record.pid
+            )),
+            _ => Err(format!(
+                "could not open pid {}: {}",
+                record.pid,
+                std::io::Error::last_os_error()
+            )),
+        };
+    }
+    // SAFETY: the handle was just returned by OpenProcess and is owned here.
+    let process = unsafe { OwnedHandle::from_raw_handle(raw as _) };
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+    // SAFETY: the handle is open and the four out-pointers are valid.
+    let timed = unsafe {
+        GetProcessTimes(
+            process.as_raw_handle() as _,
+            &mut created,
+            &mut exited,
+            &mut kernel,
+            &mut user,
+        )
+    };
+    let started = (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime);
+    let refused = || {
+        format!(
+            "the record names pid {}, which is no longer the process holding {}; not \
+             signalling it. Try again",
+            record.pid,
+            lock::path_in(data_dir).display()
+        )
+    };
+    if timed == 0 || record.start_ticks != Some(started) {
+        return Err(refused());
+    }
+    let held = lock::is_held(data_dir)
+        .map_err(|err| format!("could not read {}: {err}", data_dir.display()))?;
+    if !held {
+        return Ok(());
+    }
+    let same = lock::last_record(data_dir).is_some_and(|now| {
+        now.pid == record.pid
+            && now.started_at == record.started_at
+            && now.start_ticks == record.start_ticks
+            && now.mode == record.mode
+    });
+    if !same {
+        return Err(refused());
+    }
+    if force {
+        // SAFETY: the handle is open with PROCESS_TERMINATE.
+        if unsafe { TerminateProcess(process.as_raw_handle() as _, 1) } == 0 {
+            return Err(format!(
+                "could not end pid {}: {}",
+                record.pid,
+                std::io::Error::last_os_error()
+            ));
+        }
+        return Ok(());
+    }
+    match StopEvent::open(record.pid) {
+        Ok(Some(event)) => event
+            .signal()
+            .map_err(|err| format!("could not signal pid {}: {err}", record.pid)),
+        Ok(None) => Err(format!(
+            "pid {} has no stop event, so it cannot be asked to drain (a hub from before the \
+             stop event, or one in another logon session); nothing was signalled. \
+             agent-hub stop --force ends it without a checkpoint",
+            record.pid
+        )),
+        Err(err) => Err(format!(
+            "could not open the stop event of pid {}: {err}",
+            record.pid
+        )),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
 fn signal_holder(_data_dir: &Path, _record: &Record, _force: bool) -> Result<(), String> {
     Err("stopping a hub by pid is not supported on this platform yet".to_string())
 }

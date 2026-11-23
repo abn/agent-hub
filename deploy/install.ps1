@@ -111,7 +111,10 @@ function Get-Sha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
 }
 
-function Add-UserPath([string]$Dir) {
+# $MarkerPath records the entry this script added, and only when it adds one:
+# agent-hub uninstall takes an entry off the PATH only when the marker names it,
+# so a directory the user already had on the PATH is never touched.
+function Add-UserPath([string]$Dir, [string]$MarkerPath) {
     $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
     try {
         # Read unexpanded and write back as an expandable string, so a
@@ -126,6 +129,12 @@ function Add-UserPath([string]$Dir) {
         $key.SetValue('Path', (($parts + $Dir) -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
     } finally {
         $key.Close()
+    }
+    try {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $MarkerPath) | Out-Null
+        [IO.File]::WriteAllText($MarkerPath, $Dir, (New-Object System.Text.UTF8Encoding $false))
+    } catch {
+        Write-Warning "Could not record the PATH entry ($($_.Exception.Message)); uninstall will leave it on the PATH."
     }
     $env:Path = "$env:Path;$Dir"
     Add-Type -Namespace AgentHub -Name Native -MemberDefinition @'
@@ -418,7 +427,7 @@ function Install-Locked {
         Write-Host "Installed agent-hub $want to $exe"
     }
     try {
-        Add-UserPath $BinDir
+        Add-UserPath $BinDir (Join-Path $stateDir 'path-added')
     } catch {
         & $rollback "could not register $BinDir on the PATH ($($_.Exception.Message))"
     }
