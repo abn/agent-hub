@@ -126,6 +126,49 @@ describe("config.toml store", () => {
   });
 });
 
+describe("the default credential", () => {
+  const cred = (member, extra = "") =>
+    `[[credential]]\nurl = "https://hub.example.net"\nmember = "${member}"\ntoken = "t-${member}"\n${extra}\n`;
+  const run = (text, env = {}) =>
+    resolve({ env, project_root: "/r", config: parseConfig(text) });
+
+  it("one default among several picks that member", () => {
+    const got = run(cred("a") + cred("b", "default = true") + cred("c"));
+    expect(got).toMatchObject({ state: "ok", member: "b", token: "t-b" });
+  });
+
+  it("no default leaves several members", () => {
+    expect(run(cred("a") + cred("b"))).toMatchObject({ state: "several_members", member: null });
+  });
+
+  it("two defaults leave several members", () => {
+    const got = run(cred("a", "default = true") + cred("b", "default = true"));
+    expect(got).toMatchObject({ state: "several_members", member: null });
+  });
+
+  it("a non-boolean default reads as false", () => {
+    const got = run(cred("a", 'default = "true"') + cred("b", "default = 1"));
+    expect(got).toMatchObject({ state: "several_members" });
+  });
+
+  it("an explicit member beats the default", () => {
+    const text = cred("a") + cred("b", "default = true");
+    expect(run(text, { HUB_MEMBER: "a" })).toMatchObject({ state: "ok", member: "a", token: "t-a" });
+  });
+
+  it("a rewrite and a rekey keep default = true and add it nowhere", () => {
+    const path = join(root, "config.toml");
+    writeFileSync(path, cred("a") + cred("b", "default = true"));
+    writeCredential(path, "https://hub.example.net", "b", "t-new");
+    rekey(path, "https://hub.example.net", "b", "b2");
+    const text = readFileSync(path, "utf8");
+    expect(text.match(/default = true/gu)).toHaveLength(1);
+    const got = parseConfig(text).credentials;
+    expect(got.map((c) => [c.member, c.default === true])).toEqual([["a", false], ["b2", true]]);
+    expect(got[1].token).toBe("t-new");
+  });
+});
+
 describe("config.toml scanning", () => {
   const pairing = (p, m = "m") => `{ path = "${p}", url = "https://h", member = "${m}" }`;
 
