@@ -25,13 +25,15 @@ usage:
   agent-hub service run --config PATH
 
 install registers the hub as a per-user service and starts it: a systemd user
-unit on Linux, a launchd LaunchAgent on macOS. It writes the unit, creates
+unit on Linux, a launchd LaunchAgent on macOS, a Task Scheduler task on
+Windows. It writes the unit, creates
 config.toml with the settings the service needs (bind, data_dir, a generated
 admin token, and the client url) and never changes a setting the file already
 holds: a --bind or --data-dir that disagrees with the file is refused. Running
 it again is safe; it says what it kept. --boot (the Linux default) turns on
 linger so the hub starts with the machine and falls back to login when the
 system refuses; --login leaves linger alone. macOS starts at login only.
+Windows starts at logon; --boot there needs an elevated shell.
 --no-start installs without starting. --yes is accepted so a script can pass
 it. --force installs over a container install's Quadlet.
 
@@ -41,7 +43,7 @@ data stay. Linger is left as it was found.
 run is what the Windows scheduled task executes; it has no use elsewhere.
 
 Exits 69 when there is no service manager to reach (no systemd user instance,
-no launchd session, Windows for now), 2 for a usage error or a refusal that
+no launchd session, no Task Scheduler), 2 for a usage error or a refusal that
 needs another flag, and 78 for an invalid configuration.
 ";
 
@@ -98,7 +100,7 @@ fn no_manager(command: &str) -> ExitCode {
         "agent-hub {command}: there is no service manager to drive on this system{}. \
          Run the hub with: agent-hub start",
         if cfg!(windows) {
-            " yet (the Windows service is a separate piece of work)"
+            " (LOCALAPPDATA is not set to an absolute path)"
         } else {
             ""
         }
@@ -111,7 +113,7 @@ pub fn service_cmd(args: &[String]) -> ExitCode {
     match args.first().map(String::as_str) {
         Some("install") => install_cmd(&args[1..]),
         Some("uninstall") => service_uninstall_cmd(&args[1..]),
-        Some("run") => run_cmd(),
+        Some("run") => run_cmd(&args[1..]),
         Some(other) => usage_error(
             "service",
             &format!("unknown subcommand '{other}'"),
@@ -121,11 +123,11 @@ pub fn service_cmd(args: &[String]) -> ExitCode {
     }
 }
 
-/// The Windows supervisor's entry. The seam is here; the supervisor is not.
-fn run_cmd() -> ExitCode {
+/// The Windows supervisor's entry: what the scheduled task runs. Elsewhere it
+/// has no use and says so.
+fn run_cmd(args: &[String]) -> ExitCode {
     if cfg!(windows) {
-        eprintln!("agent-hub service run: the Windows supervisor is not available yet");
-        ExitCode::from(69)
+        super::supervise::run(args)
     } else {
         eprintln!(
             "agent-hub service run: this is what the Windows scheduled task runs; it does nothing here"
@@ -745,7 +747,7 @@ pub fn uninstall_cmd(args: &[String]) -> ExitCode {
     };
     let manager = host_manager(&process_env);
     if manager.is_none() && cfg!(windows) {
-        // The Windows service is not here yet, so there is nothing safe to drive.
+        // No Task Scheduler to reach without LOCALAPPDATA: nothing is safe to drive.
         return no_manager("uninstall");
     }
     match uninstall(&process_env, manager, ask_first, &parsed) {
@@ -1011,10 +1013,9 @@ fn uninstall(
 /// Delete the running binary. `Some(note)` says what was done instead.
 fn remove_binary(binary: &Path) -> Result<Option<String>, String> {
     if cfg!(windows) {
-        return Ok(Some(format!(
-            "{} was left in place: a running Windows binary cannot delete itself yet",
-            binary.display()
-        )));
+        // A running executable cannot delete itself: a detached command does it
+        // once this process exits, and the install directory leaves the user PATH.
+        return super::schtasks::retire_running_binary(binary);
     }
     match std::fs::remove_file(binary) {
         Ok(()) => Ok(None),

@@ -7,9 +7,9 @@
 //! `restart`, `status` and `logs` act on the service whenever one is installed.
 //! [`install`] holds `service install`, `service uninstall` and `uninstall`.
 //!
-//! Every command a manager runs goes through a [`runner::Runner`]. Windows
-//! has no manager here yet: the scheduled-task backend is a separate piece, and
-//! until it lands every service verb answers 69.
+//! Every command a manager runs goes through a [`runner::Runner`]. On Windows
+//! the manager is a Task Scheduler task ([`schtasks`]) that runs a supervisor
+//! ([`supervise`]) around `serve`.
 
 pub mod backend;
 pub mod fake;
@@ -18,6 +18,8 @@ pub mod launchd;
 pub mod purge;
 pub mod render;
 pub mod runner;
+pub mod schtasks;
+pub mod supervise;
 pub mod systemd;
 
 use std::path::{Path, PathBuf};
@@ -235,12 +237,20 @@ pub trait Manager {
 }
 
 /// The environment the process runs in, as a lookup.
+///
+/// On Windows `HOME` is not set; it reads as the user profile there, so the
+/// verbs that name the home directory work. Elsewhere the environment is
+/// returned as it is.
 pub fn process_env(key: &str) -> Option<String> {
-    std::env::var(key).ok()
+    let value = std::env::var(key).ok();
+    if cfg!(windows) && key == "HOME" {
+        return agent_hub::config::present(value).or_else(|| std::env::var("USERPROFILE").ok());
+    }
+    value
 }
 
-/// The manager for this machine. `None` where there is none to drive: Windows,
-/// until its backend lands.
+/// The manager for this machine. `None` where there is none to drive: a
+/// Windows account with no `LOCALAPPDATA`, a Linux one with no `HOME`.
 ///
 /// `AGENT_HUB_SERVICE_FAKE=<dir>` swaps in the fake manager that keeps its
 /// state in `<dir>`. It exists so the built binary can be driven through every
@@ -252,7 +262,7 @@ pub fn host_manager(env: &dyn Fn(&str) -> Option<String>) -> Option<Box<dyn Mana
         return Some(Box::new(fake::Fake::new(PathBuf::from(dir), launchd)));
     }
     match Os::current() {
-        Os::Windows => None,
+        Os::Windows => Some(Box::new(schtasks::Schtasks::host(env)?)),
         Os::Macos => Some(Box::new(launchd::Launchd::host(env)?)),
         Os::Linux => Some(Box::new(systemd::Systemd::host(env)?)),
     }

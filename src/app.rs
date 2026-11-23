@@ -813,6 +813,8 @@ fn watch_stop_signals() -> impl std::future::Future<Output = ()> {
             watch(SignalKind::interrupt(), "SIGINT"),
         )
     };
+    #[cfg(not(unix))]
+    let event_stop = windows_stop_event();
     async move {
         #[cfg(unix)]
         {
@@ -835,11 +837,344 @@ fn watch_stop_signals() -> impl std::future::Future<Output = ()> {
         }
         #[cfg(not(unix))]
         {
-            if let Err(err) = tokio::signal::ctrl_c().await {
-                tracing::warn!(error = %err, "could not watch for Ctrl-C");
-                return std::future::pending().await;
+            // The watch lives as long as this future: when the future ends or
+            // is dropped, the waiting thread is told to quit and the event is
+            // closed, so a later serve in this process can create it again.
+            let (receiver, _watch) = match event_stop {
+                Some((receiver, watch)) => (Some(receiver), Some(watch)),
+                None => (None, None),
+            };
+            let event = async {
+                match receiver {
+                    // A closed channel is a failed wait, already logged, not a
+                    // request to stop.
+                    Some(stop) => {
+                        if stop.await.is_err() {
+                            std::future::pending::<()>().await;
+                        }
+                    }
+                    None => std::future::pending().await,
+                }
+            };
+            let interrupt = async {
+                if let Err(err) = tokio::signal::ctrl_c().await {
+                    tracing::warn!(error = %err, "could not watch for Ctrl-C");
+                    std::future::pending::<()>().await;
+                }
+            };
+            tokio::select! {
+                () = interrupt => tracing::info!("interrupt received, draining"),
+                () = event => tracing::info!("stop event received, draining"),
             }
-            tracing::info!("interrupt received, draining");
+        }
+    }
+}
+
+/// What [`windows_stop_event`] hands back: the channel that fires when the
+/// event is set, and the watch that keeps the waiting thread alive.
+#[cfg(not(unix))]
+type EventStop = Option<(tokio::sync::oneshot::Receiver<()>, Box<dyn Send>)>;
+
+/// Create this process's stop event and watch it from a thread of its own.
+///
+/// A hub started detached or by the Windows service has no console to send
+/// Ctrl-C to, and `TerminateProcess` would skip the checkpoint, so
+/// `agent-hub stop` sets the named event instead. The thread is not a runtime
+/// task, so a dropped runtime does not wait for it; dropping the returned watch
+/// tells it to quit and waits until it has.
+#[cfg(windows)]
+fn windows_stop_event() -> EventStop {
+    let event = match stop_event::StopEvent::create(std::process::id()) {
+        Ok(event) => event,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not create the stop event; only Ctrl-C will stop the hub");
+            return None;
+        }
+    };
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    match event.watch(move || {
+        let _ = sender.send(());
+    }) {
+        Ok(watch) => Some((receiver, Box::new(watch))),
+        Err(err) => {
+            tracing::warn!(error = %err, "could not watch the stop event; only Ctrl-C will stop the hub");
+            None
+        }
+    }
+}
+
+#[cfg(all(not(unix), not(windows)))]
+fn windows_stop_event() -> EventStop {
+    None
+}
+
+/// The named event that stops a hub where there is no SIGTERM.
+///
+/// `serve` creates `Local\agent-hub-stop-<pid>` (and `Global\` beside it, for a
+/// stop that comes from another logon session than a boot-started hub's) and
+/// waits on it next to Ctrl-C. `agent-hub stop` and the Windows supervisor open
+/// it by the pid they hold and set it, which drains the hub and checkpoints the
+/// store the way SIGTERM does. The names are plain strings so they can be
+/// checked on any platform; the event itself exists on Windows only.
+pub mod stop_event {
+    /// The event a process of this pid waits on, in the caller's session.
+    pub fn local_name(pid: u32) -> String {
+        format!("Local\\agent-hub-stop-{pid}")
+    }
+
+    /// The same event in the global namespace.
+    pub fn global_name(pid: u32) -> String {
+        format!("Global\\agent-hub-stop-{pid}")
+    }
+
+    /// What a wait on the stop event came to.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Waited {
+        /// Someone set the event: stop.
+        Set,
+        TimedOut,
+        /// The owner of the wait called it off.
+        Cancelled,
+        /// The wait itself failed. It is not a request to stop.
+        Failed,
+    }
+
+    const WAIT_TIMEOUT: u32 = 0x0000_0102;
+
+    /// Read the result of `WaitForMultipleObjects` over `stops` stop handles,
+    /// followed by a cancel handle when `cancel` is true. Anything that is not
+    /// one of those handles being set, or the timeout, is a failure: an event
+    /// is never abandoned, so `WAIT_ABANDONED_*` and `WAIT_FAILED` both are.
+    pub fn classify(code: u32, stops: usize, cancel: bool) -> Waited {
+        let stops = stops as u32;
+        if code < stops {
+            Waited::Set
+        } else if cancel && code == stops {
+            Waited::Cancelled
+        } else if code == WAIT_TIMEOUT {
+            Waited::TimedOut
+        } else {
+            Waited::Failed
+        }
+    }
+
+    #[cfg(windows)]
+    pub use imp::{StopEvent, Watch};
+
+    #[cfg(windows)]
+    mod imp {
+        use std::io;
+        use std::thread::JoinHandle;
+        use std::time::Duration;
+
+        use windows_sys::Win32::Foundation::{
+            CloseHandle, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, GetLastError, HANDLE,
+        };
+        use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+        use windows_sys::Win32::System::Threading::{
+            CreateEventW, EVENT_MODIFY_STATE, INFINITE, OpenEventW, SetEvent,
+            WaitForMultipleObjects,
+        };
+
+        use super::{Waited, classify};
+
+        fn wide(name: &str) -> Vec<u16> {
+            name.encode_utf16().chain(std::iter::once(0)).collect()
+        }
+
+        fn millis(timeout: Option<Duration>) -> u32 {
+            match timeout {
+                Some(limit) => u32::try_from(limit.as_millis())
+                    .unwrap_or(INFINITE - 1)
+                    .min(INFINITE - 1),
+                None => INFINITE,
+            }
+        }
+
+        /// One or two handles to the same logical stop event. The handles are
+        /// kept as integers so the value can move to the thread that waits.
+        pub struct StopEvent {
+            handles: Vec<usize>,
+        }
+
+        impl StopEvent {
+            /// Create the event for `pid`. The session-local one is required,
+            /// the global one is taken when the system allows it.
+            pub fn create(pid: u32) -> io::Result<Self> {
+                let mut handles = vec![create_one(&super::local_name(pid))?];
+                if let Ok(global) = create_one(&super::global_name(pid)) {
+                    handles.push(global);
+                }
+                Ok(Self { handles })
+            }
+
+            /// Open the event of the process `pid`, or `None` when it has none
+            /// (it is not a hub, or it is gone).
+            pub fn open(pid: u32) -> io::Result<Option<Self>> {
+                let mut handles = Vec::new();
+                let mut refused = None;
+                for name in [super::local_name(pid), super::global_name(pid)] {
+                    match open_one(&name) {
+                        Ok(handle) => handles.push(handle),
+                        Err(err) if err.raw_os_error() == Some(ERROR_FILE_NOT_FOUND as i32) => {}
+                        Err(err) => refused = Some(err),
+                    }
+                }
+                match (handles.is_empty(), refused) {
+                    (false, _) => Ok(Some(Self { handles })),
+                    (true, Some(err)) => Err(err),
+                    (true, None) => Ok(None),
+                }
+            }
+
+            /// Set the event: the process waiting on it starts to stop.
+            pub fn signal(&self) -> io::Result<()> {
+                for handle in &self.handles {
+                    // SAFETY: the handle is open for as long as `self` is.
+                    if unsafe { SetEvent(*handle as HANDLE) } == 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                }
+                Ok(())
+            }
+
+            fn wait_with(&self, cancel: Option<usize>, timeout: Option<Duration>) -> Waited {
+                let mut raw: Vec<HANDLE> = self.handles.iter().map(|h| *h as HANDLE).collect();
+                if let Some(cancel) = cancel {
+                    raw.push(cancel as HANDLE);
+                }
+                // SAFETY: `raw` holds open handles and its length is the count.
+                let code = unsafe {
+                    WaitForMultipleObjects(raw.len() as u32, raw.as_ptr(), 0, millis(timeout))
+                };
+                classify(code, self.handles.len(), cancel.is_some())
+            }
+
+            /// Wait until the event is set (`Ok(true)`) or `timeout` has passed
+            /// (`Ok(false)`; `None` waits for ever). A wait that fails is an
+            /// error, never a stop.
+            pub fn wait(&self, timeout: Option<Duration>) -> io::Result<bool> {
+                match self.wait_with(None, timeout) {
+                    Waited::Set => Ok(true),
+                    Waited::TimedOut | Waited::Cancelled => Ok(false),
+                    Waited::Failed => Err(io::Error::last_os_error()),
+                }
+            }
+
+            /// Wait for the event on a thread of its own and call `on_set` once
+            /// it is set. A failed wait is logged and calls nothing. Dropping
+            /// the returned [`Watch`] ends the thread, which closes the event.
+            pub fn watch(self, on_set: impl FnOnce() + Send + 'static) -> io::Result<Watch> {
+                // SAFETY: an unnamed manual-reset event; the result is checked.
+                let cancel = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
+                if cancel.is_null() {
+                    return Err(io::Error::last_os_error());
+                }
+                let cancel = cancel as usize;
+                let thread = std::thread::Builder::new()
+                    .name("stop-event".to_string())
+                    .spawn(move || match self.wait_with(Some(cancel), None) {
+                        Waited::Set => on_set(),
+                        Waited::Cancelled | Waited::TimedOut => {}
+                        Waited::Failed => tracing::warn!(
+                            error = %io::Error::last_os_error(),
+                            "could not wait on the stop event; only Ctrl-C will stop the hub"
+                        ),
+                    });
+                match thread {
+                    Ok(thread) => Ok(Watch {
+                        cancel,
+                        thread: Some(thread),
+                    }),
+                    Err(err) => {
+                        // SAFETY: created above and closed once.
+                        unsafe { CloseHandle(cancel as HANDLE) };
+                        Err(err)
+                    }
+                }
+            }
+        }
+
+        impl Drop for StopEvent {
+            fn drop(&mut self) {
+                for handle in &self.handles {
+                    // SAFETY: each handle was opened by this value and is closed once.
+                    unsafe { CloseHandle(*handle as HANDLE) };
+                }
+            }
+        }
+
+        /// The thread waiting on a stop event. Dropping it calls the wait off
+        /// and joins the thread, so the event is closed when the drop returns.
+        pub struct Watch {
+            cancel: usize,
+            thread: Option<JoinHandle<()>>,
+        }
+
+        impl Drop for Watch {
+            fn drop(&mut self) {
+                // SAFETY: the cancel event is open until the end of this drop.
+                unsafe { SetEvent(self.cancel as HANDLE) };
+                if let Some(thread) = self.thread.take() {
+                    let _ = thread.join();
+                }
+                // SAFETY: created in `watch` and closed once, after the thread
+                // that waited on it has ended.
+                unsafe { CloseHandle(self.cancel as HANDLE) };
+            }
+        }
+
+        fn create_one(name: &str) -> io::Result<usize> {
+            let wide = wide(name);
+            // SAFETY: `wide` is a NUL-terminated string that outlives the call.
+            let handle = unsafe { CreateEventW(std::ptr::null(), 1, 0, wide.as_ptr()) };
+            if handle.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+            // SAFETY: reads the thread's last error right after the call.
+            if unsafe { GetLastError() } == ERROR_ALREADY_EXISTS {
+                // Something else made an event of this name first: it is not ours.
+                // SAFETY: the handle was just returned and is closed once.
+                unsafe { CloseHandle(handle) };
+                return Err(io::Error::from_raw_os_error(ERROR_ALREADY_EXISTS as i32));
+            }
+            Ok(handle as usize)
+        }
+
+        fn open_one(name: &str) -> io::Result<usize> {
+            let wide = wide(name);
+            // SAFETY: `wide` is a NUL-terminated string that outlives the call.
+            let handle = unsafe { OpenEventW(EVENT_MODIFY_STATE | SYNCHRONIZE, 0, wide.as_ptr()) };
+            if handle.is_null() {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(handle as usize)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn the_names_carry_the_pid_in_both_namespaces() {
+            assert_eq!(local_name(4242), "Local\\agent-hub-stop-4242");
+            assert_eq!(global_name(4242), "Global\\agent-hub-stop-4242");
+        }
+
+        #[test]
+        fn only_a_set_stop_handle_is_a_stop() {
+            // Two stop handles (local and global) and a cancel handle.
+            assert_eq!(classify(0, 2, true), Waited::Set);
+            assert_eq!(classify(1, 2, true), Waited::Set);
+            assert_eq!(classify(2, 2, true), Waited::Cancelled);
+            assert_eq!(classify(0x102, 2, true), Waited::TimedOut);
+            // WAIT_FAILED and an abandoned wait are failures, never a stop.
+            assert_eq!(classify(0xFFFF_FFFF, 2, true), Waited::Failed);
+            assert_eq!(classify(0x80, 2, true), Waited::Failed);
+            // Without a cancel handle, the index after the stops is no cancel.
+            assert_eq!(classify(1, 1, false), Waited::Failed);
+            assert_eq!(classify(0, 1, false), Waited::Set);
         }
     }
 }
