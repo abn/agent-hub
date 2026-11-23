@@ -110,28 +110,30 @@ function earlierTier(tiers, gap) {
 // Under 720px the row is a scrolling strip of every project. Wider, a hub with
 // five or more projects keeps the three with the most artifacts as chips and
 // folds the rest into a More menu; a folded project that is the current filter
-// stays on the row as a chip so the filter is always visible.
+// stays on the row as a chip so the filter is always visible. The three is a
+// ceiling: fitChips folds more of them into More as the row narrows.
 const CHIPS_SHOWN = 3;
 const MORE_CHEVRON = `<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M 6 9l6 6 6-6"></path></svg>`;
 
 function chips(active, choices) {
-  const chip = (id, label, count, extra = "") =>
-    `<button type="button" class="chip${extra}" data-arts="filter" data-project="${esc(id)}" aria-pressed="${active === id}"><span class="chip-label" title="${esc(label)}">${esc(label)}</span>${
+  const chip = (id, label, count, extra = "", attrs = "") =>
+    `<button type="button" class="chip${extra}" data-arts="filter" data-project="${esc(id)}"${attrs} aria-pressed="${active === id}"><span class="chip-label" title="${esc(label)}">${esc(label)}</span>${
       count === null ? "" : ` <span class="now-n">${count}</span>`
     }</button>`;
   if (choices.length < CHIPS_SHOWN + 2) return [chip("", "All", null), ...choices.map((c) => chip(c.id, c.name, c.count))].join("");
   const ranked = choices.map((c, i) => ({ c, i })).sort((a, b) => b.c.count - a.c.count || a.i - b.i).map(({ c }) => c);
   const top = ranked.slice(0, CHIPS_SHOWN);
   const rest = ranked.slice(CHIPS_SHOWN);
+  const rank = (c) => ` data-rank="${ranked.indexOf(c)}"`;
   const item = (c) =>
-    `<button type="button" role="menuitemradio" aria-checked="${active === c.id}" data-arts="filter" data-project="${esc(c.id)}"><span class="arts-check" aria-hidden="true">${glyphSvg("resolve", { size: 14, strokeWidth: 2.2 })}</span><span class="chip-label" title="${esc(c.name)}">${esc(c.name)}</span> <span class="mono shell-menu-n">${c.count}</span></button>`;
+    `<button type="button" role="menuitemradio" aria-checked="${active === c.id}" data-arts="filter" data-project="${esc(c.id)}"${rank(c)}${ranked.indexOf(c) < CHIPS_SHOWN ? " hidden" : ""}><span class="arts-check" aria-hidden="true">${glyphSvg("resolve", { size: 14, strokeWidth: 2.2 })}</span><span class="chip-label" title="${esc(c.name)}">${esc(c.name)}</span> <span class="mono shell-menu-n">${c.count}</span></button>`;
   return [
     chip("", "All", null),
-    ...top.map((c) => chip(c.id, c.name, c.count)),
-    ...rest.map((c) => chip(c.id, c.name, c.count, c.id === active ? " arts-chip-folded is-current" : " arts-chip-folded")),
+    ...top.map((c) => chip(c.id, c.name, c.count, "", rank(c))),
+    ...rest.map((c) => chip(c.id, c.name, c.count, c.id === active ? " arts-chip-folded is-current" : " arts-chip-folded", rank(c))),
     `<div class="shell-group arts-more">
       <button type="button" class="hub-group-toggle" data-group-toggle data-arts-more aria-haspopup="menu" aria-expanded="false">More${MORE_CHEVRON}</button>
-      <div class="shell-group-menu" role="menu" aria-label="More projects" data-group-menu hidden>${rest.map(item).join("")}</div>
+      <div class="shell-group-menu" role="menu" aria-label="More projects" data-group-menu hidden>${ranked.map(item).join("")}</div>
     </div>`,
   ].join("");
 }
@@ -210,6 +212,8 @@ export async function artifactListScreen(gen) {
   );
   installShellLayout(main);
   keepMoreInView();
+  focusFirstShown();
+  watchChipFit();
   if (first) fillPreview(first);
   if (focusAfter !== null) {
     const chosen = [...main.querySelectorAll("button.chip[data-arts='filter']")].find((b) => /** @type {HTMLElement} */ (b).dataset.project === focusAfter);
@@ -221,6 +225,87 @@ export async function artifactListScreen(gen) {
 // The project a pick just chose; its chip takes focus once the list is redrawn.
 /** @type {string | null} */
 let focusAfter = null;
+
+// How many of the busiest chips fit beside More and the key hints: as many as
+// the row holds up to the ceiling, and never fewer than one, so a long name is
+// folded into More before it is cut to a letter. The menu lists every project
+// that is not a chip on the row; the current filter stays a chip either way.
+/** @type {ResizeObserver | null} */
+let chipWatch = null;
+/** @type {MutationObserver | null} */
+let chipGuard = null;
+
+function stopChipWatch() {
+  chipWatch?.disconnect();
+  chipGuard?.disconnect();
+  chipWatch = null;
+  chipGuard = null;
+}
+
+/** @param {HTMLElement} bar */
+function fitChips(bar) {
+  if (!bar.querySelector(".arts-more")) return;
+  const chips = [...bar.querySelectorAll("button.chip[data-rank]")].map((el) => /** @type {HTMLElement} */ (el));
+  const items = [...bar.querySelectorAll(".arts-more [data-rank]")].map((el) => /** @type {HTMLElement} */ (el));
+  const apply = (/** @type {number} */ n) => {
+    for (const chip of chips) {
+      const folded = Number(chip.dataset.rank) >= n;
+      const current = chip.getAttribute("aria-pressed") === "true";
+      chip.classList.toggle("arts-chip-folded", folded);
+      chip.classList.toggle("is-current", folded && current);
+    }
+    for (const item of items) item.hidden = Number(item.dataset.rank) < n;
+  };
+  // A chip is cut when its text is wider than its label's box, unless the box
+  // is already at the longest name a chip shows.
+  const cut = (/** @type {HTMLElement} */ chip) => {
+    const label = chip.querySelector(".chip-label");
+    if (!label || chip.offsetParent === null) return false;
+    const range = document.createRange();
+    range.selectNodeContents(label);
+    const box = label.getBoundingClientRect().width;
+    const text = range.getBoundingClientRect?.().width ?? 0;
+    return text > box + 0.1 && box < parseFloat(getComputedStyle(label).maxWidth) - 0.5;
+  };
+  const wide = window.matchMedia?.("(min-width: 720px)").matches ?? true;
+  let n = wide ? CHIPS_SHOWN : chips.length;
+  for (; wide && n > 1; n--) {
+    apply(n);
+    if (bar.scrollWidth <= bar.clientWidth && !chips.some(cut)) break;
+  }
+  apply(n);
+}
+
+// The fit follows the toolbar it was started for and stops with it: another
+// screen replacing the stage takes the toolbar out, and the guard lets go.
+function watchChipFit() {
+  stopChipWatch();
+  const bar = /** @type {HTMLElement | null} */ (main.querySelector(".arts-controls"));
+  if (!bar) return;
+  fitChips(bar);
+  // Plex arrives after the first measure and is wider than the fallback face.
+  document.fonts?.ready.then(() => bar.isConnected && fitChips(bar));
+  if (typeof ResizeObserver !== "function") return;
+  chipWatch = new ResizeObserver(() => (bar.isConnected ? fitChips(bar) : stopChipWatch()));
+  chipWatch.observe(bar);
+  if (typeof MutationObserver === "function") {
+    chipGuard = new MutationObserver(() => {
+      if (!bar.isConnected) stopChipWatch();
+    });
+    chipGuard.observe(main, { childList: true, subtree: true });
+  }
+}
+
+// The menu opens on its first item; the fit may have hidden the busiest
+// projects, so focus moves on to the first one the menu still shows. The
+// menu's own toggle handler stops the click, so this sits on the toggle too.
+function focusFirstShown() {
+  const toggle = main.querySelector("[data-arts-more]");
+  toggle?.addEventListener("click", () => {
+    const menu = /** @type {HTMLElement | null} */ (toggle.closest(".arts-more")?.querySelector("[data-group-menu]"));
+    if (menu && !menu.hidden) /** @type {HTMLElement | null} */ (menu.querySelector("button:not([hidden])"))?.focus();
+  });
+}
 
 // The Group menu places itself 200px from the right edge; More's items can be
 // wider than that, so once it opens the menu is pulled back inside the window.
@@ -363,7 +448,7 @@ main.addEventListener("keydown", (event) => {
     toggle.focus();
   } else if ((event.key === "ArrowDown" || event.key === "ArrowUp") && menu.contains(target)) {
     event.preventDefault();
-    const items = [...menu.querySelectorAll("button")];
+    const items = /** @type {HTMLElement[]} */ ([...menu.querySelectorAll("button:not([hidden])")]);
     const at = items.indexOf(/** @type {HTMLButtonElement} */ (target));
     const step = event.key === "ArrowDown" ? 1 : -1;
     items[(at + step + items.length) % items.length].focus();

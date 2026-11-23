@@ -898,9 +898,12 @@ Projects register, Agents and access, Connect, and the knowledge base.
     All, the three projects with the most artifacts and a More menu (the
     Group menu's component: menu, arrow keys, Escape back to the trigger,
     checked item shown with a check mark) in the 40px row, so the row never
-    runs past the pane and the key hints stay in it; chip names are cut with
-    an ellipsis before More or the hints give way, and the counts stay whole. A folded project that is the current filter shows as
-    a selected chip after the three. A phone keeps the scrolling strip.
+    runs past the pane and the key hints stay in it. The three is a ceiling:
+    the row measures itself and shows as many of those chips as fit, at least
+    one, folding the rest into More before a name is cut to a letter, and
+    More lists every project that is not a chip on the row. A folded project
+    that is the current filter stays on the row as a selected chip. A phone
+    keeps the scrolling strip.
   - **Deviation: Copy path is a glyph.** The handoff draws a text "Copy path"
     button beside Open. The copy rule puts a glyph on the line that holds the
     string, so the preview carries the path with its glyph.

@@ -311,11 +311,6 @@ export function sessionDetailHTML(
 
   return `
     <div class="session-detail-view" data-session-id="${esc(session.id)}">
-      <style>
-        .session-tree-pane { width: 100% !important; flex: 1 !important; border-right: none !important; }
-        .session-file-viewer { display: none !important; }
-        .shell .session-back-bar { display: none !important; }
-      </style>
       <div class="session-back-bar">
         <a class="session-back-link" href="#/projects/${encodeURIComponent(current)}/sessions" aria-label="Back to sessions">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
