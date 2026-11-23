@@ -43,7 +43,9 @@ mod inbox;
 pub(crate) mod notifications;
 mod resources;
 mod search;
+pub mod session_arg;
 mod subscriptions;
+pub mod whoami;
 
 /// The lease recording an active session on a client connection.
 #[derive(Clone, Debug, PartialEq, Eq)]

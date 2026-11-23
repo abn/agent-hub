@@ -281,5 +281,6 @@ fn parse_query(raw: Option<&str>) -> std::result::Result<FeedQuery, Error> {
         // These are the human's surfaces: what the human dismissed stays out.
         // An agent's read builds its own query and still sees every event.
         hide_dismissed: true,
+        author: Default::default(),
     })
 }
