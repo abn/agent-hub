@@ -78,6 +78,62 @@ pub struct Stamp<'a> {
     pub verifies: Option<Verifies>,
 }
 
+/// A write as the log signs it: the op, the full writer, and the base check a
+/// shared session write makes.
+struct Signed<'a> {
+    op: &'a str,
+    writer: std::borrow::Cow<'a, crate::author::Writer>,
+    verifies: Option<Verifies>,
+    base: Option<Base<'a>>,
+}
+
+impl<'a> From<Stamp<'a>> for Signed<'a> {
+    fn from(stamp: Stamp<'a>) -> Self {
+        Self {
+            op: stamp.op,
+            writer: std::borrow::Cow::Owned(crate::author::Writer::from(stamp.actor)),
+            verifies: stamp.verifies,
+            base: None,
+        }
+    }
+}
+
+/// The base a shared write was made against: the version the caller read,
+/// or none, in which case an existing entry last written by a different
+/// participant is refused as stale.
+#[derive(Debug, Clone, Copy)]
+pub struct Base<'a> {
+    pub if_version: Option<&'a str>,
+}
+
+/// Whether two authors are the same writer for a stale-base check: the same
+/// participant, or for a human or legacy author the same key.
+fn same_writer(a: &crate::author::Author, b: &crate::author::Author) -> bool {
+    match (a.participant(), b.participant()) {
+        (Some(a), Some(b)) => a == b,
+        (None, None) => a.kind() == b.kind() && a.key() == b.key(),
+        _ => false,
+    }
+}
+
+/// One entry of a brain, as the members upgrade inventories it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MergeItem {
+    /// `/kv/<key>` or `/fs/<path>`.
+    pub path: String,
+    pub kind: MergeKind,
+    /// The bytes; empty for a directory.
+    pub bytes: Vec<u8>,
+}
+
+/// What a [`MergeItem`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeKind {
+    Key,
+    File,
+    Dir,
+}
+
 /// One row of the write log.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WriteRecord {
@@ -95,6 +151,12 @@ pub struct WriteRecord {
     /// Whether the write brought in the entry's newest verification, as its
     /// [`Stamp`] judged it when the write landed.
     pub verifies: bool,
+    /// Who made the write. A row written before the record was kept reads as
+    /// legacy, with its `actor` as the label.
+    pub author: crate::author::Author,
+    pub origin: crate::author::Origin,
+    /// The session the row was copied from by the members upgrade, if any.
+    pub merged_from: Option<String>,
 }
 
 /// One page and one version of it, as [`Brain::page_version`] read them.
@@ -338,9 +400,9 @@ impl BrainStore {
         })
         .await
         .map_err(engine_error)?;
-        if session_id == KNOWLEDGE_FILE {
-            create_versions_table(&agent).await?;
-        }
+        // Every brain keeps its versions: a knowledge base, and a session
+        // brain, which any participant may write.
+        create_versions_table(&agent).await?;
         drop(guard);
 
         Ok(Some(Brain {
@@ -570,7 +632,8 @@ impl Brain {
     ) -> Result<i64> {
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
-        self.record_locked(name, path, actor, bytes, version, false)
+        let writer = crate::author::Writer::from(actor);
+        self.record_locked(name, path, &writer, bytes, version, false)
             .await
     }
 
@@ -579,7 +642,7 @@ impl Brain {
         &self,
         name: &str,
         path: &str,
-        actor: &str,
+        writer: &crate::author::Writer,
         bytes: Option<usize>,
         version: Option<&str>,
         verifies: bool,
@@ -593,10 +656,16 @@ impl Brain {
         } else {
             "session"
         };
+        let author = &writer.author;
         let mut params = serde_json::json!({
             "path": path,
-            "actor": actor,
+            "actor": writer.actor(),
             "store": store,
+            "kind": author.kind().as_str(),
+            "member": author.member(),
+            "agent": author.agent(),
+            "session": author.session(),
+            "origin": writer.origin.as_column(),
         });
         if let Some(b) = bytes {
             params["bytes"] = serde_json::json!(b);
@@ -619,7 +688,7 @@ impl Brain {
     /// Whether this file keeps every version of what it stores. A project
     /// knowledge base does; a session brain is working state and does not.
     fn keeps_versions(&self) -> bool {
-        self.session_id == KNOWLEDGE_FILE
+        true
     }
 
     /// Keep one version's bytes, once however many writes store them. The
@@ -1140,11 +1209,25 @@ impl Brain {
             let Some(path) = field(&parameters, "path") else {
                 continue;
             };
+            let actor = field(&parameters, "actor").unwrap_or_default();
+            let author = crate::author::Author::from_columns(
+                field(&parameters, "kind").as_deref(),
+                field(&parameters, "member").as_deref(),
+                field(&parameters, "agent").as_deref(),
+                field(&parameters, "session").as_deref(),
+                &actor,
+            );
+            let origin =
+                crate::author::Origin::from_column(field(&parameters, "origin").as_deref());
+            let merged_from = field(&parameters, "merged_from");
             let record = WriteRecord {
                 id,
                 op,
                 path,
-                actor: field(&parameters, "actor").unwrap_or_default(),
+                actor,
+                author,
+                origin,
+                merged_from,
                 at: integer(5).or_else(|| integer(4)).unwrap_or_default(),
                 version: field(&json(3), "version"),
                 bytes: parameters
@@ -1403,7 +1486,7 @@ impl Brain {
         // Asked to write whatever is there, it always stores, so it always
         // names a version.
         let stored = self
-            .put_recorded(path, bytes, expected, stamp, false, alive, indexed)
+            .put_recorded(path, bytes, expected, stamp.into(), false, alive, indexed)
             .await?;
         Ok(stored.unwrap_or_else(|| self::version(bytes)))
     }
@@ -1421,7 +1504,7 @@ impl Brain {
         alive: impl AsyncFnOnce() -> Result<()>,
         indexed: impl AsyncFnOnce(),
     ) -> Result<Option<String>> {
-        self.put_recorded(path, bytes, expected, stamp, true, alive, indexed)
+        self.put_recorded(path, bytes, expected, stamp.into(), true, alive, indexed)
             .await
     }
 
@@ -1431,7 +1514,7 @@ impl Brain {
         path: &str,
         bytes: &[u8],
         expected: Option<&str>,
-        stamp: Stamp<'_>,
+        stamp: Signed<'_>,
         unless_same: bool,
         alive: impl AsyncFnOnce() -> Result<()>,
         indexed: impl AsyncFnOnce(),
@@ -1447,6 +1530,10 @@ impl Brain {
             (None, None, false) => None,
             _ => self.read(&namespace).await?,
         };
+        if let Some(base) = stamp.base {
+            self.check_base(path, before.as_deref(), stamp.writer.as_ref(), base)
+                .await?;
+        }
         if unless_same && before.as_deref() == Some(bytes) {
             if let Some(expected) = expected {
                 ensure_expected(path, expected, before.as_deref())?;
@@ -1490,7 +1577,7 @@ impl Brain {
         self.record_locked(
             stamp.op,
             path,
-            stamp.actor,
+            stamp.writer.as_ref(),
             Some(bytes.len()),
             Some(&version),
             verifies,
@@ -1696,6 +1783,18 @@ impl Brain {
         alive: impl AsyncFnOnce() -> Result<()>,
         removed: impl AsyncFnOnce(),
     ) -> Result<bool> {
+        self.delete_signed(path, expected, stamp.into(), alive, removed)
+            .await
+    }
+
+    async fn delete_signed(
+        &self,
+        path: &str,
+        expected: Option<&str>,
+        stamp: Signed<'_>,
+        alive: impl AsyncFnOnce() -> Result<()>,
+        removed: impl AsyncFnOnce(),
+    ) -> Result<bool> {
         let namespace = parse_path(path)?;
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
@@ -1704,6 +1803,11 @@ impl Brain {
             return Ok(false);
         }
         self.check_expected(&namespace, path, expected).await?;
+        if let Some(base) = stamp.base {
+            let current = self.read(&namespace).await?;
+            self.check_base(path, current.as_deref(), stamp.writer.as_ref(), base)
+                .await?;
+        }
         if self.keeps_versions()
             && let Some(going) = self.read(&namespace).await?
             && !self.is_kept_locked(&going).await?
@@ -1716,7 +1820,7 @@ impl Brain {
         if !self.remove(&namespace).await? {
             return Ok(false);
         }
-        self.record_locked(stamp.op, path, stamp.actor, None, None, false)
+        self.record_locked(stamp.op, path, stamp.writer.as_ref(), None, None, false)
             .await?;
         removed().await;
         Ok(true)
@@ -2132,6 +2236,298 @@ async fn create_versions_table(agent: &AgentFS) -> Result<()> {
 /// The SDK error carries the detail; the hub reports it as an engine failure.
 fn engine_error(err: agentfs_sdk::error::Error) -> Error {
     Error::Engine(err.to_string())
+}
+
+impl Brain {
+    /// Refuse a shared write whose base is stale. The caller holds the lock.
+    async fn check_base(
+        &self,
+        path: &str,
+        current: Option<&[u8]>,
+        writer: &crate::author::Writer,
+        base: Base<'_>,
+    ) -> Result<()> {
+        let now = current.map_or_else(|| VERSION_ABSENT.to_string(), version);
+        let stale = match base.if_version {
+            Some(expected) => expected != now,
+            None if current.is_none() => false,
+            None => {
+                let mut last = None;
+                self.scan_log_locked(|record| {
+                    if record.path == path {
+                        last = Some(record);
+                        return std::ops::ControlFlow::Break(());
+                    }
+                    std::ops::ControlFlow::Continue(())
+                })
+                .await?;
+                last.is_some_and(|record| !same_writer(&record.author, &writer.author))
+            }
+        };
+        if stale {
+            return Err(Error::Session(
+                crate::error::SessionReason::StaleBase,
+                format!(
+                    "'{path}' changed since it was read, or was last written by another participant; read it and write again with if_version"
+                ),
+                Some(serde_json::Map::from_iter([(
+                    "version".to_string(),
+                    serde_json::Value::from(now),
+                )])),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Store bytes as one shared session write: base check, write, version
+    /// kept and log row, all under one hold of the lock. `alive` runs under
+    /// the lock first.
+    pub(crate) async fn put_by(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        op: &str,
+        writer: &crate::author::Writer,
+        base: Base<'_>,
+        alive: impl AsyncFnOnce() -> Result<()>,
+    ) -> Result<String> {
+        let signed = Signed {
+            op,
+            writer: std::borrow::Cow::Borrowed(writer),
+            verifies: None,
+            base: Some(base),
+        };
+        let stored = self
+            .put_recorded(path, bytes, None, signed, false, alive, async || {})
+            .await?;
+        Ok(stored.unwrap_or_else(|| version(bytes)))
+    }
+
+    /// Delete an entry as one shared session write. False when nothing was
+    /// stored there.
+    pub(crate) async fn delete_by(
+        &self,
+        path: &str,
+        op: &str,
+        writer: &crate::author::Writer,
+        base: Base<'_>,
+        alive: impl AsyncFnOnce() -> Result<()>,
+    ) -> Result<bool> {
+        let signed = Signed {
+            op,
+            writer: std::borrow::Cow::Borrowed(writer),
+            verifies: None,
+            base: Some(base),
+        };
+        self.delete_signed(path, None, signed, alive, async || {})
+            .await
+    }
+
+    /// The bytes an earlier version of this brain kept, if any.
+    pub(crate) async fn kept_version(&self, version: &str) -> Result<Option<Vec<u8>>> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        self.kept_version_locked(version).await
+    }
+
+    /// Every key, directory and file, with the bytes of each key and file.
+    pub async fn inventory(&self) -> Result<Vec<MergeItem>> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        let mut items = Vec::new();
+        let mut keys = self.agent.kv.keys().await.map_err(engine_error)?;
+        keys.sort();
+        for key in keys {
+            let bytes = self
+                .agent
+                .kv
+                .get::<StoredValue>(&key)
+                .await
+                .map_err(engine_error)?
+                .map(StoredValue::into_bytes)
+                .unwrap_or_default();
+            items.push(MergeItem {
+                path: format!("/kv/{key}"),
+                kind: MergeKind::Key,
+                bytes,
+            });
+        }
+        let mut pending = vec![String::new()];
+        while let Some(dir) = pending.pop() {
+            for child in self.fs_children(&dir, false).await? {
+                let rest = child.path.trim_start_matches("/fs/").to_string();
+                match child.kind {
+                    EntryKind::Dir => {
+                        items.push(MergeItem {
+                            path: child.path.clone(),
+                            kind: MergeKind::Dir,
+                            bytes: Vec::new(),
+                        });
+                        pending.push(rest);
+                    }
+                    _ => {
+                        let bytes = self
+                            .agent
+                            .fs
+                            .read_file(&fs_path(&rest))
+                            .await
+                            .map_err(engine_error)?
+                            .unwrap_or_default();
+                        items.push(MergeItem {
+                            path: child.path.clone(),
+                            kind: MergeKind::File,
+                            bytes,
+                        });
+                    }
+                }
+            }
+        }
+        items.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(items)
+    }
+
+    /// The bytes of a key or file, none for an absent entry or a directory.
+    pub async fn merge_read(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        self.read(&parse_path(path)?).await
+    }
+
+    /// Write a key or file as the upgrade copies it, with no log row.
+    pub(crate) async fn merge_put(&self, path: &str, bytes: &[u8]) -> Result<()> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        self.write(&parse_path(path)?, bytes).await
+    }
+
+    /// Create a directory and its missing parents.
+    pub(crate) async fn merge_mkdir(&self, path: &str) -> Result<()> {
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        let Namespace::Fs(rest) = parse_path(path)? else {
+            return Err(Error::InvalidArgument(format!(
+                "{path} is not a directory path"
+            )));
+        };
+        let dir = fs_path(rest);
+        match self.agent.fs.stat(&dir).await.map_err(engine_error)? {
+            Some(stats) if stats.is_directory() => Ok(()),
+            Some(_) => Err(Error::Conflict(format!("{path} is a file"))),
+            None => {
+                self.ensure_parent(&format!("{dir}/x")).await?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Copy another brain's write-log rows into this one, each marked with
+    /// `merged_from` and its `source_id`, and `merged_path` where its entry
+    /// was relocated. A row already copied is skipped, so a replay adds none.
+    pub(crate) async fn merge_log_from(
+        &self,
+        other: &Brain,
+        other_id: &str,
+        relocated: &HashMap<String, String>,
+    ) -> Result<()> {
+        let rows = {
+            let _guard = other.lock.lock().await;
+            other.ensure_present()?;
+            other.raw_log().await?
+        };
+        let _guard = self.lock.lock().await;
+        self.ensure_present()?;
+        let mut copied = std::collections::HashSet::new();
+        for row in self.raw_log().await? {
+            let params = row.params.as_ref();
+            if params
+                .and_then(|p| p.get("merged_from"))
+                .and_then(|v| v.as_str())
+                == Some(other_id)
+                && let Some(source) = params
+                    .and_then(|p| p.get("source_id"))
+                    .and_then(|v| v.as_i64())
+            {
+                copied.insert(source);
+            }
+        }
+        for row in rows {
+            if copied.contains(&row.id) {
+                continue;
+            }
+            let mut params = row.params.unwrap_or_else(|| serde_json::json!({}));
+            params["merged_from"] = serde_json::json!(other_id);
+            params["source_id"] = serde_json::json!(row.id);
+            if let Some(path) = params.get("path").and_then(|p| p.as_str())
+                && let Some(dest) = relocated.get(path)
+            {
+                params["merged_path"] = serde_json::json!(dest);
+            }
+            self.agent
+                .tools
+                .record(
+                    &row.name,
+                    row.started,
+                    row.completed,
+                    Some(params),
+                    row.result,
+                    None,
+                )
+                .await
+                .map_err(engine_error)?;
+        }
+        Ok(())
+    }
+
+    /// Every write-log row as stored, oldest first. The caller holds the lock.
+    async fn raw_log(&self) -> Result<Vec<RawLog>> {
+        let conn = self.agent.get_connection().await.map_err(engine_error)?;
+        let mut rows = conn
+            .query(
+                "SELECT id, name, parameters, result, started_at, completed_at \
+                 FROM tool_calls ORDER BY id ASC",
+                (),
+            )
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?;
+        let mut out = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .await
+            .map_err(|err| Error::Engine(err.to_string()))?
+        {
+            let integer = |index: usize| match row.get_value(index) {
+                Ok(turso::Value::Integer(value)) => value,
+                _ => 0,
+            };
+            let json = |index: usize| match row.get_value(index) {
+                Ok(turso::Value::Text(text)) => serde_json::from_str(&text).ok(),
+                _ => None,
+            };
+            let name = match row.get_value(1) {
+                Ok(turso::Value::Text(name)) => name,
+                _ => continue,
+            };
+            out.push(RawLog {
+                id: integer(0),
+                name,
+                params: json(2),
+                result: json(3),
+                started: integer(4),
+                completed: integer(5),
+            });
+        }
+        Ok(out)
+    }
+}
+
+/// One write-log row as the engine stores it.
+struct RawLog {
+    id: i64,
+    name: String,
+    params: Option<serde_json::Value>,
+    result: Option<serde_json::Value>,
+    started: i64,
+    completed: i64,
 }
 
 #[cfg(test)]

@@ -24,7 +24,14 @@ pub struct PageComment {
     pub id: String,
     pub project_id: String,
     pub path: String,
+    /// The writer's key. Kept as `author` until every reader takes `actor`.
     pub author: String,
+    /// The writer's key, as every other row names it.
+    pub actor: String,
+    /// Who wrote it.
+    pub author_record: crate::author::AuthorView,
+    /// `hub` for the hub's own act, null for a call.
+    pub origin: Option<String>,
     pub body: String,
     pub anchor: Option<serde_json::Value>,
     pub done: bool,
@@ -36,11 +43,12 @@ pub async fn add_comment(
     db: &Database,
     project_id: &str,
     path: &str,
-    author: &str,
+    writer: impl Into<crate::author::Writer>,
     body: &str,
     anchor: Option<serde_json::Value>,
 ) -> Result<PageComment> {
-    let author = check_author(author)?;
+    let writer: crate::author::Writer = writer.into();
+    let author = check_author(writer.actor())?;
     let body = check_body(body)?;
     let anchor = check_anchor(anchor)?;
 
@@ -49,8 +57,9 @@ pub async fn add_comment(
     let _turn = super::write_turn().await?;
     let conn = super::connect(db)?;
     conn.execute(
-        "INSERT INTO kb_comments(id, project_id, path, author, body, anchor, done, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)",
+        "INSERT INTO kb_comments(id, project_id, path, author, body, anchor, done, created_at,
+            author_kind, member_id, agent, session_id, origin)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8, ?9, ?10, ?11, ?12)",
         vec![
             Value::Text(id.clone()),
             Value::Text(project_id.to_string()),
@@ -59,6 +68,11 @@ pub async fn add_comment(
             Value::Text(body),
             optional_text(anchor.as_ref().map(|anchor| anchor.to_string()).as_deref()),
             Value::Text(created_at),
+            Value::Text(writer.author.kind().as_str().to_string()),
+            optional_text(writer.author.member()),
+            optional_text(writer.author.agent()),
+            optional_text(writer.author.session()),
+            optional_text(writer.origin.as_column()),
         ],
     )
     .await
@@ -79,7 +93,7 @@ pub async fn list_comments(
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, project_id, path, author, body, anchor, done, created_at
+            "SELECT id, project_id, path, author, body, anchor, done, created_at, author_kind, member_id, agent, session_id, origin
              FROM kb_comments WHERE project_id = ?1 AND path = ?2
              ORDER BY created_at ASC, id ASC",
             vec![
@@ -111,7 +125,7 @@ pub async fn set_comment_done(db: &Database, comment_id: &str, done: bool) -> Re
     let mut rows = conn
         .query(
             "UPDATE kb_comments SET done = ?1 WHERE id = ?2
-             RETURNING id, project_id, path, author, body, anchor, done, created_at",
+             RETURNING id, project_id, path, author, body, anchor, done, created_at, author_kind, member_id, agent, session_id, origin",
             vec![
                 Value::Integer(i64::from(done)),
                 Value::Text(comment_id.to_string()),
@@ -145,7 +159,7 @@ pub async fn delete_comment(db: &Database, comment_id: &str) -> Result<()> {
 async fn comment_on(conn: &turso::Connection, comment_id: &str) -> Result<Option<PageComment>> {
     let mut rows = conn
         .query(
-            "SELECT id, project_id, path, author, body, anchor, done, created_at
+            "SELECT id, project_id, path, author, body, anchor, done, created_at, author_kind, member_id, agent, session_id, origin
              FROM kb_comments WHERE id = ?1",
             vec![Value::Text(comment_id.to_string())],
         )
@@ -223,6 +237,9 @@ fn comment_from_row(row: &Row) -> Result<PageComment> {
         project_id: required_text(row, 1)?,
         path: required_text(row, 2)?,
         author: required_text(row, 3)?,
+        actor: required_text(row, 3)?,
+        author_record: crate::store::events::author_at(row, 8, 3)?.view(None),
+        origin: text_at(row, 12)?,
         body: required_text(row, 4)?,
         anchor,
         done,

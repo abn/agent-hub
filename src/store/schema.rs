@@ -10,6 +10,26 @@ pub struct Migration {
     pub version: i64,
     /// Statements applied as one unit inside a single-writer transaction.
     pub ddl: &'static str,
+    /// A step written in Rust that runs after `ddl` in the same transaction,
+    /// for a migration whose rows cannot be moved by SQL alone.
+    pub data: Option<DataStep>,
+}
+
+/// A Rust data step, named so the migration list stays a constant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataStep {
+    /// Version 28: place old owner labels, merge same-name sessions, and move
+    /// cursors, subscriptions and comment audiences to participants.
+    Members,
+}
+
+impl DataStep {
+    /// Statements the step's transaction applies after the Rust step.
+    pub fn post(self) -> &'static str {
+        match self {
+            Self::Members => V28_POST,
+        }
+    }
 }
 
 /// The ordered migration list.
@@ -17,110 +37,142 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration {
         version: 1,
         ddl: V1,
+        data: None,
     },
     Migration {
         version: 2,
         ddl: V2,
+        data: None,
     },
     Migration {
         version: 3,
         ddl: V3,
+        data: None,
     },
     Migration {
         version: 4,
         ddl: V4,
+        data: None,
     },
     Migration {
         version: 5,
         ddl: V5,
+        data: None,
     },
     Migration {
         version: 6,
         ddl: V6,
+        data: None,
     },
     Migration {
         version: 7,
         ddl: V7,
+        data: None,
     },
     Migration {
         version: 8,
         ddl: V8,
+        data: None,
     },
     Migration {
         version: 9,
         ddl: V9,
+        data: None,
     },
     Migration {
         version: 10,
         ddl: V10,
+        data: None,
     },
     Migration {
         version: 11,
         ddl: V11,
+        data: None,
     },
     Migration {
         version: 12,
         ddl: V12,
+        data: None,
     },
     Migration {
         version: 13,
         ddl: V13,
+        data: None,
     },
     Migration {
         version: 14,
         ddl: V14,
+        data: None,
     },
     Migration {
         version: 15,
         ddl: V15,
+        data: None,
     },
     Migration {
         version: 16,
         ddl: V16,
+        data: None,
     },
     Migration {
         version: 17,
         ddl: V17,
+        data: None,
     },
     Migration {
         version: 18,
         ddl: V18,
+        data: None,
     },
     Migration {
         version: 19,
         ddl: V19,
+        data: None,
     },
     Migration {
         version: 20,
         ddl: V20,
+        data: None,
     },
     Migration {
         version: 21,
         ddl: V21,
+        data: None,
     },
     Migration {
         version: 22,
         ddl: V22,
+        data: None,
     },
     Migration {
         version: 23,
         ddl: V23,
+        data: None,
     },
     Migration {
         version: 24,
         ddl: V24,
+        data: None,
     },
     Migration {
         version: 25,
         ddl: V25,
+        data: None,
     },
     Migration {
         version: 26,
         ddl: V26,
+        data: None,
     },
     Migration {
         version: 27,
         ddl: V27,
+        data: None,
+    },
+    Migration {
+        version: 28,
+        ddl: V28,
+        data: Some(DataStep::Members),
     },
 ];
 
@@ -726,4 +778,232 @@ INSERT INTO agent_notify_cursors_v27(agent, session_id, last_seen_event_id, upda
   FROM agent_notify_cursors c JOIN sessions s ON s.agent = c.agent;
 DROP TABLE agent_notify_cursors;
 ALTER TABLE agent_notify_cursors_v27 RENAME TO agent_notify_cursors;
+"#;
+
+/// Version 28: members, shared sessions and participants.
+///
+/// The token holder is a member, not an agent, and a session belongs to its
+/// project rather than to whoever started it: one name per project, any
+/// participant writes. Every write-bearing row gains the typed author record
+/// beside its `actor` key, and delivery cursors and subscriptions are keyed by
+/// participant `(member, agent)` instead of a label.
+///
+/// This half creates the new tables and copies what moves one to one. The
+/// Rust data step then places every old owner label, merges live sessions of
+/// one name, and fills sessions, participants, cursors and subscriptions;
+/// [`V28_POST`] drops the old tables and renames the new ones into place.
+const V28: &str = r#"
+CREATE TABLE members(
+  id TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  personal_project_id TEXT,
+  created_at TEXT NOT NULL,
+  last_seen_at TEXT,
+  state TEXT NOT NULL DEFAULT 'active',
+  enrol_note TEXT,
+  enrol_source TEXT,
+  enrol_agent TEXT,
+  enrol_os TEXT,
+  enrol_host TEXT
+);
+INSERT INTO members(id, display_name, personal_project_id, created_at, last_seen_at,
+  state, enrol_note, enrol_source)
+  SELECT id, display_name, personal_project_id, created_at, last_seen_at,
+    state, enrol_note, enrol_source FROM agents;
+
+CREATE TABLE member_tokens(
+  token_hash TEXT PRIMARY KEY,
+  member_id TEXT NOT NULL REFERENCES members(id),
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at TEXT
+);
+INSERT INTO member_tokens(token_hash, member_id, created_at, last_used_at, revoked_at)
+  SELECT token_hash, agent_id, created_at, last_used_at, revoked_at FROM agent_tokens;
+
+CREATE TABLE grants_v28(
+  member_id TEXT NOT NULL REFERENCES members(id),
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(member_id, project_id)
+);
+INSERT INTO grants_v28(member_id, project_id, created_at)
+  SELECT agent_id, project_id, created_at FROM grants;
+
+CREATE TABLE projects_v28(
+  id TEXT PRIMARY KEY,
+  display_name TEXT NOT NULL,
+  owner_member TEXT,
+  created_at TEXT NOT NULL,
+  retention TEXT,
+  settings TEXT,
+  artifact_password_policy TEXT NOT NULL DEFAULT 'optional',
+  confidential INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'active'
+);
+INSERT INTO projects_v28(id, display_name, owner_member, created_at, retention, settings,
+  artifact_password_policy, confidential, status)
+  SELECT id, display_name, owner_agent, created_at, retention, settings,
+    artifact_password_policy, confidential, status FROM projects;
+
+CREATE TABLE sessions_v28(
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id),
+  session_name TEXT NOT NULL,
+  parent_id TEXT,
+  status TEXT NOT NULL DEFAULT 'active',
+  brain_path TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_activity TEXT NOT NULL,
+  deleted_at TEXT,
+  forked_from TEXT,
+  adopted_from TEXT,
+  handoff TEXT,
+  index_pending TEXT,
+  started_kind TEXT NOT NULL DEFAULT 'legacy',
+  started_member TEXT,
+  started_agent TEXT,
+  started_label TEXT
+);
+
+CREATE TABLE session_participants(
+  session_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  joined_at TEXT NOT NULL,
+  last_seen_at TEXT NOT NULL,
+  left_at TEXT,
+  PRIMARY KEY(session_id, member_id, agent)
+);
+CREATE INDEX session_participants_member
+  ON session_participants(member_id, last_seen_at DESC);
+
+CREATE TABLE session_aliases(
+  alias_id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+ALTER TABLE events ADD COLUMN author_kind TEXT NOT NULL DEFAULT 'legacy';
+ALTER TABLE events ADD COLUMN member_id TEXT;
+ALTER TABLE events ADD COLUMN agent TEXT;
+ALTER TABLE events ADD COLUMN origin TEXT;
+CREATE INDEX events_participant ON events(member_id, agent, session_id);
+
+ALTER TABLE artifacts ADD COLUMN author_kind TEXT NOT NULL DEFAULT 'legacy';
+ALTER TABLE artifacts ADD COLUMN member_id TEXT;
+ALTER TABLE artifacts ADD COLUMN agent TEXT;
+ALTER TABLE artifacts ADD COLUMN origin TEXT;
+
+ALTER TABLE comments ADD COLUMN author_kind TEXT NOT NULL DEFAULT 'legacy';
+ALTER TABLE comments ADD COLUMN member_id TEXT;
+ALTER TABLE comments ADD COLUMN agent TEXT;
+ALTER TABLE comments ADD COLUMN origin TEXT;
+ALTER TABLE comments ADD COLUMN session_id TEXT;
+
+ALTER TABLE kb_comments ADD COLUMN author_kind TEXT NOT NULL DEFAULT 'legacy';
+ALTER TABLE kb_comments ADD COLUMN member_id TEXT;
+ALTER TABLE kb_comments ADD COLUMN agent TEXT;
+ALTER TABLE kb_comments ADD COLUMN origin TEXT;
+ALTER TABLE kb_comments ADD COLUMN session_id TEXT;
+
+ALTER TABLE artifact_versions ADD COLUMN author_kind TEXT NOT NULL DEFAULT 'legacy';
+ALTER TABLE artifact_versions ADD COLUMN member_id TEXT;
+ALTER TABLE artifact_versions ADD COLUMN agent TEXT;
+ALTER TABLE artifact_versions ADD COLUMN session_id TEXT;
+ALTER TABLE artifact_versions ADD COLUMN actor TEXT;
+ALTER TABLE artifact_versions ADD COLUMN origin TEXT;
+
+CREATE TABLE feed_cursors(
+  project_id TEXT NOT NULL,
+  member_id TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  last_seen_event_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(project_id, member_id, agent)
+);
+
+CREATE TABLE notify_cursors(
+  member_id TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  session_id TEXT NOT NULL DEFAULT '',
+  last_seen_event_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(member_id, agent, session_id)
+);
+
+CREATE TABLE notify_backlog(
+  member_id TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  event_id TEXT NOT NULL,
+  PRIMARY KEY(member_id, agent, session_id, event_id)
+);
+
+CREATE TABLE notify_subscriptions_v28(
+  id TEXT PRIMARY KEY,
+  member_id TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  project_id TEXT,
+  kinds TEXT NOT NULL,
+  last_seen_event_id TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  author_filter TEXT,
+  exclude_self INTEGER NOT NULL DEFAULT 0,
+  about_self INTEGER NOT NULL DEFAULT 0,
+  session_id TEXT
+);
+
+CREATE TABLE identity_merges(
+  loser_session_id TEXT PRIMARY KEY,
+  survivor_session_id TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  stage TEXT NOT NULL DEFAULT 'planned',
+  loser_present INTEGER NOT NULL,
+  conflict_root TEXT,
+  archive_path TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE identity_merge_paths(
+  loser_session_id TEXT NOT NULL,
+  ns TEXT NOT NULL,
+  src TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  action TEXT NOT NULL,
+  dest TEXT,
+  sha256 TEXT,
+  PRIMARY KEY(loser_session_id, ns, src)
+);
+"#;
+
+/// Version 28, after the data step: the old tables go and the new ones take
+/// their names and indexes.
+const V28_POST: &str = r#"
+DROP TABLE agent_feed_cursors;
+DROP TABLE agent_notify_cursors;
+DROP TABLE notify_subscriptions;
+ALTER TABLE notify_subscriptions_v28 RENAME TO notify_subscriptions;
+CREATE INDEX notify_subscriptions_participant ON notify_subscriptions(member_id, agent);
+CREATE INDEX notify_subscriptions_session ON notify_subscriptions(session_id);
+
+DROP TABLE sessions;
+ALTER TABLE sessions_v28 RENAME TO sessions;
+CREATE UNIQUE INDEX sessions_name ON sessions(project_id, session_name) WHERE deleted_at IS NULL;
+CREATE INDEX sessions_project ON sessions(project_id, last_activity DESC);
+CREATE INDEX sessions_active ON sessions(status, last_activity DESC);
+CREATE INDEX sessions_parent ON sessions(parent_id);
+
+DROP TABLE grants;
+ALTER TABLE grants_v28 RENAME TO grants;
+
+DROP TABLE projects;
+ALTER TABLE projects_v28 RENAME TO projects;
+
+DROP TABLE agent_tokens;
+DROP TABLE agents;
+CREATE UNIQUE INDEX members_personal_project ON members(personal_project_id);
+CREATE INDEX members_pending_source ON members(enrol_source) WHERE state = 'pending';
+CREATE INDEX member_tokens_member ON member_tokens(member_id);
 "#;

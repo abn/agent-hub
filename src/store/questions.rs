@@ -124,11 +124,12 @@ pub async fn post_outcome(
 pub async fn answer(
     db: &Database,
     events_per_project: i64,
-    actor: &str,
+    actor: impl Into<crate::author::Writer>,
     question_id: &str,
     body: &str,
     idempotency_key: Option<&str>,
 ) -> Result<String> {
+    let writer: crate::author::Writer = actor.into();
     let tx = super::begin_write(db).await?;
 
     let question = events::get_in_tx(&tx, question_id)
@@ -186,7 +187,7 @@ pub async fn answer(
     let id = events::append_in_tx(
         &tx,
         events_per_project,
-        actor,
+        &writer,
         None,
         NewEvent {
             project_id: question.project_id.clone(),
@@ -227,6 +228,9 @@ pub struct Decision {
     /// decision approved one. The caller turns on the agent's enrolment share
     /// so the enrolling client can collect its token on the status long-poll.
     pub enrolled_agent: Option<String>,
+    /// Token hashes a refused enrolment deleted, which the caller sends on
+    /// `AppState::revocations`.
+    pub revoked: Vec<String>,
 }
 
 /// Approve or decline an approval, with an optional note saying why.
@@ -249,7 +253,7 @@ pub struct Decision {
 pub async fn decide(
     db: &Database,
     events_per_project: i64,
-    actor: &str,
+    actor: impl Into<crate::author::Writer>,
     approval_id: &str,
     approved: bool,
     note: Option<&str>,
@@ -278,12 +282,13 @@ pub async fn decide(
 pub async fn decide_reporting(
     db: &Database,
     events_per_project: i64,
-    actor: &str,
+    actor: impl Into<crate::author::Writer>,
     approval_id: &str,
     approved: bool,
     note: Option<&str>,
     idempotency_key: Option<&str>,
 ) -> Result<Decision> {
+    let writer: crate::author::Writer = actor.into();
     // Before anything is read or written, so a refused note decides nothing.
     let note = note.map(str::trim).filter(|note| !note.is_empty());
     if let Some(note) = note {
@@ -322,6 +327,7 @@ pub async fn decide_reporting(
         return Ok(Decision {
             event_id,
             enrolled_agent: None,
+            revoked: Vec::new(),
         });
     }
     // An approval is decided once. An approval always enters the inbox when it
@@ -380,7 +386,7 @@ pub async fn decide_reporting(
             identity::approve_enrolment_in_tx(&tx, subject, None, None, None).await?;
             enrolled_agent = Some(subject.to_string());
         } else {
-            identity::refuse_enrolment_in_tx(&tx, subject).await?;
+            let revoked = identity::refuse_enrolment_in_tx(&tx, subject).await?;
             // The refusal deletes the personal project, its events, and the
             // inbox item, so there is no thread left for a decision answer.
             // The decided approval's own id stands in for it.
@@ -388,6 +394,7 @@ pub async fn decide_reporting(
             return Ok(Decision {
                 event_id: approval_id.to_string(),
                 enrolled_agent: None,
+                revoked,
             });
         }
     }
@@ -410,7 +417,7 @@ pub async fn decide_reporting(
     let id = events::append_in_tx(
         &tx,
         events_per_project,
-        actor,
+        &writer,
         None,
         NewEvent {
             project_id: approval.project_id.clone(),
@@ -443,6 +450,7 @@ pub async fn decide_reporting(
     Ok(Decision {
         event_id: id,
         enrolled_agent,
+        revoked: Vec::new(),
     })
 }
 
@@ -520,7 +528,7 @@ async fn expire_one(db: &Database, event_id: &str, now: time::OffsetDateTime) ->
     events::append_in_tx(
         &tx,
         0,
-        HUB_ACTOR,
+        crate::author::Writer::hub(),
         None,
         NewEvent {
             project_id: item.project_id.clone(),

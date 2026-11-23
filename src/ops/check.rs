@@ -51,7 +51,11 @@ pub async fn check(dir: &Path) -> Result<CheckReport> {
     if hub_db.is_file() {
         db_paths.push(hub_db.clone());
     }
-    for root in [dir.join("sessions"), crate::brain::knowledge_dir(dir)] {
+    for root in [
+        dir.join("sessions"),
+        crate::brain::knowledge_dir(dir),
+        dir.join("merged"),
+    ] {
         for path in walk_files(&root)? {
             if path.extension().and_then(|ext| ext.to_str()) == Some("db") {
                 db_paths.push(path);

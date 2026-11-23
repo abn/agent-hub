@@ -455,8 +455,8 @@ async fn an_agent_upgraded_under_the_hubs_name_loses_its_token() {
             .expect("issue token");
         let conn = db.connect().expect("connect");
         conn.execute_batch(
-            "UPDATE agents SET id = 'hub' WHERE id = 'legacy';
-             UPDATE agent_tokens SET agent_id = 'hub' WHERE agent_id = 'legacy';",
+            "UPDATE members SET id = 'hub' WHERE id = 'legacy';
+             UPDATE member_tokens SET member_id = 'hub' WHERE member_id = 'legacy';",
         )
         .await
         .expect("rename the agent to hub");
@@ -522,8 +522,8 @@ async fn the_reserved_name_revoke_sorts_after_every_id_the_store_holds() {
             .expect("issue token");
         let conn = db.connect().expect("connect");
         conn.execute_batch(
-            "UPDATE agents SET id = 'hub' WHERE id = 'legacy';
-             UPDATE agent_tokens SET agent_id = 'hub' WHERE agent_id = 'legacy';",
+            "UPDATE members SET id = 'hub' WHERE id = 'legacy';
+             UPDATE member_tokens SET member_id = 'hub' WHERE member_id = 'legacy';",
         )
         .await
         .expect("rename the agent to hub");

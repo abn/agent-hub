@@ -46,24 +46,24 @@ pub async fn authorize(
     project_id: &str,
     access: Access,
 ) -> Result<()> {
-    if principal.is_admin {
+    if principal.is_admin() {
         return Ok(());
     }
     // A non-admin never learns whether a project exists: a missing one and a
     // denied one both return the same value, so neither the code nor the
     // message is an existence oracle. The detail goes to the log.
     let project = projects::get(db, project_id).await?.ok_or_else(|| {
-        tracing::debug!(actor = %principal.actor, project = %project_id, "project not found");
+        tracing::debug!(member = ?principal.member(), project = %project_id, "project not found");
         denied()
     })?;
 
     // Ownership rule: writing to another agent's personal space is never allowed.
     if access == Access::Write
         && project.owner_agent.is_some()
-        && !owned_by(&project.owner_agent, principal.agent_id.as_deref())
+        && !owned_by(&project.owner_agent, principal.member())
     {
         tracing::debug!(
-            actor = %principal.actor,
+            member = ?principal.member(),
             project = %project_id,
             ?access,
             "cannot write another agent's personal space"
@@ -73,13 +73,13 @@ pub async fn authorize(
 
     // Confidentiality rule: access to a confidential project requires an explicit grant.
     if project.confidential {
-        let has_grant = match principal.agent_id.as_deref() {
+        let has_grant = match principal.member() {
             Some(agent_id) => crate::store::identity::has_grant(db, agent_id, project_id).await?,
             None => false,
         };
         if !has_grant {
             tracing::debug!(
-                actor = %principal.actor,
+                member = ?principal.member(),
                 project = %project_id,
                 ?access,
                 "confidential project without grant"
@@ -103,7 +103,7 @@ pub(crate) async fn authorize_in_tx(
 ) -> Result<()> {
     let mut rows = tx
         .query(
-            "SELECT id, owner_agent, confidential, status FROM projects WHERE id = ?1",
+            "SELECT id, owner_member, confidential, status FROM projects WHERE id = ?1",
             vec![Value::Text(project_id.to_string())],
         )
         .await
@@ -111,8 +111,8 @@ pub(crate) async fn authorize_in_tx(
     let row = match rows.next().await.map_err(engine)? {
         Some(r) => r,
         None => {
-            tracing::debug!(actor = %principal.actor, project = %project_id, "project not found in tx");
-            return Err(if principal.is_admin {
+            tracing::debug!(member = ?principal.member(), project = %project_id, "project not found in tx");
+            return Err(if principal.is_admin() {
                 Error::NotFound(format!("project {project_id} not found"))
             } else {
                 denied()
@@ -124,15 +124,15 @@ pub(crate) async fn authorize_in_tx(
         _ => "active".to_string(),
     };
     if status != "active" {
-        tracing::debug!(actor = %principal.actor, project = %project_id, "project not active in tx");
-        return Err(if principal.is_admin {
+        tracing::debug!(member = ?principal.member(), project = %project_id, "project not active in tx");
+        return Err(if principal.is_admin() {
             Error::NotFound(format!("project {project_id} not found"))
         } else {
             denied()
         });
     }
 
-    if principal.is_admin {
+    if principal.is_admin() {
         return Ok(());
     }
 
@@ -142,10 +142,10 @@ pub(crate) async fn authorize_in_tx(
     };
     if access == Access::Write
         && owner_agent.is_some()
-        && !owned_by(&owner_agent, principal.agent_id.as_deref())
+        && !owned_by(&owner_agent, principal.member())
     {
         tracing::debug!(
-            actor = %principal.actor,
+            member = ?principal.member(),
             project = %project_id,
             ?access,
             "cannot write another agent's personal space in tx"
@@ -158,11 +158,11 @@ pub(crate) async fn authorize_in_tx(
         _ => false,
     };
     if confidential {
-        let has_grant = match principal.agent_id.as_deref() {
+        let has_grant = match principal.member() {
             Some(agent_id) => {
                 let mut grant_rows = tx
                     .query(
-                        "SELECT 1 FROM grants WHERE agent_id = ?1 AND project_id = ?2",
+                        "SELECT 1 FROM grants WHERE member_id = ?1 AND project_id = ?2",
                         vec![
                             Value::Text(agent_id.to_string()),
                             Value::Text(project_id.to_string()),
@@ -176,7 +176,7 @@ pub(crate) async fn authorize_in_tx(
         };
         if !has_grant {
             tracing::debug!(
-                actor = %principal.actor,
+                member = ?principal.member(),
                 project = %project_id,
                 ?access,
                 "confidential project without grant in tx"
@@ -198,7 +198,7 @@ fn denied() -> Error {
 /// agent cannot tell "does not exist" from "not allowed". The admin, who can
 /// reach everything, keeps the precise error.
 pub fn conceal(principal: &Principal, error: Error) -> Error {
-    if principal.is_admin || error.code() != ErrorCode::NotFound {
+    if principal.is_admin() || error.code() != ErrorCode::NotFound {
         return error;
     }
     denied()
@@ -208,16 +208,16 @@ pub fn conceal(principal: &Principal, error: Error) -> Error {
 /// an agent sees every non-confidential project plus any confidential project
 /// it has been granted.
 pub async fn visibility(db: &Database, principal: &Principal) -> Result<Visibility> {
-    if principal.is_admin {
+    if principal.is_admin() {
         return Ok(Visibility::All);
     }
     let conn = crate::store::connect(db)?;
-    let mut rows = match principal.agent_id.as_deref() {
+    let mut rows = match principal.member() {
         Some(agent_id) => conn
             .query(
                 "SELECT id FROM projects WHERE confidential = 0
                  UNION
-                 SELECT project_id FROM grants WHERE agent_id = ?1
+                 SELECT project_id FROM grants WHERE member_id = ?1
                  ORDER BY 1",
                 [agent_id],
             )

@@ -221,29 +221,27 @@ fn capture_store_identity(data_dir: &Path, hub_db: &Path) -> StoreIdentity {
     }
 }
 
-/// Copy the hub store aside before a migration touches it.
+/// Copy the whole store aside before a migration touches it.
 ///
-/// The copy is the engine's `VACUUM INTO`, which writes a consistent snapshot
-/// of everything committed regardless of what is still in the source's
-/// write-ahead log. It runs before any writer exists in this process and the
-/// engine's file lock keeps every other process out, so nothing is writing
-/// while it runs. Only the newest three copies are kept.
-async fn backup_before_migration(db: &turso::Database, data_dir: &Path, from: i64) -> Result<()> {
+/// The set is an offline backup (`hub.db`, every session and project brain,
+/// the knowledge bases and the artifact blobs), written under
+/// `backups/.staging-<stamp>` and renamed into place, so a set is complete or
+/// absent. Rolling back restores it whole. Only the newest three sets are
+/// kept, and older ones go only once the new one is in place.
+async fn backup_before_migration(data_dir: &Path, from: i64) -> Result<()> {
     let backups = data_dir.join("backups");
     config::private_dir(&backups)?;
-
-    let target = backups.join(format!(
-        "pre-migration-v{from}-{}.db",
-        store::filename_stamp()
-    ));
-    // The destination is a string literal to the engine, so a quote in the
-    // path is doubled rather than ending it.
-    let target_sql = target.to_string_lossy().replace('\'', "''");
-    let conn = store::connect(db)?;
-    conn.execute(&format!("VACUUM INTO '{target_sql}'"), ())
-        .await
-        .map_err(store::engine)?;
-    config::private_file(&target)?;
+    let stamp = store::filename_stamp();
+    let staging = backups.join(format!(".staging-{stamp}"));
+    let target = backups.join(format!("pre-migration-v{from}-{stamp}"));
+    if let Err(err) = crate::ops::backup::backup_aside(data_dir, &staging).await {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(store::migrate::stop_with(format!(
+            "could not copy the store and session brains aside before migrating: {err}"
+        )));
+    }
+    std::fs::rename(&staging, &target)?;
+    store::migrate::sync_dir(&backups)?;
     tracing::info!(
         path = %target.display(),
         from,
@@ -283,6 +281,16 @@ fn prune_backups(dir: &Path, keep: usize) {
     }
     backups.sort_by_key(|entry| std::cmp::Reverse(entry.0));
     for (_, stem) in backups.into_iter().skip(keep) {
+        if stem.is_dir() {
+            if let Err(err) = std::fs::remove_dir_all(&stem) {
+                tracing::warn!(
+                    path = %stem.display(),
+                    error = %err,
+                    "could not remove an old pre-migration backup"
+                );
+            }
+            continue;
+        }
         for path in [stem.clone(), sidecar(&stem, "-wal"), sidecar(&stem, "-shm")] {
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
@@ -297,11 +305,14 @@ fn prune_backups(dir: &Path, keep: usize) {
     }
 }
 
-/// Whether a directory entry is a pre-migration backup's database file.
+/// Whether a directory entry is a pre-migration backup: a set (a
+/// directory) or, from before sets, a single database file.
 fn is_backup_store(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.starts_with("pre-migration-") && name.ends_with(".db"))
+        .is_some_and(|name| {
+            name.starts_with("pre-migration-") && (name.ends_with(".db") || path.is_dir())
+        })
 }
 
 /// The path of one of a store file's sidecars.
@@ -314,23 +325,53 @@ fn sidecar(stem: &Path, suffix: &str) -> PathBuf {
 impl AppState {
     /// Create the data layout and open the store.
     pub async fn open(config: Config) -> Result<Self> {
+        let data_dir = config.data_dir.clone();
+        let hub_db = config.hub_db_path();
         // The whole store is private to the operator's account: brains,
-        // knowledge pages and artifact blobs all live here. H11.
-        config::private_dir(&config.data_dir)?;
-        config::private_dir(&config.sessions_dir())?;
-        config::private_dir(&config.knowledge_dir())?;
-        config::private_dir(&config.artifacts_dir())?;
-
-        let db = store::open_engine(&config.hub_db_path()).await?;
-
-        // A migration changes the store in place. Copy it aside first, and only
-        // when there is something to migrate: a second start on an up-to-date
-        // store must not leave a backup behind.
-        let from = store::schema_version(&db).await?;
-        if from < store::schema::SUPPORTED_MAX {
-            backup_before_migration(&db, &config.data_dir, from).await?;
+        // knowledge pages and artifact blobs all live here. H11. A fresh
+        // directory is laid out at once; an existing store is probed and
+        // planned first, so a start that stops changes nothing in it.
+        let harden = || -> Result<()> {
+            config::private_dir(&config.data_dir)?;
+            config::private_dir(&config.sessions_dir())?;
+            config::private_dir(&config.knowledge_dir())?;
+            config::private_dir(&config.artifacts_dir())?;
+            Ok(())
+        };
+        let existing = hub_db.is_file();
+        if !existing {
+            harden()?;
         }
-        let schema_version = store::migrate(&db).await?;
+
+        let mut db = store::open_engine(&hub_db).await?;
+        let from = store::schema_version(&db).await?;
+        let upgrading = existing && from > 0 && from < store::schema::SUPPORTED_MAX;
+        if upgrading {
+            let backups = data_dir.join("backups");
+            let had_backups = backups.exists();
+            let plan = store::migrate::preflight_in(&db, &data_dir, &backups).await;
+            if !had_backups {
+                let _ = std::fs::remove_dir(&backups);
+            }
+            let plan = plan?;
+            if !plan.is_clean() {
+                return Err(store::migrate::stop_error(&plan));
+            }
+        }
+        harden()?;
+
+        // A migration changes the store in place. Copy the whole store aside
+        // first, and only when there is something to migrate: a second start
+        // on an up-to-date store must not leave a backup behind, and a fresh
+        // one has nothing to keep.
+        if upgrading {
+            drop(db);
+            backup_before_migration(&data_dir, from).await?;
+            db = store::open_engine(&hub_db).await?;
+        }
+        let schema_version = store::migrate_in(&db, Some(&data_dir)).await?;
+        // Merged sessions' brains are folded in before anything is served.
+        store::migrate::run_merges(&db, &data_dir, None).await?;
 
         // Seed the id high-water mark this process mints against, from the
         // persisted table AND from the newest id the data already holds: the
@@ -466,7 +507,6 @@ impl AppState {
             }
         }
 
-        let data_dir = config.data_dir.clone();
         let brain = BrainStore::new(config.sessions_dir());
         let knowledge = BrainStore::new(config.knowledge_dir());
         let auth = Arc::new(Auth::from_config(&config));
@@ -482,7 +522,7 @@ impl AppState {
             }
             None => crate::notify::Notifier::off(),
         };
-        Ok(Self {
+        let state = Self {
             config: Arc::new(config),
             data_dir,
             schema_version,
@@ -502,7 +542,17 @@ impl AppState {
             backup_running: Arc::new(tokio::sync::Mutex::new(())),
             session_gates: SessionGates::default(),
             revocations,
-        })
+        };
+        // A brain write that crashed between its file and its index left its
+        // session marked; its search rows are rebuilt from the file.
+        let reindexed = crate::brain::shared::reindex_pending(&state).await?;
+        if reindexed > 0 {
+            tracing::info!(
+                reindexed,
+                "rebuilt the search rows of interrupted brain writes"
+            );
+        }
+        Ok(state)
     }
 
     /// Record the share flag for an approved enrolment.
@@ -564,7 +614,8 @@ impl AppState {
     /// report's event weights are dropped with them, and the screens are told
     /// to refetch.
     pub async fn sweep_prunes(&self) -> Result<u64> {
-        let committed = store::prune::sweep(&self.db, &self.data_dir).await?;
+        let committed =
+            store::prune::sweep_gated(&self.db, &self.data_dir, &self.session_gates).await?;
         if committed > 0 {
             self.stats.forget_events();
             self.notify();
@@ -694,8 +745,13 @@ pub async fn run_with(
             )
             .await
             {
-                Ok(0) => {}
-                Ok(expired) => tracing::info!(expired, "expired abandoned enrolment requests"),
+                Ok((0, _)) => {}
+                Ok((expired, hashes)) => {
+                    for hash in hashes {
+                        let _ = sweeper.revocations.send(hash);
+                    }
+                    tracing::info!(expired, "expired abandoned enrolment requests")
+                }
                 Err(err) => tracing::warn!(error = %err, "could not expire pending enrolments"),
             }
             if let Some(every) = integrity_every

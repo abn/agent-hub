@@ -615,3 +615,81 @@ fn a_loopback_hub_with_no_admin_token_answers_a_declared_agent() {
     assert_eq!(json_of(&peeked)["count"], 0);
     drop(child);
 }
+
+#[tokio::test]
+async fn a_peek_pages_a_migration_backlog_past_its_first_page_and_moves_nothing() {
+    let world = world("me-pending-migrated-backlog").await;
+    let mut child = HubProcess::serve(&world.dir, ADMIN_TOKEN, &[]);
+    let port = child.port();
+    let agent = Mcp::connect(port, &world.agent_token);
+    let asked: Vec<String> = (0..60)
+        .map(|n| {
+            agent.call(
+                "question_post",
+                json!({"project_id": PROJECT, "subject": format!("Q{n:02}"), "body": "A or B."}),
+            )["question_id"]
+                .as_str()
+                .expect("question id")
+                .to_string()
+        })
+        .collect();
+    for question_id in &asked {
+        answer(port, question_id);
+    }
+    child.stop();
+
+    // A migration leaves the cursor past rows it still owes the participant.
+    let db = common::store::open(&world.dir).await;
+    let conn = db.connect().expect("connect");
+    conn.execute(
+        "INSERT INTO notify_cursors(member_id, agent, session_id, last_seen_event_id, updated_at)
+         VALUES ('walker', 'cli', '', 'zzzz', '2020-01-01T00:00:00Z')",
+        (),
+    )
+    .await
+    .expect("cursor");
+    for question_id in &asked {
+        conn.execute(
+            "INSERT INTO notify_backlog(member_id, agent, session_id, event_id)
+             VALUES ('walker', 'cli', '', ?1)",
+            vec![turso::Value::Text(question_id.clone())],
+        )
+        .await
+        .expect("backlog row");
+    }
+    drop(conn);
+    drop(db);
+
+    let child = HubProcess::serve(&world.dir, ADMIN_TOKEN, &[]);
+    let port = child.port();
+    let mut seen = Vec::new();
+    let mut after = String::new();
+    for _ in 0..6 {
+        let query = if after.is_empty() {
+            "?limit=100".to_string()
+        } else {
+            format!("?limit=100&after={after}")
+        };
+        let page = peek(port, &world.agent_token, &query);
+        let got = titles(&page);
+        if got.is_empty() {
+            break;
+        }
+        assert!(
+            got.len() <= 50,
+            "a page is at most one backlog page: {page}"
+        );
+        after = page["cursor"].as_str().expect("cursor").to_string();
+        seen.extend(got);
+    }
+    let expected: Vec<String> = (0..60).map(|n| format!("answered: Q{n:02}")).collect();
+    assert_eq!(seen, expected, "every backlog item once, in order");
+
+    let again = peek(port, &world.agent_token, "?limit=100");
+    assert_eq!(
+        titles(&again),
+        expected[..50].to_vec(),
+        "a peek with no after still starts at the first page: {again}"
+    );
+    drop(child);
+}
