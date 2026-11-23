@@ -18,6 +18,7 @@
 
 pub mod knowledge;
 mod session;
+pub mod shared;
 
 /// The well-known path a session's latest anchor is rendered to.
 pub const RECOVERY_PATH: &str = "/fs/RECOVERY.md";

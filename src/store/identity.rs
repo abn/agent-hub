@@ -1201,3 +1201,170 @@ fn format_time(ts: time::OffsetDateTime) -> String {
 fn engine(err: turso::Error) -> Error {
     Error::Engine(err.to_string())
 }
+
+// Members: the token holders (renamed from agents). The REST members routes,
+// the principal and the enrol surface call these.
+
+/// The member an open loopback hub attributes token-less calls to.
+pub const LOOPBACK_MEMBER: &str = "loopback";
+
+/// Where a member's token stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenState {
+    Active,
+    Pending,
+    /// The hash has `revoked_at`: revoked, or replaced by a reissue.
+    Revoked,
+}
+
+/// A presented token, resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedToken {
+    pub member: String,
+    pub token_hash: String,
+    pub state: TokenState,
+}
+
+/// What a member enrolled with.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct EnrolContext {
+    pub note: Option<String>,
+    pub source: Option<String>,
+    /// The canonical agent that asked.
+    pub agent: Option<String>,
+    pub os: Option<String>,
+    pub host: Option<String>,
+}
+
+/// A member, as `GET /api/v1/members` lists it.
+#[derive(Debug, Clone, Serialize)]
+pub struct Member {
+    pub id: String,
+    pub display_name: String,
+    pub personal_project_id: String,
+    pub created_at: String,
+    pub last_seen_at: Option<String>,
+    pub has_live_token: bool,
+    /// `active` or `pending`.
+    pub state: String,
+    pub enrol: EnrolContext,
+    /// Live sessions the member participates in.
+    pub live_sessions: i64,
+}
+
+/// A self-enrolment request, from REST or the MCP `enrol` tool.
+#[derive(Debug, Clone)]
+pub struct Enrolment<'a> {
+    pub member: &'a str,
+    pub display_name: &'a str,
+    /// The address it came from.
+    pub source: &'a str,
+    pub why: &'a str,
+    pub agent: &'a str,
+    pub os: Option<&'a str>,
+    pub host: Option<&'a str>,
+}
+
+/// Whether `id` is acceptable for a new member: `[a-z0-9][a-z0-9._-]{0,62}`
+/// and not a reserved id. Legacy ids are kept as they are and never checked.
+pub fn valid_new_member_id(id: &str) -> bool {
+    let mut chars = id.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && id.len() <= 63
+        && chars
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
+        && !RESERVED_AGENT_IDS.contains(&id)
+        && id != LOOPBACK_MEMBER
+}
+
+/// Resolve a token hash to its member and state, revoked included.
+pub async fn resolve_member_token(
+    db: &Database,
+    token_hash: &str,
+) -> Result<Option<ResolvedToken>> {
+    let _ = (db, token_hash);
+    Err(super::unbuilt("identity::resolve_member_token"))
+}
+
+/// Every member.
+pub async fn list_members(db: &Database) -> Result<Vec<Member>> {
+    let _ = db;
+    Err(super::unbuilt("identity::list_members"))
+}
+
+/// One member.
+pub async fn get_member(db: &Database, id: &str) -> Result<Option<Member>> {
+    let _ = (db, id);
+    Err(super::unbuilt("identity::get_member"))
+}
+
+/// Create a member with its personal space. Refuses an id that fails
+/// [`valid_new_member_id`].
+pub async fn create_member(db: &Database, id: &str, display_name: &str) -> Result<Member> {
+    let _ = (db, id, display_name);
+    Err(super::unbuilt("identity::create_member"))
+}
+
+/// Make sure a reserved-path member exists (`local`, `loopback`), creating it
+/// with no token. Returns its id.
+pub async fn ensure_member(db: &Database, id: &str) -> Result<String> {
+    let _ = (db, id);
+    Err(super::unbuilt("identity::ensure_member"))
+}
+
+/// Record a pending enrolment with its context and issue the pending token.
+pub async fn enrol_member(
+    db: &Database,
+    enrolment: &Enrolment<'_>,
+    pending_max: usize,
+) -> Result<(Member, IssuedToken)> {
+    let _ = (db, enrolment, pending_max);
+    Err(super::unbuilt("identity::enrol_member"))
+}
+
+/// Approve a pending member, optionally renaming it. Participants, cursors and
+/// the pending token move with the rename.
+pub async fn approve_member(
+    db: &Database,
+    current_id: &str,
+    new_id: Option<&str>,
+    new_display_name: Option<&str>,
+    projects: Option<&[String]>,
+) -> Result<Member> {
+    let _ = (db, current_id, new_id, new_display_name, projects);
+    Err(super::unbuilt("identity::approve_member"))
+}
+
+/// Issue a member a new token, revoking the old. Returns the token and the
+/// hashes it revoked, which the caller sends on `AppState::revocations`.
+pub async fn issue_member_token(db: &Database, member: &str) -> Result<(IssuedToken, Vec<String>)> {
+    let _ = (db, member);
+    Err(super::unbuilt("identity::issue_member_token"))
+}
+
+/// Revoke a member's live token. Returns the revoked hashes, which the caller
+/// sends on `AppState::revocations`.
+pub async fn revoke_member_token(db: &Database, member: &str) -> Result<Vec<String>> {
+    let _ = (db, member);
+    Err(super::unbuilt("identity::revoke_member_token"))
+}
+
+#[cfg(test)]
+mod member_tests {
+    use super::*;
+
+    #[test]
+    fn new_member_ids_are_plain_lowercase_and_not_reserved() {
+        for good in ["laptop", "nas-01", "a.b_c", "0"] {
+            assert!(valid_new_member_id(good), "{good}");
+        }
+        let long = "a".repeat(64);
+        for bad in [
+            "", "Laptop", "-x", "a/b", "human", "local", "hub", "loopback", &long,
+        ] {
+            assert!(!valid_new_member_id(bad), "{bad}");
+        }
+    }
+}

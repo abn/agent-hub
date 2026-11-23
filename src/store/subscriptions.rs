@@ -375,3 +375,60 @@ fn text_at(row: &Row, index: usize) -> Result<Option<String>> {
 fn engine(err: turso::Error) -> Error {
     Error::Engine(err.to_string())
 }
+
+// Subscriptions per participant.
+
+/// A subscription to register for a participant.
+#[derive(Debug, Clone, Default)]
+pub struct NewSubscription<'a> {
+    pub session_id: Option<&'a str>,
+    pub project_id: Option<&'a str>,
+    pub kinds: &'a [String],
+    pub last_seen_event_id: &'a str,
+    /// Replaces `actor_filter`.
+    pub author: crate::author::AuthorFilter,
+    /// Drop events whose (member, agent) is the subscriber's.
+    pub exclude_self: bool,
+    /// Keep events whose audience names the subscriber's session or
+    /// participant.
+    pub about_self: bool,
+}
+
+/// Register a subscription, or return the identical one the participant
+/// holds.
+pub async fn register(
+    db: &Database,
+    key: &crate::author::ParticipantKey,
+    subscription: &NewSubscription<'_>,
+) -> Result<Registered> {
+    let _ = (db, key, subscription);
+    Err(super::unbuilt("subscriptions::register"))
+}
+
+/// A participant's subscriptions, in one session scope or all.
+pub async fn list_for(
+    db: &Database,
+    key: &crate::author::ParticipantKey,
+    session_id: Option<&str>,
+) -> Result<Vec<Subscription>> {
+    let _ = (db, key, session_id);
+    Err(super::unbuilt("subscriptions::list_for"))
+}
+
+/// Remove one of a participant's subscriptions. False when it held none by
+/// that id.
+pub async fn delete_for(
+    db: &Database,
+    key: &crate::author::ParticipantKey,
+    id: &str,
+) -> Result<bool> {
+    let _ = (db, key, id);
+    Err(super::unbuilt("subscriptions::delete_for"))
+}
+
+/// Move a subscription's cursor from `from` to `to`. False when another drain
+/// moved it first.
+pub async fn advance_from(db: &Database, id: &str, from: &str, to: &str) -> Result<bool> {
+    let _ = (db, id, from, to);
+    Err(super::unbuilt("subscriptions::advance_from"))
+}
