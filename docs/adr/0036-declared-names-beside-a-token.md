@@ -10,7 +10,9 @@ status: stable
 
 ## Status
 
-Accepted (companion to ADR 0021 and ADR 0031).
+Accepted (companion to ADR 0021 and ADR 0031). Superseded by ADR 0039: a token
+names a member, and the agent comes from the client, not from a name declared
+beside the token.
 
 ## Context
 

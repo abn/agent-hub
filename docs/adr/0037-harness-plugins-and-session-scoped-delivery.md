@@ -10,7 +10,10 @@ status: stable
 
 ## Status
 
-Accepted (companion to ADR 0035 and ADR 0036).
+Accepted (companion to ADR 0035 and ADR 0036). Amended by ADR 0039: sessions
+are shared and named on every write instead of held by a connection, the
+project file is `.agent-hub.toml`, and a plugin reaches the binary through a
+launcher.
 
 ## Context
 
