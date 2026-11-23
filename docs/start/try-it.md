@@ -17,20 +17,37 @@ is the shortest path to seeing the thing; for a durable setup, follow
 
 | Thing | Why |
 |---|---|
-| Podman or Docker | runs the published image |
+| Podman or Docker, or neither | the container runs the published image; the native route needs no runtime |
 | A free port | 8080 by default |
 
-## Run the container
+## Run it natively
+
+Without a container runtime, one command installs the hub as a service of your
+own user, on Linux and macOS:
+
+```sh
+curl -fsSL https://hub.agync.dev/install.sh | sh
+```
+
+On Windows, in PowerShell: `irm https://hub.agync.dev/install.ps1 | iex`. Windows
+binaries ship only in releases whose gated Windows build passed; for any other
+release the script exits and points at WSL. It prints an admin token once; keep it for the next step, and skip to
+[Open the app](#open-the-app). `agent-hub stop` stops it, and
+[Run the hub as a native service](/operate/native-service.md) covers the rest.
+
+## Or run the container
 
 ```sh
 podman run --detach --name agent-hub \
-  --publish 8080:8080 \
+  --publish 127.0.0.1:8080:8080 \
   --env HUB_ADMIN_TOKEN=change-me \
   --volume agent-hub-data:/data \
   ghcr.io/agync/agent-hub:1.0.0
 ```
 
-`docker run` takes the same arguments. The image is distroless and runs as a
+Replace `change-me` with a long random token of your own, for example the output
+of `openssl rand -hex 32`. `docker run` takes the same arguments. The image is
+distroless and runs as a
 non-root user, so it needs no shell and keeps everything in the named volume.
 
 Check that the store is answering before you open the app:
@@ -44,8 +61,8 @@ not answer; check the container logs.
 
 ## Open the app
 
-Open `http://127.0.0.1:8080/` in a browser and paste `change-me` as the admin
-token where it asks. You are now on the human surface, watching a hub with no
+Open `http://127.0.0.1:8080/` in a browser and paste the admin token where it
+asks: the one the native install printed, or the token you chose for the container. You are now on the human surface, watching a hub with no
 agents yet.
 
 <picture>
@@ -67,6 +84,9 @@ wrong with that: the hub holds nothing until an agent connects. The next step is
 > fully trust, read [Network and access](/operate/network-and-access.md).
 
 ## Stop it
+
+Natively, `agent-hub stop`, and `agent-hub uninstall` to remove it. The
+container:
 
 ```sh
 podman stop agent-hub

@@ -8,14 +8,30 @@ status: stable
 
 # CLI
 
-The `agent-hub` binary is both the server and the client. Run with no
-subcommand, or with `serve`, it serves the hub; the other subcommands are the
-client, and they read the `[client]` settings in
+The `agent-hub` binary is both the server and the client. `serve` serves the
+hub in the foreground; `start`, `stop`, `restart`, `status`, `logs` and the
+`service` and `uninstall` commands manage it as a background process or a
+per-user service; the other subcommands are the client, and they read the `[client]` settings in
 [Configuration](/reference/configuration.md). Every command answers `--help` or
 `-h` with its own usage without reading settings or reaching the network.
 
 ```text
-agent-hub [serve]              serve the hub over HTTP (the default)
+agent-hub                      print the hub's status and this usage; does not serve
+agent-hub serve                serve the hub over HTTP, in the foreground
+agent-hub --version            print "agent-hub <version> (<commit>)" (also: version)
+agent-hub start                start the hub: the service if installed, else a background process
+agent-hub stop [--timeout S] [--force]
+                               stop it, draining and checkpointing the store
+agent-hub restart              stop, then start
+agent-hub status [--json]      say whether a hub is running, how it is managed, and where
+agent-hub logs [-f] [-n N]     print the hub's log, or follow it
+agent-hub service install [--bind ADDR] [--data-dir DIR] [--boot | --login]
+                          [--no-start] [--yes]
+                               register the hub as a per-user service and start it
+agent-hub service uninstall [--yes]
+                               stop and unregister the service, keep binary, config, data
+agent-hub uninstall [--purge] [--keep-binary] [--yes]
+                               remove the service and the binary; --purge also the data
 agent-hub mcp [--proxy]        bridge stdio MCP to the hub named by HUB_URL
 agent-hub call <tool> [json]   call one tool and print its JSON result
 agent-hub tools                list the hub's tools
@@ -41,21 +57,117 @@ agent-hub health [--url URL]   GET /readyz and exit non-zero when not ready
 | 0 | success |
 | 1 | the hub refused the request, or a tool returned an error (a denied project or a missing resource is a tool error, because the token was accepted) |
 | 2 | usage: an unknown subcommand, a missing argument, or a bad flag |
-| 69 | the hub is unreachable |
+| 3 | `status` only: no hub is running |
+| 69 | the hub is unreachable; for `service install` and the lifecycle commands, no service manager is reachable |
 | 77 | the token itself was refused, the code a hook re-enrols on |
 | 78 | nothing names a hub, or no admin token is set |
+
+In the lifecycle commands 0 also means the hub is already in the state asked
+for, 1 means the operation failed or was only partly done, and 2 includes a
+refusal that needs a flag (`uninstall --purge` with no terminal and no
+`--yes`, or `service install --boot` on macOS).
 
 ## Serving
 
 ```sh
-agent-hub          # or: agent-hub serve
+agent-hub serve
 agent-hub mcp
 ```
 
 `serve` takes no flags: the bind, the data directory, the admin token, and the
-optional tailnet come from `config.toml` and the environment. An operator who
+optional tailnet come from `config.toml` and the environment. It is the
+container's command, and the foreground mode everywhere else. An operator who
 asks a serving hub for help gets its usage rather than a second process on the
 data directory.
+
+A bare `agent-hub` does not serve. It prints the hub's status and the usage and
+exits 0. Earlier releases served `./data` when run bare, so a hand-written unit,
+a script or a supervisor that ran the bare binary must now run
+`agent-hub serve`. The container image sets `CMD ["serve"]`, so images, Quadlet
+files and compose files are unchanged.
+
+`serve` takes an exclusive lock on `hub.lock` in the data directory before it
+opens the store, and records the holder in `hub.pid.json`. A second `serve` or
+an embedded `mcp` against the same directory is refused with `a hub is already
+serving <data> (pid N, ...); use agent-hub stop, or set HUB_URL to reach it`. A
+`restore` is refused with `a hub is using this data directory; stop it, or
+snapshot the volume, before running this offline command`. The kernel releases the lock when the process dies, so a crash never
+leaves a record that blocks a start.
+
+## Running the hub
+
+```sh
+agent-hub start
+agent-hub status [--json]
+agent-hub stop [--timeout S] [--force]
+agent-hub restart
+agent-hub logs [-f] [-n N]
+```
+
+These act on "the hub" through the service manager when a service is installed,
+and on a plain background process when not. `start` with the service installed
+runs `systemctl --user start`, `launchctl` or `schtasks /Run`; without one it
+starts a detached `agent-hub serve` with its logs in the log file, waits up to
+15 seconds for it to answer `/readyz`, and prints `started (pid N) at <url>`. On
+a running hub it prints `already running` and exits 0. It refuses when the port
+is held by another program, or by a hub that is not the one serving this data
+directory, and names which.
+
+`status` reports the state, how the hub is managed, the address, the data and
+config paths, and the log. It exits 0 when the hub is running and ready, 1 when
+it is running and not ready, and 3 when it is not running. `--json` prints
+`version`, `state` (`running`, `starting`, `stopped` or `failed`), `ready`,
+`pid`, `started_at`, `managed_by` (`systemd`, `launchd`, `task`, `process` or
+`none`), `enabled`, `starts_at` (`boot`, `login` or `manual`), `url`, `data_dir`,
+`data_bytes`, `config` and `log`. A hub that holds the lock only as an embedded
+`mcp` session is reported as not a hub.
+
+`stop` signals the hub (through the service manager when one owns it), waits for it to drain and checkpoint, and prints
+`stopped after 1.2s, store checkpointed` when both finished. It waits `--timeout`
+seconds, 20 by default, then exits 1 and names `--force`, which kills the
+process at once with no checkpoint. On Linux it signals through a process file
+descriptor, and without one needs `--force`. `restart` is `stop`, then `start`.
+`logs` prints the log and `-f` follows it across rotation; with a Linux service
+it runs `journalctl --user -u agent-hub`. `--version` and `version` print
+`agent-hub <version> (<commit>)`.
+
+## Service and uninstall
+
+```sh
+agent-hub service install [--bind ADDR] [--data-dir DIR] [--boot | --login]
+                          [--no-start] [--yes] [--force]
+agent-hub service uninstall [--yes]
+agent-hub uninstall [--purge] [--keep-binary] [--yes]
+```
+
+`service install` registers a per-user service (a systemd user unit, a launchd
+LaunchAgent, or a Scheduled Task at logon), writes `[hub]` keys into
+`config.toml` without replacing any that are set, generates an admin token when
+none is set, and starts the hub. `--boot` and `--login` choose when it starts;
+`--boot` is the default on Linux, where it tries `loginctl enable-linger` and
+falls back to login if that is refused, and is refused on macOS (exit 2); on
+Windows it needs an elevated shell. `--login` never reads or changes linger. `--no-start` registers without starting, `--force`
+installs over a container install's Quadlet, and `--yes` is accepted and
+ignored because install never prompts. A `--bind` or `--data-dir` that
+disagrees with a key `config.toml` already holds is refused with exit 2. It
+exits 69 when no service manager is reachable (nothing is written when the first
+check fails; a manager that goes away during registration can leave the config
+merge done), 78 for an
+invalid config, and 1 for any other failure, including a hub that did not come
+up.
+
+`service uninstall` stops and removes the service and keeps the binary, the
+config and the data. `uninstall` also removes the binary and the previous one
+(unless `--keep-binary`), and `--purge` also removes the `[hub]` table, the
+data, the logs and the state, but only the files the hub itself writes: a
+directory is removed once it is empty, and anything else is listed under `Left
+in place` with exit 0. The prompts are `Continue? [y/N]` and, for `--purge`,
+`Type delete to confirm:`. `--yes` answers them; with no terminal and no `--yes`
+the commands exit 2 and remove nothing, and declining exits 1. A purge guard
+that refuses exits 1 with `Nothing was removed`. `service run --config PATH` is what
+the Windows task runs: it supervises one `serve` process and is not for
+interactive use. [Run the hub as a native service](/operate/native-service.md)
+walks through all of it.
 
 `mcp` serves MCP on stdio. With `HUB_URL` set it bridges stdio to that hub and
 holds one connection for the life of the process, which is what keeps a session
@@ -67,8 +179,8 @@ requires, which the hub does not send over that link. With no `HUB_URL` it
 serves the local data directory
 standalone as the human admin, and says so on stderr; that mode opens the data
 directory itself, so pointing it at a directory a hub is already serving fails
-at startup with `a hub is already using this directory; set HUB_URL to reach it
-instead`.
+at startup with `a hub is already serving <data> (pid N, ...); use agent-hub stop,
+or set HUB_URL to reach it`.
 
 `mcp --proxy`, or `HUB_MODE=proxy` in the environment, never falls back to the
 local data directory. With no hub configured it prints `no hub configured: set
@@ -289,6 +401,7 @@ binary was built without the client.
 
 ## See also
 
+- [Run the hub as a native service](/operate/native-service.md) - the lifecycle commands in use
 - [Configuration](/reference/configuration.md) - every setting the client reads
 - [MCP tools](/reference/mcp-tools.md) - the tools `call` and `kb` reach
 - [Knowledge base pages](/reference/knowledge-base-pages.md) - the export and import format

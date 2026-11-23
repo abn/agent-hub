@@ -13,6 +13,13 @@ after a restart and drains cleanly on stop. This page starts from a built image;
 building one, the binary, and every setting are in
 [Install and run the hub](/start/install.md).
 
+> [!NOTE]
+> To run the hub with no container runtime, as a per-user service that
+> installs with one command, see
+> [Run the hub as a native service](/operate/native-service.md). It and the
+> container cannot share a port, and the installer refuses to run beside a
+> Quadlet unit named `agent-hub`. The rest of this page is for the container.
+
 ## Before you start
 
 | Thing | Why |
@@ -153,6 +160,7 @@ It prints `ready` and exits 0 while the store answers.
 
 ## See also
 
+- [Run the hub as a native service](/operate/native-service.md) - the same, with no container runtime
 - [Network and access](/operate/network-and-access.md) - the bind, TLS, and a tailnet
 - [Back up and restore](/operate/backup-and-restore.md) - take a consistent backup
 - [Upgrade and roll back](/operate/upgrade-and-rollback.md) - move to a new image tag safely

@@ -1,7 +1,7 @@
 ---
 type: Guide
 title: Install and run the hub
-description: Install the container, a release binary, or from source, and run it
+description: Install the hub natively, in a container, from an archive or from source, and run it
 tags: [user, install, config]
 status: stable
 ---
@@ -10,26 +10,56 @@ status: stable
 
 By the end you will have the hub running and answering its health probes. This
 page is the one canonical install; [Choose your setup](/start/choose-your-setup.md)
-tells you which lane is yours, and [Deploy as a service](/operate/deploy-as-a-service.md)
-turns a running hub into one that starts on boot.
+tells you which lane is yours. The native install starts on its own (at boot on
+Linux when the system allows it); the container lane turns into a boot-time service with
+[Deploy as a service](/operate/deploy-as-a-service.md).
 
 ## Before you start
 
 | Thing | Why |
 |---|---|
-| An admin token | the control surface refuses every request without one |
-| A place for the data | a named volume, or a directory you control |
-| Podman or Docker, or a Rust toolchain | one of the install lanes below |
+| A normal user account | the native install is a per-user service and refuses to run as root |
+| An admin token | the control surface refuses every request without one; the native install creates it for you |
+| A place for the data | the native install picks one; the container needs a named volume or a directory |
+| Podman or Docker, or a Rust toolchain | only for the container and source lanes |
+
+## The native install
+
+One command downloads the release for the machine, checks it, places the
+binary, and registers a service that runs as your user. No container runtime
+and no `sudo`. On Linux and macOS:
+
+```sh
+curl -fsSL https://hub.agync.dev/install.sh | sh
+```
+
+On Windows, in PowerShell (this needs a release that carries the Windows
+build; an earlier one stops with a pointer to WSL):
+
+```powershell
+irm https://hub.agync.dev/install.ps1 | iex
+```
+
+The hub listens on `127.0.0.1:8080`, starts on its own (at boot on Linux when linger can be turned on, otherwise
+at login; at login on macOS and Windows), and prints a generated admin token once. Manage it
+with `agent-hub status`, `stop`, `start`, `restart` and `logs`. Running the
+command again upgrades it. Flags, paths, upgrade, uninstall and a move from a
+container are in
+[Run the hub as a native service](/operate/native-service.md).
+
+For a machine that only runs agents and needs the binary on `PATH`, add
+`--no-service`: `curl -fsSL https://hub.agync.dev/install.sh | sh -s -- --no-service`.
+
+## The container
+
+Pull and run the published image. It is the isolation option, and the lane
+for a host where you would rather not install anything.
 
 Set the token once and keep it out of your shell history where you can:
 
 ```sh
 HUB_ADMIN_TOKEN="$(openssl rand -hex 32)"
 ```
-
-## The container
-
-Pull and run the published image. This is the default lane.
 
 ```sh
 podman pull ghcr.io/agync/agent-hub:1.0.0
@@ -69,8 +99,10 @@ volume keeps the data.
 
 ## A release binary
 
-Each GitHub release carries one archive per platform: Linux on x86_64 and arm64,
-statically linked, and macOS on Apple silicon and Intel. Windows is not built.
+The installer fetches this for you; do it by hand to inspect the archive first
+or to mirror it. Each GitHub release carries one archive per platform: Linux on
+x86_64 and arm64, statically linked, and macOS on Apple silicon and Intel. A
+release that includes the Windows build adds a `.zip` for `x86_64-pc-windows-msvc`.
 The archive holds the full binary, server and client in one, with a `.sha256`
 checksum beside it. Download the one for the host, check it, and unpack it:
 
@@ -87,7 +119,25 @@ tar -xzf "$NAME.tar.gz"
 ```
 
 `TARGET` is one of `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
-`aarch64-apple-darwin`, or `x86_64-apple-darwin`.
+`aarch64-apple-darwin` or `x86_64-apple-darwin`. Run the unpacked binary with
+`serve` to start the hub in the foreground.
+
+On Windows the archive is a `.zip` for `x86_64-pc-windows-msvc`, present only on
+a release whose Windows build passed. In PowerShell:
+
+```powershell
+$Version = "v1.2.0"
+$Name = "agent-hub-$Version-x86_64-pc-windows-msvc"
+$Base = "https://github.com/agync/agent-hub/releases/download/agent-hub-$Version"
+Invoke-WebRequest "$Base/$Name.zip" -OutFile "$Name.zip"
+Invoke-WebRequest "$Base/$Name.sha256" -OutFile "$Name.sha256"
+(Get-FileHash "$Name.zip" -Algorithm SHA256).Hash.ToLower() -eq (Get-Content "$Name.sha256").Split(" ")[0]
+Expand-Archive "$Name.zip" -DestinationPath .
+& ".\$Name\agent-hub.exe" --help
+```
+
+The comparison prints `True` when the checksum matches. Run `agent-hub.exe serve`
+to start the hub in the foreground.
 
 ## From source
 
@@ -101,11 +151,13 @@ cargo build --release --locked
 
 ## Run the binary
 
-Point the process at a data directory and a bind address:
+`serve` is the foreground command. A bare `agent-hub` no longer serves: it
+prints the hub's status and the usage. Point the process at a data directory
+and a bind address:
 
 ```sh
 HUB_DATA_DIR=./data HUB_BIND=127.0.0.1:8080 HUB_ADMIN_TOKEN=change-me \
-  ./target/debug/agent-hub
+  ./target/debug/agent-hub serve
 ```
 
 On start it prints one line naming the bound address, the data directory, and
@@ -140,7 +192,8 @@ has the procedure.
 ## You should now see
 
 A hub logging its bound address and answering `/readyz` with a version. Open
-`http://127.0.0.1:8080/` and paste the admin token:
+`http://127.0.0.1:8080/` and paste the admin token (the native install printed
+it, and saved it in `config.toml`):
 [Open the app and log in](/start/first-login.md) walks through it.
 
 > [!NOTE]
@@ -151,6 +204,7 @@ A hub logging its bound address and answering `/readyz` with a version. Open
 ## See also
 
 - [Choose your setup](/start/choose-your-setup.md) - which lane is yours
-- [Deploy as a service](/operate/deploy-as-a-service.md) - start on boot
+- [Run the hub as a native service](/operate/native-service.md) - the per-user service in full
+- [Deploy as a service](/operate/deploy-as-a-service.md) - the container on boot
 - [Network and access](/operate/network-and-access.md) - TLS, a reverse proxy, a tailnet
 - [Configuration](/reference/configuration.md) - every setting

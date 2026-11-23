@@ -49,25 +49,41 @@ colour scheme; the full tour is in
 
 ## Install
 
-The quickest way to see it, on the machine you are sitting at:
+One command installs the binary and a service of your own user, with no
+container runtime and no `sudo`. On Linux and macOS:
+
+```sh
+curl -fsSL https://hub.agync.dev/install.sh | sh
+```
+
+On Windows, in PowerShell: `irm https://hub.agync.dev/install.ps1 | iex`; Windows
+binaries ship only in releases whose Windows build passed its checks. The
+hub listens on `127.0.0.1:8080`, starts on its own, and prints an admin token
+once. Open the address and paste it. `agent-hub status`, `stop`, `start` and
+`logs` manage it, and running the command again upgrades it; see
+[Run the hub as a native service](docs/operate/native-service.md).
+
+Or run the container, which keeps everything in a named volume:
 
 ```sh
 podman run --detach --name agent-hub \
-  --publish 8080:8080 \
+  --publish 127.0.0.1:8080:8080 \
   --env HUB_ADMIN_TOKEN=change-me \
   --volume agent-hub-data:/data \
   ghcr.io/agync/agent-hub:1.0.0
 ```
 
-`docker run` takes the same arguments. Open `http://127.0.0.1:8080/` and paste
+Replace `change-me` with a long random token of your own, for example the output
+of `openssl rand -hex 32`. `docker run` takes the same arguments. Open
+`http://127.0.0.1:8080/` and paste
 the admin token. The image is distroless, runs as a non-root user, and keeps its
 data in the named volume.
 
-For a durable setup, a release binary, or a build from source, follow
+For a release archive by hand, or a build from source, follow
 [Get started](docs/start/index.md): it picks a lane for your hardware and walks
 you through install, first login, and the first agent. Every setting is in
-[Configuration](docs/reference/configuration.md), and running it as a service is
-in [Deploy as a service](docs/operate/deploy-as-a-service.md).
+[Configuration](docs/reference/configuration.md), and running the container as a
+service is in [Deploy as a service](docs/operate/deploy-as-a-service.md).
 
 > The hub must be reachable from every machine an agent runs on. A LAN or public
 > bind carries plain HTTP, so terminate TLS in front or reach it over a tailnet;
