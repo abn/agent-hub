@@ -389,14 +389,8 @@ pub async fn usage_from(
 /// the data directory can be gone or unreadable, and a storage screen showing
 /// 0 of 0 would be a number that is real-looking and wrong.
 fn volume(data_dir: &Path) -> Option<(i64, i64)> {
-    match rustix::fs::statvfs(data_dir) {
-        Ok(stat) => {
-            let block = i64::try_from(stat.f_frsize).ok()?;
-            Some((
-                i64::try_from(stat.f_blocks).ok()? * block,
-                i64::try_from(stat.f_bavail).ok()? * block,
-            ))
-        }
+    match super::volume_space(data_dir) {
+        Ok(space) => space.total.zip(space.free),
         Err(err) => {
             tracing::warn!(
                 path = %data_dir.display(),
@@ -416,11 +410,22 @@ pub fn host_name(configured: Option<&str>) -> String {
     if let Some(name) = configured {
         return name.to_string();
     }
+    system_host_name()
+}
+
+#[cfg(unix)]
+fn system_host_name() -> String {
     rustix::system::uname()
         .nodename()
         .to_str()
         .map(str::to_string)
         .unwrap_or_default()
+}
+
+/// Windows keeps the machine name in `COMPUTERNAME` for every process.
+#[cfg(windows)]
+fn system_host_name() -> String {
+    std::env::var("COMPUTERNAME").unwrap_or_default()
 }
 
 /// The bytes a project's knowledge base holds, including what the engine

@@ -168,7 +168,7 @@ impl Run<'_> {
 
     /// The directories a transcript may be read from.
     fn transcript_roots(&self) -> Vec<PathBuf> {
-        let Some(home) = (self.env)("HOME").filter(|home| !home.is_empty()) else {
+        let Some(home) = state::home_dir(self.env) else {
             return Vec::new();
         };
         let home = PathBuf::from(home);
@@ -621,12 +621,21 @@ async fn pre_compact(run: &Run<'_>) -> Result<Output, String> {
     Ok(output)
 }
 
-/// Whether `real`, a canonical path, is under one of `roots`.
-fn under_roots(real: &std::path::Path, roots: &[PathBuf]) -> bool {
+/// The canonical form of each root that exists. This is done once per read, so
+/// the check before the open and the check after it hold the same roots even
+/// if a root is swapped for a junction in between.
+fn resolve_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
     roots
         .iter()
         .filter_map(|root| std::fs::canonicalize(root).ok())
-        .any(|root| real.starts_with(root))
+        .collect()
+}
+
+/// Whether `real`, a canonical path, is under one of `roots`, which are
+/// already canonical. The comparison is by path component and does not fold
+/// case, which would be wrong on a case-sensitive directory.
+fn under_roots(real: &std::path::Path, roots: &[PathBuf]) -> bool {
+    roots.iter().any(|root| real.starts_with(root))
 }
 
 /// Whether the file that was opened is still under `roots`: the path named a
@@ -641,9 +650,15 @@ fn opened_under_roots(file: &std::fs::File, real: &std::path::Path, roots: &[Pat
         std::fs::canonicalize(format!("/proc/self/fd/{}", file.as_raw_fd()))
             .is_ok_and(|opened| under_roots(&opened, roots))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(windows)]
+    {
+        let _ = real;
+        resolve::handle_path(file).is_some_and(|opened| under_roots(&opened, roots))
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
     {
         use std::os::unix::fs::MetadataExt;
+        let _ = roots;
         match (file.metadata(), std::fs::metadata(real)) {
             (Ok(held), Ok(named)) => held.dev() == named.dev() && held.ino() == named.ino(),
             _ => false,
@@ -658,12 +673,13 @@ fn opened_under_roots(file: &std::fs::File, real: &std::path::Path, roots: &[Pat
 /// regular file under one of `roots`. The open does not wait, which keeps a
 /// FIFO from holding the hook, and the last 256 KiB are read from the handle.
 fn transcript_excerpt(path: &str, roots: &[PathBuf]) -> Option<String> {
+    let roots = resolve_roots(roots);
     let real = std::fs::canonicalize(path).ok()?;
-    if !under_roots(&real, roots) {
+    if !under_roots(&real, &roots) {
         return None;
     }
     let mut file = resolve::open_regular(&real)?;
-    if !opened_under_roots(&file, &real, roots) {
+    if !opened_under_roots(&file, &real, &roots) {
         return None;
     }
     let size = file.metadata().ok()?.len();
@@ -805,5 +821,18 @@ mod tests {
         let done = execute(&arguments(&["nonsense"]), Instant::now(), &silent, &nothing);
         assert_eq!(done.stdout, "{}");
         assert!(done.error.is_some());
+    }
+
+    #[test]
+    fn roots_are_matched_by_component_and_missing_roots_are_dropped() {
+        let base = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let missing = base.join("no-such-root");
+        let roots = resolve_roots(&[base.clone(), missing]);
+        assert_eq!(roots, vec![std::fs::canonicalize(&base).expect("src")]);
+        let inside = roots[0].join("lib.rs");
+        assert!(under_roots(&inside, &roots));
+        let sibling = std::path::PathBuf::from(format!("{}-evil/lib.rs", roots[0].display()));
+        assert!(!under_roots(&sibling, &roots));
+        assert!(!under_roots(&inside, &[]));
     }
 }
