@@ -143,10 +143,10 @@ test.describe("a screen that fails to load", () => {
   });
 
   test("the Access screen's card still renders when its list fails", async ({ hub, page }) => {
-    await page.route(/\/api\/v1\/agents(\?|$)/, refuse(500, "Agents unavailable"));
+    await page.route(/\/api\/v1\/members(\?|$)/, refuse(500, "Members unavailable"));
     await page.goto(`${hub.baseUrl}/#/access`);
     const card = page.locator("main .card").filter({ hasText: "Access" });
-    await expect(card.getByText("Agents unavailable")).toBeVisible();
+    await expect(card.getByText("Members unavailable")).toBeVisible();
   });
 });
 

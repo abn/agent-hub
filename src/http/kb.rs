@@ -141,10 +141,7 @@ pub(crate) async fn check_access(
     headers: &HeaderMap,
     project_id: &str,
 ) -> std::result::Result<(), Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(headers).as_deref())
-        .map_err(problem)?;
+    crate::http::auth::admin(state, bearer_token(headers).as_deref())?;
     match projects::get(&state.db, project_id)
         .await
         .map_err(problem)?

@@ -446,7 +446,7 @@ function desktopTable(usage) {
 
     // 1. PROJECT
     const tdProject = el("td", "cell-project");
-    const isLive = (project.agents_active || 0) > 0;
+    const isLive = (project.sessions_live || 0) > 0;
     const dot = el("span", `rail-dot ${isLive ? "live" : "idle"}`);
     dot.setAttribute("aria-hidden", "true");
     const link = el("a", "storage-proj-link", projectName(project));

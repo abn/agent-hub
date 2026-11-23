@@ -275,7 +275,7 @@ export function quietHomePayload(fields = {}) {
   return {
     unread: 0,
     waiting: 0,
-    agents_active: 2,
+    sessions_live: 2,
     last_event_at: null,
     recent: [],
     unseen: [],

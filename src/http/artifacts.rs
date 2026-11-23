@@ -23,6 +23,7 @@ use serde_json::{Value, json};
 use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
+use crate::http::filters::Params;
 use crate::http::origin::request_origin;
 use crate::http::problem::{Problem, ProblemPath, ProblemQuery, json_body};
 use crate::markdown::escape_html;
@@ -44,12 +45,46 @@ pub struct ArtifactListQuery {
     pub session: Option<String>,
     /// Alias for `session`.
     pub session_id: Option<String>,
+    /// Filter to artifacts this member wrote.
+    pub member: Option<String>,
+    /// Filter to artifacts this agent wrote, by any spelling of its name.
+    pub agent: Option<String>,
+    /// Filter to one author kind: human, legacy, participant or local.
+    pub kind: Option<String>,
 }
 
 impl ArtifactListQuery {
     fn session_filter(&self) -> Option<&str> {
         self.session.as_deref().or(self.session_id.as_deref())
     }
+
+    /// The author filters, read the way every listing reads them.
+    fn author_filters(&self) -> std::result::Result<Params, Problem> {
+        let mut params = Params::default();
+        for (key, value) in [
+            ("member", &self.member),
+            ("agent", &self.agent),
+            ("kind", &self.kind),
+        ] {
+            if let Some(value) = value {
+                params
+                    .take(key, value)
+                    .map_err(|err| Problem::from_error(&err))?;
+            }
+        }
+        Ok(params)
+    }
+}
+
+/// The artifacts the author filters keep. A listing with none is unchanged.
+fn keep_matching(artifacts: Vec<Artifact>, filters: &Params) -> Vec<Artifact> {
+    if filters.is_empty() {
+        return artifacts;
+    }
+    artifacts
+        .into_iter()
+        .filter(|artifact| serde_json::to_value(artifact).is_ok_and(|row| filters.keeps(&row)))
+        .collect()
 }
 
 /// `GET /api/v1/artifacts`
@@ -60,10 +95,7 @@ pub async fn list_session(
     headers: HeaderMap,
     ProblemQuery(query): ProblemQuery<ArtifactListQuery>,
 ) -> std::result::Result<Json<ArtifactList>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let artifacts = match query.session_filter() {
         Some(session_id) => artifact_store::list_for_session(&state.db, session_id).await,
@@ -75,6 +107,7 @@ pub async fn list_session(
     }
     .map_err(|err| Problem::from_error(&err))?;
 
+    let artifacts = keep_matching(artifacts, &query.author_filters()?);
     Ok(Json(ArtifactList { artifacts }))
 }
 
@@ -87,16 +120,14 @@ pub async fn list(
     headers: HeaderMap,
     ProblemQuery(query): ProblemQuery<ArtifactListQuery>,
 ) -> std::result::Result<Json<ArtifactList>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let artifacts =
         artifact_store::list_with_session(&state.db, &project_id, query.session_filter())
             .await
             .map_err(|err| Problem::from_error(&err))?;
 
+    let artifacts = keep_matching(artifacts, &query.author_filters()?);
     Ok(Json(ArtifactList { artifacts }))
 }
 
@@ -250,10 +281,7 @@ pub async fn content(
     ProblemQuery(query): ProblemQuery<VersionQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<ArtifactContent>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let (artifact, bytes) = match query.version {
         Some(version) => {
@@ -299,10 +327,7 @@ pub async fn versions(
     ProblemPath(artifact_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<VersionList>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let versions = artifact_store::list_versions(&state.db, &artifact_id)
         .await
@@ -333,10 +358,7 @@ async fn squash_versions_for(
     headers: &HeaderMap,
     requested: Option<i64>,
 ) -> std::result::Result<Json<Value>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(state, bearer_token(headers).as_deref())?;
     let target = squash_target(state, artifact_id, requested).await?;
     let removed = artifact_store::squash_versions(&state.db, &state.data_dir, artifact_id, target)
         .await
@@ -431,10 +453,7 @@ pub async fn comment_list(
     ProblemPath(artifact_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<Value>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let listed = comment_store::list_comments(&state.db, &artifact_id)
         .await
@@ -456,10 +475,7 @@ pub async fn comment_post(
     headers: HeaderMap,
     body: std::result::Result<Json<CommentPostBody>, JsonRejection>,
 ) -> std::result::Result<Json<Value>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let payload = json_body(body, "comment body must be JSON with a body field")?;
     let anchor = parse_anchor(payload.anchor).map_err(|err| Problem::from_error(&err))?;
@@ -508,10 +524,7 @@ pub async fn comment_resolve(
     headers: HeaderMap,
     body: std::result::Result<Json<CommentResolveBody>, JsonRejection>,
 ) -> std::result::Result<Json<Value>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let payload = json_body(body, "resolve body must be JSON with a done field")?;
     let comment = comment_store::get_comment(&state.db, &comment_id)
@@ -539,10 +552,7 @@ pub async fn comment_remove(
     ProblemPath((artifact_id, comment_id)): ProblemPath<(String, String)>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<DestroyResult>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let comment = comment_store::get_comment(&state.db, &comment_id)
         .await
@@ -568,10 +578,7 @@ pub async fn destroy(
     ProblemPath(artifact_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<DestroyResult>, Problem> {
-    let principal = state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    let principal = crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     artifact_store::delete(&state.db, &state.data_dir, &principal.actor, &artifact_id)
         .await
@@ -593,10 +600,7 @@ pub async fn raw(
     ProblemQuery(query): ProblemQuery<VersionQuery>,
     headers: HeaderMap,
 ) -> std::result::Result<Response, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let (artifact, bytes) = match query.version {
         Some(version) => {
@@ -728,10 +732,7 @@ pub async fn viewer_pass(
     ProblemPath(artifact_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<ViewerPassResponse>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let artifact = artifact_store::metadata(&state.db, &artifact_id)
         .await
@@ -821,10 +822,7 @@ pub async fn live(
     ProblemPath(artifact_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<LiveState>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let artifact = artifact_store::metadata(&state.db, &artifact_id)
         .await
@@ -1034,10 +1032,7 @@ pub async fn share_create(
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> std::result::Result<Json<ShareResponse>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let req: ShareCreateRequest = if body.is_empty() {
         ShareCreateRequest::default()
@@ -1088,10 +1083,7 @@ pub async fn share_revoke(
     ProblemPath(artifact_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<StatusCode, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     artifact_store::revoke_share(&state.db, &artifact_id)
         .await
@@ -1108,10 +1100,7 @@ pub async fn share_get(
     ProblemPath(artifact_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<ShareResponse>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let share = artifact_store::get_share_for_artifact(&state.db, &artifact_id)
         .await

@@ -575,6 +575,15 @@ impl AppState {
             .unwrap_or(false)
     }
 
+    /// Tell every open stream a token held that the token is gone. The caller
+    /// sends after its store change committed, so a stream that checks again
+    /// finds the refusal. No receiver is not a failure: nothing was listening.
+    pub fn announce_revoked(&self, hashes: Vec<String>) {
+        for hash in hashes {
+            let _ = self.revocations.send(hash);
+        }
+    }
+
     /// Nudge every stream subscriber to refetch. A send with no subscribers is
     /// not an error; the next subscriber gets the state on its next write.
     pub fn notify(&self) {
@@ -747,9 +756,7 @@ pub async fn run_with(
             {
                 Ok((0, _)) => {}
                 Ok((expired, hashes)) => {
-                    for hash in hashes {
-                        let _ = sweeper.revocations.send(hash);
-                    }
+                    sweeper.announce_revoked(hashes);
                     tracing::info!(expired, "expired abandoned enrolment requests")
                 }
                 Err(err) => tracing::warn!(error = %err, "could not expire pending enrolments"),

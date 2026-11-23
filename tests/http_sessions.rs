@@ -39,7 +39,7 @@ async fn list_without_token_is_a_problem() {
 }
 
 #[tokio::test]
-async fn list_requires_a_project() {
+async fn a_listing_names_a_filter() {
     let state = state().await;
     let app = router(state.clone());
     let response = app
@@ -457,68 +457,12 @@ async fn a_lineage_whose_source_is_gone_reads_as_pruned() {
         .clone();
     assert_eq!(entry["lineage"]["kind"], "forked");
     assert_eq!(entry["lineage"]["pruned"], true);
-    assert_eq!(entry["lineage"]["agent"], Value::Null);
+    assert_eq!(entry["lineage"]["session_name"], Value::Null);
 }
 
+/// Sessions have no owner to move, so the route that moved one is gone.
 #[tokio::test]
-async fn the_human_reassigns_a_session_over_the_control_surface() {
-    let state = state().await;
-    let session = sessions::start(&state.db, "proj", "stuck", "agent-one")
-        .await
-        .expect("start");
-    agent_hub::store::identity::create_agent(&state.db, "agent-two", "Agent two")
-        .await
-        .expect("create the agent the session moves to");
-
-    // An owner no token resolves to could never resume, end or write the
-    // session again, so a name that is not an agent is refused.
-    let refused = router(state.clone())
-        .oneshot(
-            Request::builder()
-                .uri(format!("/api/v1/sessions/{}/reassign", session.id))
-                .method("POST")
-                .header(header::AUTHORIZATION, "Bearer token")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"agent":"no-such-agent"}"#))
-                .expect("build request"),
-        )
-        .await
-        .expect("request");
-    assert_eq!(refused.status(), StatusCode::NOT_FOUND);
-    let unmoved = sessions::get(&state.db, &session.id)
-        .await
-        .expect("get")
-        .expect("exists");
-    assert_eq!(
-        unmoved.agent, "agent-one",
-        "a refused reassign moves nothing"
-    );
-
-    let app = router(state.clone());
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri(format!("/api/v1/sessions/{}/reassign", session.id))
-                .method("POST")
-                .header(header::AUTHORIZATION, "Bearer token")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"agent":"agent-two"}"#))
-                .expect("build request"),
-        )
-        .await
-        .expect("request");
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(json_body(response).await["agent"], "agent-two");
-
-    let moved = sessions::get(&state.db, &session.id)
-        .await
-        .expect("get")
-        .expect("exists");
-    assert_eq!(moved.agent, "agent-two");
-}
-
-#[tokio::test]
-async fn reassign_without_token_is_a_problem() {
+async fn there_is_no_reassign_route() {
     let state = state().await;
     let app = router(state.clone());
     let response = app
@@ -526,14 +470,131 @@ async fn reassign_without_token_is_a_problem() {
             Request::builder()
                 .uri("/api/v1/sessions/unknown/reassign")
                 .method("POST")
+                .header(header::AUTHORIZATION, "Bearer token")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(r#"{"agent":"agent-two"}"#))
                 .expect("build request"),
         )
         .await
         .expect("request");
-    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    assert_eq!(problem_body(response).await["code"], "unauthenticated");
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+/// The listing filters by member and by agent, and a row carries who took
+/// part and who started it.
+#[tokio::test]
+async fn the_listing_filters_by_member_and_agent_and_names_participants() {
+    let state = state().await;
+    let (alice, bob) = ("alice", "bob");
+    for member in [alice, bob] {
+        agent_hub::store::identity::create_member(&state.db, member, member)
+            .await
+            .expect("create the member");
+    }
+    for (member, agent, name) in [
+        (alice, "claude-code", "alice-work"),
+        (bob, "opencode", "bob-work"),
+    ] {
+        let key = agent_hub::author::ParticipantKey {
+            member: member.to_string(),
+            agent: agent.to_string(),
+        };
+        let writer = agent_hub::author::Writer::call(agent_hub::author::Author::Participant {
+            member: member.to_string(),
+            agent: agent.to_string(),
+            session: None,
+        });
+        let started = sessions::start_session(
+            &state.db,
+            &sessions::StartRequest {
+                project_id: "proj",
+                session_name: name,
+                writer: &writer,
+                exclusive: false,
+                fork_from: None,
+            },
+        )
+        .await
+        .expect("start");
+        assert!(started.joined.first, "{key:?} joined");
+    }
+
+    let listed = |query: &str| {
+        let app = router(state.clone());
+        let uri = format!("/api/v1/sessions?{query}");
+        async move {
+            let response = app
+                .oneshot(request("GET", &uri, Some("Bearer token")))
+                .await
+                .expect("request");
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+            json_body(response).await["sessions"]
+                .as_array()
+                .expect("sessions")
+                .clone()
+        }
+    };
+    let by_member = listed("member=alice").await;
+    assert_eq!(by_member.len(), 1);
+    assert_eq!(by_member[0]["session_name"], "alice-work");
+    assert_eq!(by_member[0]["participants"][0]["member"], "alice");
+    assert_eq!(by_member[0]["participants"][0]["agent"], "claude-code");
+    assert!(by_member[0]["participants"][0]["last_active_at"].is_string());
+    assert_eq!(by_member[0]["started_by"]["member"], "alice");
+    assert_eq!(by_member[0]["children_count"], 0);
+
+    let by_agent = listed("project=proj&agent=opencode").await;
+    assert_eq!(by_agent.len(), 1);
+    assert_eq!(by_agent[0]["session_name"], "bob-work");
+
+    assert_eq!(listed("live=1").await.len(), 2);
+    assert_eq!(listed("project_id=proj").await.len(), 2);
+}
+
+#[tokio::test]
+async fn ending_a_session_is_the_humans_and_takes_its_live_children() {
+    let state = state().await;
+    let writer = agent_hub::author::Writer::human();
+    let start = |name: &'static str| {
+        let state = state.clone();
+        let writer = writer.clone();
+        async move {
+            sessions::start_session(
+                &state.db,
+                &sessions::StartRequest {
+                    project_id: "proj",
+                    session_name: name,
+                    writer: &writer,
+                    exclusive: false,
+                    fork_from: None,
+                },
+            )
+            .await
+            .expect("start")
+            .session
+        }
+    };
+    let parent = start("feat-x").await;
+    let child = start("feat-x/review").await;
+
+    let response = router(state.clone())
+        .oneshot(request(
+            "POST",
+            &format!("/api/v1/sessions/{}/end", parent.id),
+            Some("Bearer token"),
+        ))
+        .await
+        .expect("request");
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response).await;
+    assert_eq!(body["ok"], true);
+    let ended: Vec<&str> = body["ended"]
+        .as_array()
+        .expect("ended ids")
+        .iter()
+        .filter_map(|id| id.as_str())
+        .collect();
+    assert!(ended.contains(&parent.id.as_str()) && ended.contains(&child.id.as_str()));
 }
 
 /// Write to a session's brain through the wrapper and report the file's bytes.

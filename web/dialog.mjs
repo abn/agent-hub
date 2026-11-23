@@ -592,8 +592,8 @@ export function confirmProjectDelete({ project, stats = null, footprint = "" }) 
     } else if (footprint && footprint !== "0 B") {
       manifestRows.push({ label: "Files on disk", value: footprint });
     }
-    if (stats.agents_written > 0) {
-      manifestRows.push({ label: "Agents that have written here", value: String(stats.agents_written) });
+    if (stats.members_written > 0) {
+      manifestRows.push({ label: "Agents that have written here", value: String(stats.members_written) });
     }
   }
 

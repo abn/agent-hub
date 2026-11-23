@@ -22,13 +22,13 @@ async fn state() -> TestState {
     common::state::open("enrol").await
 }
 
-fn enrol_req(suggested_id: &str, display_name: &str, why: &str, _source: &str) -> Request<Body> {
+fn enrol_req(member_id: &str, display_name: &str, why: &str, _source: &str) -> Request<Body> {
     json_request(
         "POST",
         "/api/v1/enrol",
         None,
         &json!({
-            "suggested_id": suggested_id,
+            "member": member_id,
             "display_name": display_name,
             "why": why,
         })
@@ -40,7 +40,7 @@ fn enrol_req(suggested_id: &str, display_name: &str, why: &str, _source: &str) -
 /// a test about the source rule sets it here rather than in the body.
 fn enrol_req_from(
     peer: SocketAddr,
-    suggested_id: &str,
+    member_id: &str,
     display_name: &str,
     why: &str,
 ) -> Request<Body> {
@@ -50,7 +50,7 @@ fn enrol_req_from(
         "/api/v1/enrol",
         None,
         &json!({
-            "suggested_id": suggested_id,
+            "member": member_id,
             "display_name": display_name,
             "why": why,
         })
@@ -84,10 +84,10 @@ async fn security_invariant_pending_token_refusal_is_byte_for_byte_identical_to_
 
     // Test routes that ordinary callers or agents reach.
     let test_cases = [
-        ("GET", "/api/v1/agents", None),
+        ("GET", "/api/v1/members", None),
         (
             "POST",
-            "/api/v1/agents",
+            "/api/v1/members",
             Some(json!({"id": "foo", "display_name": "Foo"})),
         ),
         ("GET", "/api/v1/projects", None),
@@ -194,7 +194,7 @@ async fn approving_enrolment_makes_same_token_work_without_reissue() {
     assert_eq!(status_after.status(), StatusCode::OK);
     let status_after_json = json_body(status_after).await;
     assert_eq!(status_after_json["status"], "approved");
-    assert_eq!(status_after_json["agent_id"], "worker");
+    assert_eq!(status_after_json["member"], "worker");
     assert_eq!(status_after_json["share"], true);
 
     // The agent is now resolved by resolve_agent as ordinary trusted agent.
@@ -261,7 +261,7 @@ async fn refusing_enrolment_deletes_row_and_token_allowing_same_id_again() {
         .expect("status");
     assert_eq!(status_res.status(), StatusCode::UNAUTHORIZED);
 
-    // Same suggested_id can enrol again cleanly.
+    // Same member_id can enrol again cleanly.
     let res2 = app
         .clone()
         .oneshot(enrol_req(
@@ -760,7 +760,7 @@ fn enrol_from(peer: SocketAddr, forwarded: Option<&str>, id: &str, name: &str) -
     }
     let mut request = builder
         .body(Body::from(
-            json!({ "suggested_id": id, "display_name": name, "why": "test" }).to_string(),
+            json!({ "member": id, "display_name": name, "why": "test" }).to_string(),
         ))
         .expect("build request");
     request.extensions_mut().insert(ConnectInfo(peer));
@@ -783,7 +783,7 @@ async fn a_body_source_cannot_spoof_the_socket_peer() {
             "POST",
             "/api/v1/enrol",
             None,
-            &json!({"suggested_id": "spoof-one", "display_name": "One", "why": "One", "source": "9.9.9.9"}).to_string(),
+            &json!({"member": "spoof-one", "display_name": "One", "why": "One", "source": "9.9.9.9"}).to_string(),
         ))
         .await
         .expect("enrol 1");
@@ -796,7 +796,7 @@ async fn a_body_source_cannot_spoof_the_socket_peer() {
             "POST",
             "/api/v1/enrol",
             None,
-            &json!({"suggested_id": "spoof-two", "display_name": "Two", "why": "Two", "source": "8.8.8.8"}).to_string(),
+            &json!({"member": "spoof-two", "display_name": "Two", "why": "Two", "source": "8.8.8.8"}).to_string(),
         ))
         .await
         .expect("enrol 2");

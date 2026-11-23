@@ -21,10 +21,7 @@ pub async fn metrics(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> std::result::Result<Response, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     // Counters from the registry, then the storage gauges read fresh for this
     // scrape: free bytes on the data volume and the store and WAL sizes, so a

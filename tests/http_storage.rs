@@ -475,7 +475,7 @@ async fn home_carries_the_counts_its_summary_line_and_cards_show() {
     let (status, body) = call(&state, "GET", "/api/v1/home").await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
-        body["agents_active"], 2,
+        body["sessions_live"], 2,
         "an agent with two sessions counts once, an ended one not at all: {body}"
     );
     assert_eq!(body["prunable"]["sessions"], 1);
@@ -517,7 +517,7 @@ async fn an_agent_that_has_gone_quiet_is_not_counted_as_active() {
 
     let (_, body) = call(&state, "GET", "/api/v1/home").await;
     assert_eq!(
-        body["agents_active"], 0,
+        body["sessions_live"], 0,
         "a session last touched long ago makes nobody active"
     );
 }
@@ -578,7 +578,7 @@ async fn project_stats_count_what_the_header_and_the_tab_row_show() {
     );
     assert_eq!(body["kb_pages"], 2, "only this project's pages");
     assert_eq!(
-        body["agents_active"], 1,
+        body["sessions_live"], 1,
         "the agent working elsewhere is not working here"
     );
     assert_eq!(
@@ -615,7 +615,7 @@ async fn an_active_window_beyond_the_calendar_does_not_take_the_read_surfaces_do
         let (status, body) = call(&state, "GET", uri).await;
         assert_eq!(status, StatusCode::OK, "{uri} answered {body}");
         assert!(
-            body["agents_active"].as_i64().is_some(),
+            body["sessions_live"].as_i64().is_some(),
             "{uri} still reports a count: {body}"
         );
     }

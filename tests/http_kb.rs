@@ -641,7 +641,12 @@ async fn hostile_paths_are_refused_the_same_over_rest_and_mcp() {
     agent
         .ok(
             "brain_put",
-            json!({"path": "/fs/draft.md", "content": "draft", "store": "session"}),
+            json!({
+                "session": {"project_id": project, "name": "work"},
+                "path": "/fs/draft.md",
+                "content": "draft",
+                "store": "session",
+            }),
         )
         .await;
 
@@ -680,7 +685,7 @@ async fn hostile_paths_are_refused_the_same_over_rest_and_mcp() {
         let (code, _) = agent
             .refused(
                 "brain_promote",
-                json!({"from_path": "/fs/draft.md", "to_path": mcp}),
+                json!({"session": {"project_id": project, "name": "work"}, "from_path": "/fs/draft.md", "to_path": mcp}),
             )
             .await;
         assert_eq!(code, "invalid_argument", "brain_promote {mcp:?}");
@@ -1382,7 +1387,7 @@ async fn derived_numbers_are_fresh_after_every_write_path() {
     agent
         .ok(
             "brain_put",
-            json!({"path": "/fs/draft.md", "content": "links to [hub](hub.md)", "store": "session"}),
+            json!({"session": {"project_id": project, "name": "work"}, "path": "/fs/draft.md", "content": "links to [hub](hub.md)", "store": "session"}),
         )
         .await;
 
@@ -1578,7 +1583,7 @@ async fn promote_writes_identical_bytes_over_rest_and_mcp_and_signals_once() {
         agent
             .ok(
                 "brain_put",
-                json!({"path": from_path, "content": source, "store": "session"}),
+                json!({"session": {"project_id": project, "name": "investigation"}, "path": from_path, "content": source, "store": "session"}),
             )
             .await;
         let fields = json!({
@@ -1589,6 +1594,7 @@ async fn promote_writes_identical_bytes_over_rest_and_mcp_and_signals_once() {
         });
 
         let mut over_mcp = fields.clone();
+        over_mcp["session"] = json!({"project_id": project, "name": "investigation"});
         over_mcp["from_path"] = json!(from_path);
         over_mcp["to_path"] = json!(format!("/fs/mcp/{index}.md"));
         let result = agent.ok("brain_promote", over_mcp).await;
@@ -1631,7 +1637,7 @@ async fn promote_writes_identical_bytes_over_rest_and_mcp_and_signals_once() {
         assert_eq!(by_human["last_write"]["actor"], "human");
 
         let untouched = agent
-            .ok("brain_get", json!({"path": from_path, "store": "session"}))
+            .ok("brain_get", json!({"session": {"project_id": project, "name": "investigation"}, "path": from_path, "store": "session"}))
             .await;
         assert_eq!(untouched["content"], *source, "the source is left alone");
     }
@@ -1673,7 +1679,7 @@ async fn promote_writes_identical_bytes_over_rest_and_mcp_and_signals_once() {
     let (code, _) = agent
         .refused(
             "brain_promote",
-            json!({"from_path": "/fs/plain.md", "to_path": "/fs/mcp/0.md", "if_version": "absent"}),
+            json!({"session": {"project_id": project, "name": "investigation"}, "from_path": "/fs/plain.md", "to_path": "/fs/mcp/0.md", "if_version": "absent"}),
         )
         .await;
     assert_eq!(code, "conflict");
@@ -1694,7 +1700,12 @@ async fn promote_and_review_refuse_a_value_that_could_end_its_line() {
     agent
         .ok(
             "brain_put",
-            json!({"path": "/fs/draft.md", "content": "draft", "store": "session"}),
+            json!({
+                "session": {"project_id": project, "name": "work"},
+                "path": "/fs/draft.md",
+                "content": "draft",
+                "store": "session",
+            }),
         )
         .await;
 
@@ -1706,6 +1717,7 @@ async fn promote_and_review_refuse_a_value_that_could_end_its_line() {
     ];
     for fields in hostile {
         let mut over_mcp = fields.clone();
+        over_mcp["session"] = json!({"project_id": project, "name": "work"});
         over_mcp["from_path"] = json!("/fs/draft.md");
         over_mcp["to_path"] = json!("/fs/out.md");
         let (code, message) = agent.refused("brain_promote", over_mcp).await;
@@ -1927,13 +1939,13 @@ async fn a_link_into_a_subdirectory_is_not_reported_broken_on_write() {
     agent
         .ok(
             "brain_put",
-            json!({"path": "/fs/draft.md", "content": linking, "store": "session"}),
+            json!({"session": {"project_id": project, "name": "work"}, "path": "/fs/draft.md", "content": linking, "store": "session"}),
         )
         .await;
     let promoted = agent
         .ok(
             "brain_promote",
-            json!({"from_path": "/fs/draft.md", "to_path": "/fs/promoted.md"}),
+            json!({"session": {"project_id": project, "name": "work"}, "from_path": "/fs/draft.md", "to_path": "/fs/promoted.md"}),
         )
         .await;
     let found = broken(&promoted["lint"]);
@@ -2321,11 +2333,15 @@ async fn the_skill_document_describes_the_promote_tool_that_exists() {
     agent
         .ok(
             "brain_put",
-            json!({"path": "/fs/draft.md", "content": "draft", "store": "session"}),
+            json!({"session": {"project_id": project, "name": "work"}, "path": "/fs/draft.md", "content": "draft", "store": "session"}),
         )
         .await;
 
     let mut arguments = serde_json::Map::new();
+    arguments.insert(
+        "session".to_string(),
+        json!({"project_id": project, "name": "work"}),
+    );
     for name in &names {
         let value = match name.trim_end_matches('?') {
             "from_path" => json!("/fs/draft.md"),
@@ -2349,6 +2365,10 @@ async fn the_skill_document_describes_the_promote_tool_that_exists() {
 
     // And with only what it marks as required.
     let mut arguments = serde_json::Map::new();
+    arguments.insert(
+        "session".to_string(),
+        json!({"project_id": project, "name": "work"}),
+    );
     for name in required {
         let value = if name == "from_path" {
             "/fs/draft.md"

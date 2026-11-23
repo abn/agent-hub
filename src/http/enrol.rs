@@ -10,7 +10,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 use crate::app::AppState;
-use crate::error::Error;
+use crate::error::{CredentialReason, Error};
 use axum::extract::ConnectInfo;
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
@@ -20,17 +20,25 @@ use std::net::SocketAddr;
 use crate::config::Config;
 use crate::http::auth::bearer_token;
 use crate::http::problem::{Problem, ProblemPath, ProblemQuery, json_body};
-use crate::store::identity::{self, Agent};
+use crate::store::identity::{self, Enrolment, Member, TokenState};
 
 /// Enrolment request payload.
 #[derive(Debug, Deserialize)]
 pub struct EnrolRequest {
+    /// The member asked for. Without one the display name is slugged.
     #[serde(default)]
-    pub suggested_id: Option<String>,
+    pub member: Option<String>,
     #[serde(default)]
     pub display_name: Option<String>,
     #[serde(default)]
     pub why: Option<String>,
+    /// The client asking: a name such as `claude-code`, canonicalised here.
+    #[serde(default)]
+    pub agent: Option<String>,
+    #[serde(default)]
+    pub os: Option<String>,
+    #[serde(default)]
+    pub host: Option<String>,
 }
 
 /// Query parameters for enrolment status polling.
@@ -42,8 +50,9 @@ pub struct StatusQuery {
 /// Operator approval payload.
 #[derive(Debug, Default, Deserialize)]
 pub struct ApproveRequest {
+    /// The name to approve under, when it is not the one asked for.
     #[serde(default)]
-    pub id: Option<String>,
+    pub member: Option<String>,
     #[serde(default)]
     pub display_name: Option<String>,
     #[serde(default)]
@@ -53,11 +62,21 @@ pub struct ApproveRequest {
 }
 
 fn admin(state: &AppState, headers: &HeaderMap) -> std::result::Result<(), Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(headers).as_deref())
-        .map(|_| ())
-        .map_err(|err| Problem::from_error(&err))
+    crate::http::auth::admin(state, bearer_token(headers).as_deref()).map(|_| ())
+}
+
+/// The longest `os` or `host` an enrolment keeps.
+const CONTEXT_CHARS_MAX: usize = 100;
+
+/// A line of enrolment context, trimmed and bounded, or none when blank.
+fn context_field(value: Option<&str>) -> Option<String> {
+    let text: String = value?
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(CONTEXT_CHARS_MAX)
+        .collect();
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.to_string())
 }
 
 fn slugify(name: &str) -> String {
@@ -70,8 +89,15 @@ fn slugify(name: &str) -> String {
         }
     }
     let trimmed = out.trim_matches('-');
-    if trimmed.is_empty() {
-        format!("agent-{}", &crate::store::next_id()[..8])
+    if trimmed.is_empty() || !identity::valid_new_member_id(trimmed) {
+        format!(
+            "member-{}",
+            crate::store::next_id()
+                .to_ascii_lowercase()
+                .chars()
+                .take(8)
+                .collect::<String>()
+        )
     } else {
         trimmed.to_string()
     }
@@ -91,8 +117,9 @@ pub async fn enrol(
     payload: std::result::Result<Json<EnrolRequest>, JsonRejection>,
 ) -> std::result::Result<(StatusCode, Json<Value>), Problem> {
     if !state.config.enrol_enabled {
-        return Err(Problem::from_error(&Error::Forbidden(
-            "agent enrolment is disabled on this hub".to_string(),
+        return Err(Problem::from_error(&Error::Credential(
+            CredentialReason::EnrolDisabled,
+            "enrolment is disabled on this hub".to_string(),
         )));
     }
 
@@ -125,21 +152,37 @@ pub async fn enrol(
     let source = enrolment_source(&state.config, peer, &headers);
 
     let id = match request
-        .suggested_id
+        .member
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        Some(suggested) => suggested.to_string(),
+        Some(asked) => {
+            if !identity::valid_new_member_id(asked) {
+                return Err(Problem::from_error(&Error::InvalidArgument(format!(
+                    "'{asked}' is not a member id: use 1 to 63 of a-z, 0-9, '.', '_' or '-', \
+                     starting with a letter or digit"
+                ))));
+            }
+            asked.to_string()
+        }
         None => slugify(display_name),
     };
+    let agent = crate::agent_name::canonical(request.agent.as_deref().unwrap_or(""));
+    let os = context_field(request.os.as_deref());
+    let host = context_field(request.host.as_deref());
 
-    let (agent, token) = identity::enrol_agent(
+    let (member, token) = identity::enrol_member(
         &state.db,
-        &id,
-        display_name,
-        &source,
-        why.trim(),
+        &Enrolment {
+            member: &id,
+            display_name,
+            source: &source,
+            why: why.trim(),
+            agent: &agent,
+            os: os.as_deref(),
+            host: host.as_deref(),
+        },
         state.config.enrol_pending_max,
     )
     .await
@@ -151,7 +194,7 @@ pub async fn enrol(
         StatusCode::ACCEPTED,
         Json(json!({
             "token": token.token,
-            "agent_id": agent.id,
+            "member": member.id,
             "status": "pending",
         })),
     ))
@@ -219,7 +262,10 @@ pub async fn status(
     ProblemQuery(query): ProblemQuery<StatusQuery>,
 ) -> std::result::Result<Json<Value>, Problem> {
     let token = bearer_token(&headers).ok_or_else(|| {
-        Problem::from_error(&Error::Unauthenticated("bearer token required".to_string()))
+        Problem::from_error(&Error::Credential(
+            CredentialReason::TokenMissing,
+            "bearer token required".to_string(),
+        ))
     })?;
 
     let token_hash = identity::hash_token(&token);
@@ -229,29 +275,42 @@ pub async fn status(
     let deadline = tokio::time::Instant::now() + Duration::from_secs(wait_secs);
 
     loop {
-        let lookup = identity::lookup_agent_by_token_hash(&state.db, &token_hash)
+        let lookup = identity::resolve_member_token(&state.db, &token_hash)
             .await
             .map_err(|err| Problem::from_error(&err))?;
 
-        let Some((agent_id, agent_state)) = lookup else {
-            return Err(Problem::from_error(&Error::Unauthenticated(
+        let Some(resolved) = lookup else {
+            return Err(Problem::from_error(&Error::Credential(
+                CredentialReason::TokenUnknown,
                 "the bearer token is not recognised".to_string(),
             )));
         };
 
-        if agent_state == "active" {
-            let share = state.get_enrol_share(&agent_id);
-            return Ok(Json(json!({
-                "status": "approved",
-                "agent_id": agent_id,
-                "share": share,
-            })));
+        match resolved.state {
+            TokenState::Active => {
+                let share = state.get_enrol_share(&resolved.member);
+                return Ok(Json(json!({
+                    "status": "approved",
+                    "member": resolved.member,
+                    "share": share,
+                })));
+            }
+            TokenState::Revoked => {
+                // A refused enrolment, or a token reissued since: either way
+                // this token will not become active.
+                return Err(Problem::from_error(&Error::Credential(
+                    CredentialReason::TokenRevoked,
+                    "the token was revoked or the enrolment refused".to_string(),
+                )));
+            }
+            TokenState::Pending => {}
         }
 
         let now = tokio::time::Instant::now();
         if now >= deadline {
             return Ok(Json(json!({
                 "status": "pending",
+                "member": resolved.member,
             })));
         }
 
@@ -273,21 +332,39 @@ pub async fn status(
 
 /// `POST /api/v1/enrol/{id}/approve`
 ///
-/// Operator approves an agent's enrolment request.
+/// Operator approves a member's enrolment request, under the name asked for or
+/// another one.
 pub async fn approve(
     State(state): State<AppState>,
     ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
     body: Option<Json<ApproveRequest>>,
-) -> std::result::Result<Json<Agent>, Problem> {
+) -> std::result::Result<Json<Member>, Problem> {
     admin(&state, &headers)?;
 
     let req = body.map(|Json(b)| b).unwrap_or_default();
 
-    let agent = identity::approve_enrolment(
+    if let Some(renamed) = req
+        .member
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        && renamed != id
+        && !identity::valid_new_member_id(renamed)
+    {
+        return Err(Problem::from_error(&Error::InvalidArgument(format!(
+            "'{renamed}' is not a member id: use 1 to 63 of a-z, 0-9, '.', '_' or '-', starting \
+             with a letter or digit"
+        ))));
+    }
+
+    let member = identity::approve_member(
         &state.db,
         &id,
-        req.id.as_deref(),
+        req.member
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty()),
         req.display_name.as_deref(),
         req.projects.as_deref(),
     )
@@ -295,17 +372,18 @@ pub async fn approve(
     .map_err(|err| Problem::from_error(&err))?;
 
     if let Some(share) = req.share {
-        state.set_enrol_share(&agent.id, share);
+        state.set_enrol_share(&member.id, share);
     }
 
     state.notify();
 
-    Ok(Json(agent))
+    Ok(Json(member))
 }
 
 /// `POST /api/v1/enrol/{id}/refuse`
 ///
-/// Operator refuses an agent's enrolment request, wiping pending state.
+/// Operator refuses an agent's enrolment request, wiping pending state and
+/// closing every stream the pending token holds.
 pub async fn refuse(
     State(state): State<AppState>,
     ProblemPath(id): ProblemPath<String>,
@@ -313,9 +391,12 @@ pub async fn refuse(
 ) -> std::result::Result<StatusCode, Problem> {
     admin(&state, &headers)?;
 
-    identity::refuse_enrolment(&state.db, &id)
+    let revoked = identity::refuse_enrolment(&state.db, &id)
         .await
         .map_err(|err| Problem::from_error(&err))?;
+    // Sent after the commit, so a pending stream that checks again finds the
+    // token gone.
+    state.announce_revoked(revoked);
 
     state.notify();
 

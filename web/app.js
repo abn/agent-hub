@@ -209,7 +209,7 @@ main.addEventListener("submit", (event) => {
       id: String(data.get("id") || "").trim(),
       display_name: String(data.get("display_name") || "").trim(),
     };
-    api("/api/v1/agents", { method: "POST", body: JSON.stringify(payload) })
+    api("/api/v1/members", { method: "POST", body: JSON.stringify(payload) })
       .then(async () => {
         // The token is issued once, now, and the reveal opens on it directly:
         // the copy promises it, and a mobile create that skipped it left the
@@ -217,7 +217,7 @@ main.addEventListener("submit", (event) => {
         location.hash = `#/access?agent=${encodeURIComponent(payload.id)}`;
         let issued = null;
         try {
-          issued = await api(`/api/v1/agents/${encodeURIComponent(payload.id)}/token`, { method: "POST" });
+          issued = await api(`/api/v1/members/${encodeURIComponent(payload.id)}/token`, { method: "POST" });
         } catch {}
         await revealIssuedToken(issued?.token || null, payload.display_name || payload.id, payload.id);
       })
@@ -225,7 +225,7 @@ main.addEventListener("submit", (event) => {
   } else if (action === "agent-grant") {
     const agent = String(data.get("agent") || "").trim();
     const project = String(data.get("project") || "").trim();
-    api(`/api/v1/agents/${encodeURIComponent(agent)}/grants`, {
+    api(`/api/v1/members/${encodeURIComponent(agent)}/grants`, {
       method: "POST",
       body: JSON.stringify({ project_id: project }),
     })

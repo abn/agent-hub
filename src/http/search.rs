@@ -3,10 +3,12 @@
 use axum::Json;
 use axum::extract::{RawQuery, State};
 use axum::http::HeaderMap;
+use serde_json::Value;
 
 use crate::app::AppState;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
+use crate::http::filters::Params;
 use crate::http::problem::Problem;
 use crate::store::search::{self, SearchQuery, SearchResults};
 
@@ -18,28 +20,48 @@ pub async fn search(
     State(state): State<AppState>,
     headers: HeaderMap,
     RawQuery(raw): RawQuery,
-) -> std::result::Result<Json<SearchResults>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+) -> std::result::Result<Json<Value>, Problem> {
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
-    let params = parse(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;
+    let (params, filters) = parse(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;
 
     let results = search::search_human(&state.db, &params)
         .await
         .map_err(|err| Problem::from_error(&err))?;
-
-    Ok(Json(results))
+    if filters.is_empty() {
+        return Ok(Json(serde_json::to_value(results).unwrap_or_default()));
+    }
+    Ok(Json(narrow(results, &filters)))
 }
 
-fn parse(raw: Option<&str>) -> std::result::Result<SearchQuery, Error> {
+/// The results with the hits the author filters keep, and the counts of the
+/// page and of each group to match.
+fn narrow(results: SearchResults, filters: &Params) -> Value {
+    let mut value = serde_json::to_value(results).unwrap_or_default();
+    let mut total = 0;
+    if let Some(groups) = value.get_mut("groups").and_then(Value::as_array_mut) {
+        for group in groups.iter_mut() {
+            if let Some(hits) = group.get_mut("hits").and_then(Value::as_array_mut) {
+                hits.retain(|hit| filters.keeps(hit));
+                let kept = hits.len();
+                total += kept;
+                group["count"] = Value::from(kept);
+            }
+        }
+        groups.retain(|group| group["count"].as_u64().unwrap_or(0) > 0);
+    }
+    value["count"] = Value::from(total);
+    value
+}
+
+fn parse(raw: Option<&str>) -> std::result::Result<(SearchQuery, Params), Error> {
     let mut query = String::new();
     let mut scope = None;
     let mut project = None;
     let mut kind = None;
     let mut mode = None;
     let mut limit = 50i64;
+    let mut filters = Params::default();
 
     for (key, value) in pairs(raw) {
         match key.as_str() {
@@ -54,9 +76,11 @@ fn parse(raw: Option<&str>) -> std::result::Result<SearchQuery, Error> {
                     .map_err(|_| Error::InvalidArgument("limit must be an integer".to_string()))?
             }
             other => {
-                return Err(Error::InvalidArgument(format!(
-                    "unknown search parameter '{other}'"
-                )));
+                if !filters.take(other, &value)? {
+                    return Err(Error::InvalidArgument(format!(
+                        "unknown search parameter '{other}'"
+                    )));
+                }
             }
         }
     }
@@ -79,14 +103,18 @@ fn parse(raw: Option<&str>) -> std::result::Result<SearchQuery, Error> {
         None => project,
     };
 
-    Ok(SearchQuery {
-        text: query,
-        project_id,
-        kind,
-        session_id: None,
-        limit,
-        mode,
-    })
+    let session_id = filters.session.clone();
+    Ok((
+        SearchQuery {
+            text: query,
+            project_id,
+            kind,
+            session_id,
+            limit,
+            mode,
+        },
+        filters,
+    ))
 }
 
 fn pairs(raw: Option<&str>) -> Vec<(String, String)> {

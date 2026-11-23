@@ -27,10 +27,7 @@ pub async fn prune(
     ProblemPath(session_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<PruneToken>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let token = prune::prune_session(&state.db, &session_id)
         .await
@@ -52,10 +49,7 @@ pub async fn prune_project(
 ) -> std::result::Result<Json<prune::BatchPrune>, Problem> {
     // Ahead of the lookup, so an unauthenticated caller cannot learn which
     // project ids exist by reading the status code.
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
     // A typo reads as "no such project", the way the other project routes read
     // it, rather than as "nothing to reclaim".
     if crate::store::projects::get(&state.db, &project_id)
@@ -85,10 +79,7 @@ async fn batch(
     project_id: Option<&str>,
     headers: &HeaderMap,
 ) -> std::result::Result<Json<prune::BatchPrune>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(headers).as_deref())?;
 
     let pruned = prune::prune_ended(&state.db, project_id)
         .await
@@ -106,10 +97,7 @@ pub async fn undo(
     ProblemPath(token): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<UndoResult>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     prune::undo(&state.db, &token)
         .await
@@ -128,10 +116,7 @@ pub async fn usage(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<StorageUsage>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let mut usage = state
         .stats

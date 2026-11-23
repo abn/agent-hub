@@ -115,7 +115,7 @@ function states(hub, wiki, agent) {
       name: "Issue a token",
       hash: agentAt,
       ready: agentReady,
-      answer: { url: "**/api/v1/agents/*/token", method: "POST", status: 200, body: { token: "not-a-real-token" } },
+      answer: { url: "**/api/v1/members/*/token", method: "POST", status: 200, body: { token: "not-a-real-token" } },
       press: ['[data-action="agent-issue"]'],
       close: "dialog[open] .dialog-commit",
     },
@@ -193,8 +193,8 @@ test.describe("styles live in the stylesheet", () => {
       }
     }
 
-    const response = await fetch(`${hub.baseUrl}/api/v1/agents`, { headers });
-    const { agents } = await response.json();
+    const response = await fetch(`${hub.baseUrl}/api/v1/members`, { headers });
+    const { members: agents } = await response.json();
     const tokenless = agents.find((agent) => agent.state !== "pending" && agent.has_live_token === false);
     expect(tokenless, "the seeded hub has no enrolled agent without a token").toBeDefined();
     for (const state of states(hub, wiki, tokenless.id)) {

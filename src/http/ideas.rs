@@ -35,10 +35,7 @@ pub async fn create(
     headers: HeaderMap,
     body: std::result::Result<Json<IdeaBody>, JsonRejection>,
 ) -> std::result::Result<Json<IdeaResult>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let payload = json_body(body, "idea body must be JSON with a summary")?;
 
@@ -107,10 +104,7 @@ async fn mark(
     idea_id: String,
     status: &str,
 ) -> std::result::Result<Json<IdeaResult>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let idea = load_idea(&state, &idea_id).await?;
     let result = if status == "resolved" {
@@ -134,10 +128,7 @@ pub async fn reply(
     headers: HeaderMap,
     body: std::result::Result<Json<IdeaBody>, JsonRejection>,
 ) -> std::result::Result<Json<IdeaResult>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let idea = load_idea(&state, &idea_id).await?;
     let payload = json_body(body, "idea body must be JSON with a summary")?;
