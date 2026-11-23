@@ -37,7 +37,7 @@ jobs:
           # Inputs of the Rust build and tests, including what the binary
           # embeds (web/, skills/) and what tests read from the tree.
           git diff --name-only "$BASE_SHA" HEAD | tee "$RUNNER_TEMP/changed"
-          if grep -qE '^(src/|tests/|web/|skills/|plugins/contract/fixtures/|Cargo\.toml$|Cargo\.lock$|build\.rs$|Makefile$|AGENTS\.md$|DESIGN\.md$|docs/log\.md$|docs/reference/knowledge-base-pages\.md$|\.github/workflows/check\.yml$)' "$RUNNER_TEMP/changed"; then
+          if grep -qE '^(src/|tests/|web/|skills/|plugins/|Cargo\.toml$|Cargo\.lock$|build\.rs$|Makefile$|AGENTS\.md$|DESIGN\.md$|docs/log\.md$|docs/reference/knowledge-base-pages\.md$|\.github/workflows/check\.yml$)' "$RUNNER_TEMP/changed"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
