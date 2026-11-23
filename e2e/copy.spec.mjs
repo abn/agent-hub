@@ -30,10 +30,23 @@ test.describe("a copy glyph confirms on itself", () => {
     await page.emulateMedia({ colorScheme: theme });
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const id = await artifact(hub);
+    await page.clock.install();
     const glyph = await open(page, hub, id);
+    // From here the page's timers move only when the test says so.
+    await page.clock.pauseAt(new Date(Date.now() + 60_000));
     const before = await glyph.getAttribute("aria-label");
+    const idleShape = await glyph.locator("svg").innerHTML();
+    // The announcer is in the page before the first copy, empty.
+    await expect(page.locator("#copy-status")).toHaveAttribute("aria-live", "polite");
+    await expect(page.locator("#copy-status")).toHaveText("");
     await glyph.click();
     await expect(glyph).toHaveAttribute("aria-label", "Copied");
+    await page.clock.runFor(50);
+    // The check icon: the resolve glyph's tick path, not the copy outline.
+    const checkShape = await glyph.locator("svg").innerHTML();
+    expect(checkShape).not.toBe(idleShape);
+    await expect(glyph.locator("svg path")).toHaveCount(1);
+    await expect(glyph.locator("svg path")).toHaveAttribute("d", /^M\s*5\s+12\s*l\s*5\s+5\s+9\s*-\s*9$/);
     await expect(glyph).toHaveClass(/is-copied/);
     await expect(glyph.locator("svg")).toBeVisible();
     await expect(page.locator("#copy-status")).toHaveText("Copied");
@@ -49,8 +62,12 @@ test.describe("a copy glyph confirms on itself", () => {
     });
     expect(await glyph.evaluate((el) => getComputedStyle(el).color)).toBe(ok);
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBeTruthy();
-    await expect(glyph).toHaveAttribute("aria-label", before, { timeout: 3000 });
+    await page.clock.runFor(1250);
+    await expect(glyph).toHaveAttribute("aria-label", "Copied");
+    await page.clock.runFor(150);
+    await expect(glyph).toHaveAttribute("aria-label", before);
     await expect(glyph).not.toHaveClass(/is-copied/);
+    expect(await glyph.locator("svg").innerHTML()).toBe(idleShape);
   });
   }
 

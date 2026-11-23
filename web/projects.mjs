@@ -162,7 +162,8 @@ if (typeof document !== "undefined") {
 if (typeof window !== "undefined" && window.matchMedia) {
   const mq = window.matchMedia("(min-width: 720px)");
   mq.addEventListener?.("change", () => {
-    if (location.hash === "#/projects" || location.hash === "#/projects/") {
+    const path = location.hash.split("?")[0];
+    if (path === "#/projects" || path === "#/projects/") {
       projectsIndexScreen(beginRender());
     }
   });

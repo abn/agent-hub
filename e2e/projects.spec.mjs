@@ -134,4 +134,17 @@ test.describe("the projects register", () => {
     await expect(page.locator(".project-row:visible")).toHaveCount(3);
     await expect(page.locator(".projects-tabs-track")).toHaveCount(0);
   });
+
+  test("a register address with a query also redraws on crossing the breakpoint", async ({ page, hub }) => {
+    await routeRegister(page, 3, 1);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await goto(page, "#/projects?from=link", "Projects");
+    await expect(page.locator(".projects-section-label")).toHaveText("Agent spaces");
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.locator(".projects-tabs-track")).toBeVisible();
+    await expect(page.locator(".projects-section-label")).toHaveCount(0);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.locator(".projects-section-label")).toHaveText("Agent spaces");
+    await expect(page.locator(".projects-tabs-track")).toHaveCount(0);
+  });
 });
