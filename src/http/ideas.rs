@@ -56,7 +56,7 @@ pub async fn create(
     let id = events::append(
         &state.db,
         state.config.events_per_project.per_project,
-        "human",
+        &crate::author::Writer::human(),
         None,
         NewEvent {
             project_id,
@@ -148,7 +148,7 @@ pub async fn reply(
     let id = events::append(
         &state.db,
         state.config.events_per_project.per_project,
-        "human",
+        &crate::author::Writer::human(),
         None,
         NewEvent {
             project_id: idea.project_id,

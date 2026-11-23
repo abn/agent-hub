@@ -31,14 +31,26 @@ fn signal(summary: &str) -> NewEvent {
 async fn the_event_that_crosses_the_ceiling_is_refused_and_names_the_cap() {
     let db = open().await;
     for summary in ["one", "two", "three"] {
-        events::append(&db, 3, "agent-one", None, signal(summary))
-            .await
-            .expect("under the ceiling");
+        events::append(
+            &db,
+            3,
+            &common::seed::writer("agent-one"),
+            None,
+            signal(summary),
+        )
+        .await
+        .expect("under the ceiling");
     }
 
-    let err = events::append(&db, 3, "agent-one", None, signal("four"))
-        .await
-        .expect_err("the fourth event crosses the ceiling");
+    let err = events::append(
+        &db,
+        3,
+        &common::seed::writer("agent-one"),
+        None,
+        signal("four"),
+    )
+    .await
+    .expect_err("the fourth event crosses the ceiling");
 
     assert_eq!(err.code(), ErrorCode::Conflict);
     let message = err.to_string();
@@ -58,16 +70,34 @@ async fn the_event_that_crosses_the_ceiling_is_refused_and_names_the_cap() {
 async fn a_replayed_write_is_not_refused_at_the_ceiling() {
     let db = open().await;
     for summary in ["one", "two"] {
-        events::append(&db, 3, "agent-one", None, signal(summary))
-            .await
-            .expect("under the ceiling");
+        events::append(
+            &db,
+            3,
+            &common::seed::writer("agent-one"),
+            None,
+            signal(summary),
+        )
+        .await
+        .expect("under the ceiling");
     }
-    let third = events::append(&db, 3, "agent-one", Some("third-key"), signal("three"))
-        .await
-        .expect("the third fills the ceiling");
-    let replay = events::append(&db, 3, "agent-one", Some("third-key"), signal("three"))
-        .await
-        .expect("a replay of an accepted write is returned, not refused");
+    let third = events::append(
+        &db,
+        3,
+        &common::seed::writer("agent-one"),
+        Some("third-key"),
+        signal("three"),
+    )
+    .await
+    .expect("the third fills the ceiling");
+    let replay = events::append(
+        &db,
+        3,
+        &common::seed::writer("agent-one"),
+        Some("third-key"),
+        signal("three"),
+    )
+    .await
+    .expect("a replay of an accepted write is returned, not refused");
 
     assert_eq!(third, replay);
     assert_eq!(
@@ -80,9 +110,15 @@ async fn a_replayed_write_is_not_refused_at_the_ceiling() {
 async fn zero_disables_the_ceiling() {
     let db = open().await;
     for i in 0..5 {
-        events::append(&db, 0, "agent-one", None, signal(&format!("signal {i}")))
-            .await
-            .expect("zero never refuses");
+        events::append(
+            &db,
+            0,
+            &common::seed::writer("agent-one"),
+            None,
+            signal(&format!("signal {i}")),
+        )
+        .await
+        .expect("zero never refuses");
     }
     assert_eq!(
         events::count_for_project(&db, "proj").await.expect("count"),
@@ -97,7 +133,7 @@ async fn system_audit_events_neither_count_nor_are_refused() {
     audit.kind = "system".to_string();
 
     for _ in 0..4 {
-        events::append(&db, 2, "human", None, audit.clone())
+        events::append(&db, 2, &common::seed::writer("human"), None, audit.clone())
             .await
             .expect("an audit event is exempt");
     }
@@ -125,9 +161,15 @@ async fn a_full_feed_refuses_an_artifact_publish_but_not_a_knowledge_base_write(
         .expect("create project");
 
     // Fill the feed with the one event it may hold.
-    events::append(&state.db, 1, "agent-one", None, signal("the one event"))
-        .await
-        .expect("the first event fills the ceiling");
+    events::append(
+        &state.db,
+        1,
+        &common::seed::writer("agent-one"),
+        None,
+        signal("the one event"),
+    )
+    .await
+    .expect("the first event fills the ceiling");
 
     // The artifact publish is an agent-content writer, so the ceiling bounds it.
     let refused = agent_hub::store::artifacts::publish_capped(
@@ -135,7 +177,7 @@ async fn a_full_feed_refuses_an_artifact_publish_but_not_a_knowledge_base_write(
         &state.data_dir,
         1,
         agent_hub::store::artifacts::NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: &project.id,
             title: "Report",
             description: "",
@@ -156,7 +198,7 @@ async fn a_full_feed_refuses_an_artifact_publish_but_not_a_knowledge_base_write(
     let written = agent_hub::brain::knowledge::put(
         &state,
         &project.id,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         "/fs/notes.md",
         "# notes\n",
         None,
@@ -190,10 +232,9 @@ async fn a_full_feed_refuses_an_artifact_publish_but_not_a_knowledge_base_write(
 
     // A lifecycle write is exempt by construction (`sessions.rs` passes no
     // ceiling), so a full feed can never refuse `session_start`.
-    let session =
-        agent_hub::store::sessions::start(&state.db, &project.id, "bootstrap", "agent-one")
-            .await
-            .expect("session_start works at a full ceiling");
+    let session = common::seed::start_session(&state.db, &project.id, "bootstrap", "agent-one")
+        .await
+        .expect("session_start works at a full ceiling");
     assert_eq!(session.status, "active");
     assert_eq!(
         events::count_for_project(&state.db, &project.id)

@@ -11,7 +11,7 @@ use crate::store::inbox;
 /// A question to post.
 pub struct NewQuestion<'a> {
     /// Who asks.
-    pub actor: &'a str,
+    pub writer: &'a crate::author::Writer,
     /// The project it belongs to.
     pub project_id: &'a str,
     /// The question, one line.
@@ -57,7 +57,7 @@ pub async fn post_outcome(
     question: NewQuestion<'_>,
 ) -> Result<events::Appended> {
     let NewQuestion {
-        actor,
+        writer,
         project_id,
         subject,
         body,
@@ -93,7 +93,7 @@ pub async fn post_outcome(
         db,
         caps,
         events_per_project,
-        actor,
+        writer,
         idempotency_key,
         NewEvent {
             project_id: project_id.to_string(),
@@ -124,12 +124,12 @@ pub async fn post_outcome(
 pub async fn answer(
     db: &Database,
     events_per_project: i64,
-    actor: impl Into<crate::author::Writer>,
+    actor: &crate::author::Writer,
     question_id: &str,
     body: &str,
     idempotency_key: Option<&str>,
 ) -> Result<String> {
-    let writer: crate::author::Writer = actor.into();
+    let writer = actor;
     let tx = super::begin_write(db).await?;
 
     let question = events::get_in_tx(&tx, question_id)
@@ -187,7 +187,7 @@ pub async fn answer(
     let id = events::append_in_tx(
         &tx,
         events_per_project,
-        &writer,
+        writer,
         None,
         NewEvent {
             project_id: question.project_id.clone(),
@@ -253,7 +253,7 @@ pub struct Decision {
 pub async fn decide(
     db: &Database,
     events_per_project: i64,
-    actor: impl Into<crate::author::Writer>,
+    actor: &crate::author::Writer,
     approval_id: &str,
     approved: bool,
     note: Option<&str>,
@@ -282,13 +282,13 @@ pub async fn decide(
 pub async fn decide_reporting(
     db: &Database,
     events_per_project: i64,
-    actor: impl Into<crate::author::Writer>,
+    actor: &crate::author::Writer,
     approval_id: &str,
     approved: bool,
     note: Option<&str>,
     idempotency_key: Option<&str>,
 ) -> Result<Decision> {
-    let writer: crate::author::Writer = actor.into();
+    let writer = actor;
     // Before anything is read or written, so a refused note decides nothing.
     let note = note.map(str::trim).filter(|note| !note.is_empty());
     if let Some(note) = note {
@@ -417,7 +417,7 @@ pub async fn decide_reporting(
     let id = events::append_in_tx(
         &tx,
         events_per_project,
-        &writer,
+        writer,
         None,
         NewEvent {
             project_id: approval.project_id.clone(),
@@ -528,7 +528,7 @@ async fn expire_one(db: &Database, event_id: &str, now: time::OffsetDateTime) ->
     events::append_in_tx(
         &tx,
         0,
-        crate::author::Writer::hub(),
+        &crate::author::Writer::hub(),
         None,
         NewEvent {
             project_id: item.project_id.clone(),

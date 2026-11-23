@@ -62,11 +62,12 @@ impl Hub {
     }
 
     async fn agent(&self, id: &str) -> String {
-        identity::create_agent(&self.state.db, id, id)
+        identity::create_member(&self.state.db, id, id)
             .await
             .expect("create agent");
-        identity::issue_token(&self.state.db, id)
+        identity::issue_member_token(&self.state.db, id)
             .await
+            .map(|(issued, _)| issued)
             .expect("issue token")
             .token
     }

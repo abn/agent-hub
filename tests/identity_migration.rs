@@ -922,7 +922,7 @@ async fn rolling_back_to_the_pre_upgrade_set_brings_back_a_deleted_artifact() {
     drop(db);
 
     let state = open(&dir).await;
-    agent_hub::store::artifacts::delete(&state.db, &dir, "human", "art-1")
+    agent_hub::store::artifacts::delete(&state.db, &dir, &common::seed::writer("human"), "art-1")
         .await
         .expect("delete after the upgrade");
     assert!(!dir.join(&rel).exists());

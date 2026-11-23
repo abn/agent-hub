@@ -424,11 +424,11 @@ async fn a_peek_pages_through_a_backlog_of_answers_by_its_cursor() {
 }
 
 #[tokio::test]
-async fn an_ended_session_leaves_the_lease_reading_only_what_was_asked_outside_any_session() {
+async fn a_call_naming_an_ended_session_reads_only_what_was_asked_outside_any_session() {
     let world = world("me-pending-ended-lease").await;
     let child = HubProcess::serve(&world.dir, ADMIN_TOKEN, &[]);
     let port = child.port();
-    let agent = Mcp::connect(port, &world.agent_token);
+    let agent = Mcp::connect(port, &world.agent_token).bind("work");
     let session_id = agent.call(
         "session_start",
         json!({"project_id": PROJECT, "session_name": "work"}),
@@ -467,7 +467,7 @@ async fn a_session_ended_over_rest_takes_its_subscriptions_and_refuses_new_ones(
     let world = world("me-pending-end").await;
     let child = HubProcess::serve(&world.dir, ADMIN_TOKEN, &[]);
     let port = child.port();
-    let agent = Mcp::connect(port, &world.agent_token);
+    let agent = Mcp::connect(port, &world.agent_token).bind("work");
     let session_id = agent.call(
         "session_start",
         json!({"project_id": PROJECT, "session_name": "work"}),
@@ -496,10 +496,10 @@ async fn a_session_ended_over_rest_takes_its_subscriptions_and_refuses_new_ones(
         json!([]),
         "the subscription went with the session: {listed}"
     );
-    // The connection still holds the lease the human ended under it.
+    // A call that still names the session the human ended takes nothing new.
     let refused = mcp_post(
         port,
-        &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"notify_subscribe","arguments":{"kinds":"signal"}}}).to_string(),
+        &json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"notify_subscribe","arguments":{"kinds":"signal","session":{"session_id": session_id}}}}).to_string(),
         Some(&agent.token),
         Some(&agent.session),
     )

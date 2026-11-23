@@ -71,8 +71,8 @@ pub type Verifies = fn(Option<&[u8]>, &[u8]) -> bool;
 pub struct Stamp<'a> {
     /// The operation, such as `kb.put`.
     pub op: &'a str,
-    /// The authenticated actor, never a value the caller supplied.
-    pub actor: &'a str,
+    /// The authenticated writer, never a value the caller supplied.
+    pub writer: &'a crate::author::Writer,
     /// Asked under the write lock, and the answer goes on the log row. `None`
     /// for a store that has no such notion.
     pub verifies: Option<Verifies>,
@@ -91,7 +91,7 @@ impl<'a> From<Stamp<'a>> for Signed<'a> {
     fn from(stamp: Stamp<'a>) -> Self {
         Self {
             op: stamp.op,
-            writer: std::borrow::Cow::Owned(crate::author::Writer::from(stamp.actor)),
+            writer: std::borrow::Cow::Borrowed(stamp.writer),
             verifies: stamp.verifies,
             base: None,
         }
@@ -626,14 +626,13 @@ impl Brain {
         &self,
         name: &str,
         path: &str,
-        actor: &str,
+        writer: &crate::author::Writer,
         bytes: Option<usize>,
         version: Option<&str>,
     ) -> Result<i64> {
         let _guard = self.lock.lock().await;
         self.ensure_present()?;
-        let writer = crate::author::Writer::from(actor);
-        self.record_locked(name, path, &writer, bytes, version, false)
+        self.record_locked(name, path, writer, bytes, version, false)
             .await
     }
 

@@ -19,9 +19,6 @@ pub struct Session {
     pub id: String,
     pub project_id: String,
     pub session_name: String,
-    /// The label the session was started under, the same as
-    /// `started_label`. Kept for readers of the old key.
-    pub agent: String,
     pub status: String,
     pub brain_path: String,
     pub created_at: String,
@@ -62,221 +59,6 @@ fn t(value: &str) -> Value {
 
 fn ot(value: Option<&str>) -> Value {
     value.map_or(Value::Null, t)
-}
-
-// The old surface, kept as adapters over shared sessions.
-
-/// Start a session, or resume the one of that name in the project.
-pub async fn start(
-    db: &Database,
-    project_id: &str,
-    session_name: &str,
-    agent: &str,
-) -> Result<Session> {
-    Ok(start_resumed(db, project_id, session_name, agent).await?.0)
-}
-
-/// Start a session, reporting whether one of that name already existed.
-pub async fn start_resumed(
-    db: &Database,
-    project_id: &str,
-    session_name: &str,
-    agent: &str,
-) -> Result<(Session, bool)> {
-    let writer = Writer::from(agent);
-    let started = start_session(
-        db,
-        &StartRequest {
-            project_id,
-            session_name,
-            writer: &writer,
-            exclusive: false,
-            fork_from: None,
-        },
-    )
-    .await?;
-    Ok((started.session, started.outcome != StartOutcome::Created))
-}
-
-/// What picking up a session turned out to be.
-#[derive(Debug)]
-pub enum Pickup {
-    /// The caller named the session under its own name: an ordinary resume.
-    Resumed(Session),
-    /// Never returned: sessions are shared, so nothing is adopted.
-    Adopted {
-        session: Session,
-        /// The owner the session came from.
-        from_agent: String,
-    },
-    /// The caller gets a copy of the source. The row is written by
-    /// [`insert_fork`] once the brain has been copied.
-    Fork(Session),
-}
-
-/// Branch from another session. A source under the same name is resumed;
-/// any other is forked.
-pub async fn start_from(
-    db: &Database,
-    project_id: &str,
-    session_name: &str,
-    caller: &str,
-    source_id: &str,
-) -> Result<Pickup> {
-    let source = lookup_id(db, source_id)
-        .await?
-        .ok_or_else(|| Error::NotFound(format!("session {source_id} not found")))?;
-    if source.project_id != project_id {
-        return Err(Error::InvalidArgument(format!(
-            "session {source_id} belongs to another project, and a brain is project-scoped from_project_id={}",
-            source.project_id
-        )));
-    }
-    if source.deleted_at.is_some() {
-        return Err(Error::Conflict(format!(
-            "session {source_id} is pruned; restore it with undo before picking it up session_id={source_id}"
-        )));
-    }
-    if source.session_name == session_name {
-        let (session, _) = start_resumed(db, project_id, session_name, caller).await?;
-        return Ok(Pickup::Resumed(session));
-    }
-    let conn = super::connect(db)?;
-    if let Some(existing) = live_or_ended_on(&conn, project_id, session_name).await? {
-        return Err(name_taken(session_name, &existing.id));
-    }
-    Ok(Pickup::Fork(source))
-}
-
-/// Record a fork once its brain file is in place.
-///
-/// The row, the copied search rows and the lifecycle event commit together, so
-/// a forked session is never listed without the entries it was forked with.
-pub async fn insert_fork(
-    db: &Database,
-    source: &Session,
-    session_name: &str,
-    caller: &str,
-    new_id: &str,
-) -> Result<Session> {
-    let writer = Writer::from(caller);
-    let tx = super::begin_write(db).await?;
-    assert_project_active(&tx, &source.project_id).await?;
-    if let Some(existing) = live_or_ended_on(&tx, &source.project_id, session_name).await? {
-        return Err(name_taken(session_name, &existing.id));
-    }
-    let session = insert_session(
-        &tx,
-        new_id,
-        &source.project_id,
-        session_name,
-        None,
-        &writer,
-        Some(&source.id),
-    )
-    .await?;
-    copy_search_rows(&tx, &source.id, new_id).await?;
-    append_lifecycle(
-        &tx,
-        &writer,
-        &session,
-        format!("session {session_name} forked from {}", source.agent),
-        serde_json::json!({
-            "action": "forked",
-            "session_id": new_id,
-            "session_name": session_name,
-            "from_session_id": source.id,
-            "from_agent": source.agent,
-        }),
-    )
-    .await?;
-    tx.commit().await.map_err(engine)?;
-    Ok(session)
-}
-
-/// Relabel who a session was started under, which only the human does.
-///
-/// Sessions are shared and have no owner, so nothing about who may write
-/// moves: this changes the `started_*` record and the old `agent` key the
-/// surfaces still show, and says so on the feed.
-pub async fn reassign(
-    db: &Database,
-    session_id: &str,
-    to_agent: &str,
-    actor: &str,
-) -> Result<Session> {
-    let tx = super::begin_write(db).await?;
-    let session = get_on(&tx, session_id)
-        .await?
-        .filter(|session| session.deleted_at.is_none())
-        .ok_or_else(|| Error::NotFound(format!("session {session_id} not found")))?;
-    if session.agent == to_agent {
-        return Err(Error::Conflict(format!(
-            "session {session_id} already belongs to {to_agent} owner={to_agent}"
-        )));
-    }
-    let known = scalar(
-        &tx,
-        "SELECT id FROM members WHERE id = ?1",
-        vec![t(to_agent)],
-    )
-    .await?;
-    if known.is_none() {
-        return Err(Error::NotFound(format!("agent {to_agent} not found")));
-    }
-    let at = now();
-    tx.execute(
-        "UPDATE sessions SET started_label = ?1, started_kind = 'participant',
-                started_member = ?1, started_agent = '', last_activity = ?2
-          WHERE id = ?3",
-        vec![t(to_agent), t(&at), t(session_id)],
-    )
-    .await
-    .map_err(engine)?;
-    append_lifecycle(
-        &tx,
-        &Writer::from(actor),
-        &session,
-        format!("session {} reassigned to {to_agent}", session.session_name),
-        serde_json::json!({
-            "action": "reassigned",
-            "session_id": session.id,
-            "session_name": session.session_name,
-            "from_agent": session.agent,
-            "to_agent": to_agent,
-        }),
-    )
-    .await?;
-    tx.commit().await.map_err(engine)?;
-    Ok(Session {
-        agent: to_agent.to_string(),
-        started_label: to_agent.to_string(),
-        last_activity: at,
-        ..session
-    })
-}
-
-/// End a session for everyone, with its live children.
-///
-/// Ending is not owner-gated: a session has no owner. The store trusts its
-/// caller, which must have authorized project access first (an active member
-/// with access to the session's project, or the human admin); ending a parent
-/// ends its children under that same authorization. `_expected_owner` is
-/// accepted and not read, only so the callers that still pass it compile; it
-/// goes with this function.
-///
-/// Retry-safe: ending an already-ended session is a no-op, so a retried call
-/// does not append a second lifecycle event and does not clear an earlier note.
-pub async fn end(
-    db: &Database,
-    session_id: &str,
-    actor: &str,
-    _expected_owner: Option<&str>,
-    handoff: Option<&str>,
-) -> Result<()> {
-    end_inner(db, session_id, &Writer::from(actor), handoff)
-        .await
-        .map(|_| ())
 }
 
 /// How often one session's activity timestamp reaches the store.
@@ -385,35 +167,6 @@ impl Activity {
             Err(poisoned) => poisoned.into_inner(),
         }
     }
-}
-
-/// How many distinct starters hold a recently touched active session,
-/// fleet-wide or in one project. Kept for the `agents_active` key; the live
-/// count of [`live_count`] replaces it.
-pub async fn agents_active(db: &Database, since: &str, project_id: Option<&str>) -> Result<i64> {
-    let mut sql = String::from(
-        "SELECT COUNT(DISTINCT started_label) FROM sessions
-         WHERE status = 'active' AND deleted_at IS NULL AND last_activity >= ?1",
-    );
-    let mut params = vec![t(since)];
-    if let Some(project_id) = project_id {
-        params.push(t(project_id));
-        sql.push_str(" AND project_id = ?2");
-    }
-    let conn = super::connect(db)?;
-    crate::store::events::count_on(&conn, &sql, params).await
-}
-
-/// [`agents_active`] per project, in one grouped query.
-pub async fn agents_active_by_project(db: &Database, since: &str) -> Result<Vec<(String, i64)>> {
-    grouped_counts(
-        db,
-        "SELECT project_id, COUNT(DISTINCT started_label) FROM sessions
-         WHERE status = 'active' AND deleted_at IS NULL AND last_activity >= ?1
-         GROUP BY project_id",
-        since,
-    )
-    .await
 }
 
 /// Live sessions per project, in one grouped query: the per-project form of
@@ -580,23 +333,6 @@ pub async fn query(db: &Database, query: &SessionQuery<'_>) -> Result<Vec<Sessio
     many(db, &sql, params).await
 }
 
-/// The live session of a name that was started under `agent`, if any.
-///
-/// Kept for the callers that resolved a session by its starter; a name is
-/// one session per project now, so this is that session when `agent` started
-/// it.
-pub async fn find_owned(
-    db: &Database,
-    project_id: &str,
-    agent: &str,
-    session_name: &str,
-) -> Result<Option<Session>> {
-    let conn = super::connect(db)?;
-    Ok(live_or_ended_on(&conn, project_id, session_name)
-        .await?
-        .filter(|session| session.agent == agent))
-}
-
 /// The session that holds a name in a project and is not pruned.
 async fn live_or_ended_on(
     conn: &turso::Connection,
@@ -690,7 +426,6 @@ fn session_from_row(row: &Row) -> Result<Session> {
         id: text(0)?,
         project_id: text(1)?,
         session_name: text(2)?,
-        agent: label.clone(),
         status: text(4)?,
         brain_path: text(5)?,
         created_at: text(6)?,
@@ -791,15 +526,6 @@ pub(crate) async fn writable_in_tx(conn: &turso::Connection, session_id: &str) -
     Ok(session)
 }
 
-/// Refuse an artifact write that names an ended or pruned session. A session
-/// id the store does not hold is the caller's lineage label and passes.
-pub(crate) async fn refuse_closed_in_tx(conn: &turso::Connection, session_id: &str) -> Result<()> {
-    match writable_in_tx(conn, session_id).await {
-        Err(Error::Session(SessionReason::Unknown, _, _)) => Ok(()),
-        other => other.map(|_| ()),
-    }
-}
-
 /// Insert a new session row from its writer.
 async fn insert_session(
     tx: &crate::store::WriteTx,
@@ -838,7 +564,6 @@ async fn insert_session(
         id: id.to_string(),
         project_id: project_id.to_string(),
         session_name: session_name.to_string(),
-        agent: writer.actor().to_string(),
         status: "active".to_string(),
         brain_path: path,
         created_at: at.clone(),
@@ -1409,7 +1134,7 @@ pub async fn start_session(db: &Database, request: &StartRequest<'_>) -> Result<
                 "session_id": id,
                 "session_name": request.session_name,
                 "from_session_id": source.id,
-                "from_agent": source.agent,
+                "from_agent": source.started_label,
             }),
         )
         .await?;

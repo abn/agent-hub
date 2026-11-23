@@ -3,7 +3,7 @@
 
 use agent_hub::http::router;
 use agent_hub::store::events::{self, NewEvent};
-use agent_hub::store::{artifacts, prune, sessions};
+use agent_hub::store::{artifacts, prune};
 use axum::http::StatusCode;
 use serde_json::json;
 use tower::ServiceExt;
@@ -24,10 +24,10 @@ async fn state() -> TestState {
 #[tokio::test]
 async fn feed_filters_by_session_and_combines_with_kind() {
     let state = state().await;
-    let s1 = sessions::start(&state.db, "proj", "sess-1", "agent-one")
+    let s1 = common::seed::start_session(&state.db, "proj", "sess-1", "agent-one")
         .await
         .expect("start s1");
-    let s2 = sessions::start(&state.db, "proj", "sess-2", "agent-two")
+    let s2 = common::seed::start_session(&state.db, "proj", "sess-2", "agent-two")
         .await
         .expect("start s2");
 
@@ -35,7 +35,7 @@ async fn feed_filters_by_session_and_combines_with_kind() {
     events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -54,7 +54,7 @@ async fn feed_filters_by_session_and_combines_with_kind() {
     events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -73,7 +73,7 @@ async fn feed_filters_by_session_and_combines_with_kind() {
     events::append(
         &state.db,
         0,
-        "agent-two",
+        &common::seed::writer("agent-two"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -124,13 +124,13 @@ async fn feed_filters_by_session_and_combines_with_kind() {
 #[tokio::test]
 async fn feed_and_artifacts_return_empty_for_unknown_or_pruned_session() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "to-prune", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "to-prune", "agent-one")
         .await
         .expect("start");
     events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -145,7 +145,7 @@ async fn feed_and_artifacts_return_empty_for_unknown_or_pruned_session() {
     .await
     .expect("append");
 
-    sessions::end(&state.db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&state.db, &session.id, "agent-one", None)
         .await
         .expect("end");
     prune::prune_session(&state.db, &session.id)
@@ -329,7 +329,7 @@ async fn pruning_preserves_artifacts_and_search_index() {
     let db = common::store::open(&dir).await;
     let _ = agent_hub::store::projects::create(&db, "proj", "Project").await;
 
-    let session = sessions::start(&db, "proj", "sess-art", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "sess-art", "agent-one")
         .await
         .expect("start");
 
@@ -337,7 +337,7 @@ async fn pruning_preserves_artifacts_and_search_index() {
         &db,
         &dir,
         artifacts::NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Durable Report",
             description: "",
@@ -353,7 +353,7 @@ async fn pruning_preserves_artifacts_and_search_index() {
     .expect("publish");
 
     // Prune session
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");

@@ -240,7 +240,7 @@ pub async fn answer(
     let event_id = question_store::answer(
         &state.db,
         state.config.events_per_project.per_project,
-        &principal.actor,
+        &principal.writer(None),
         &question_id,
         &payload.body,
         payload.idempotency_key.as_deref(),
@@ -294,7 +294,7 @@ pub async fn decide(
     let decision = question_store::decide_reporting(
         &state.db,
         state.config.events_per_project.per_project,
-        &principal.actor,
+        &principal.writer(None),
         &approval_id,
         approved,
         payload.note.as_deref(),

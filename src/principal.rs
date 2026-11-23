@@ -63,15 +63,8 @@ pub fn declared_name(headers: &HeaderMap) -> Result<Option<&str>> {
 /// A resolved caller.
 #[derive(Debug, Clone)]
 pub struct Principal {
-    /// The opaque key written in the `actor` column: the member, `human`, or
-    /// `local`. Kept beside the typed fields for code that still reads it.
-    pub actor: String,
-    /// The member id, when the caller is a member rather than the human admin.
-    pub agent_id: Option<String>,
     /// Whether the caller is the human admin.
     pub is_admin: bool,
-    /// Whether the caller is in pending enrolment.
-    pub is_pending: bool,
     /// The member the caller acts as: the token's member, `local` for embedded
     /// stdio, `loopback` on the open loopback hub, none for the human.
     pub member: Option<String>,
@@ -105,10 +98,7 @@ impl Principal {
     /// A member with a token the hub knows.
     pub fn for_member(member: &str, token_hash: &str, credential: CredentialState) -> Self {
         Self {
-            actor: member.to_string(),
-            agent_id: Some(member.to_string()),
             is_admin: false,
-            is_pending: credential == CredentialState::Pending,
             member: Some(member.to_string()),
             agent: crate::agent_name::CLI.to_string(),
             kind: crate::author::AuthorKind::Participant,
@@ -129,10 +119,7 @@ impl Principal {
     /// loopback hub.
     pub fn human() -> Self {
         Self {
-            actor: crate::author::HUMAN_KEY.to_string(),
-            agent_id: None,
             is_admin: true,
-            is_pending: false,
             member: None,
             agent: crate::agent_name::CLI.to_string(),
             kind: crate::author::AuthorKind::Human,
@@ -144,10 +131,7 @@ impl Principal {
     /// Embedded stdio: the local administrator.
     pub fn local() -> Self {
         Self {
-            actor: crate::author::LOCAL_MEMBER.to_string(),
-            agent_id: None,
             is_admin: true,
-            is_pending: false,
             member: Some(crate::author::LOCAL_MEMBER.to_string()),
             agent: crate::agent_name::CLI.to_string(),
             kind: crate::author::AuthorKind::Local,
@@ -159,10 +143,7 @@ impl Principal {
     /// A caller with no bearer on a networked hub: it may only enrol.
     pub fn anonymous() -> Self {
         Self {
-            actor: "anonymous".to_string(),
-            agent_id: None,
             is_admin: false,
-            is_pending: false,
             member: None,
             agent: crate::agent_name::CLI.to_string(),
             kind: crate::author::AuthorKind::Human,

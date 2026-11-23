@@ -29,12 +29,10 @@ pub const CONTEXT_CHARS_MAX: usize = 64;
 pub struct Comment {
     pub id: String,
     pub artifact_id: String,
-    /// The writer's key. Kept as `author` until every reader takes `actor`.
-    pub author: String,
     /// The writer's key, as every other row names it.
     pub actor: String,
     /// Who wrote it.
-    pub author_record: crate::author::AuthorView,
+    pub author: crate::author::AuthorView,
     /// `hub` for the hub's own act, null for a call.
     pub origin: Option<String>,
     pub body: String,
@@ -51,9 +49,8 @@ pub fn comment_view(comment: &Comment) -> serde_json::Value {
     serde_json::json!({
         "id": comment.id,
         "artifact_id": comment.artifact_id,
-        "author": comment.author,
         "actor": comment.actor,
-        "author_record": comment.author_record,
+        "author": comment.author,
         "origin": comment.origin,
         "body": comment.body,
         "anchor": comment.anchor.clone().unwrap_or(serde_json::Value::Null),
@@ -182,14 +179,13 @@ pub fn generate_delete_token() -> (String, String) {
 pub async fn add_comment(
     db: &Database,
     artifact_id: &str,
-    writer: impl Into<crate::author::Writer>,
+    writer: &crate::author::Writer,
     body: &str,
     anchor: Option<AnchorInput>,
     anchor_version: Option<i64>,
     delete_token_hash: Option<&str>,
     idempotency_key: Option<&str>,
 ) -> Result<(Comment, bool)> {
-    let writer: crate::author::Writer = writer.into();
     let author = check_author(writer.actor())?;
     let body = check_body(body)?;
     let anchor_json = check_anchor(anchor)?;
@@ -556,9 +552,8 @@ fn comment_from_row(row: &Row) -> Result<Comment> {
     Ok(Comment {
         id: required_text(row, 0)?,
         artifact_id: required_text(row, 1)?,
-        author: required_text(row, 2)?,
         actor: required_text(row, 2)?,
-        author_record: author.view(None),
+        author: author.view(None),
         origin: text_at(row, 13)?,
         body: required_text(row, 3)?,
         anchor,
@@ -603,9 +598,8 @@ mod tests {
         let comment = Comment {
             id: "c-1".to_string(),
             artifact_id: "art-1".to_string(),
-            author: "alice".to_string(),
             actor: "alice".to_string(),
-            author_record: crate::author::Author::Legacy {
+            author: crate::author::Author::Legacy {
                 label: "alice".to_string(),
             }
             .view(None),

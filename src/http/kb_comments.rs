@@ -33,9 +33,6 @@ pub struct CommentsQuery {
 pub struct CommentPostBody {
     pub path: String,
     pub body: String,
-    /// Who the comment is recorded under. Absent means the human.
-    #[serde(default)]
-    pub author: Option<String>,
     #[serde(default)]
     pub anchor: Option<Value>,
 }
@@ -68,7 +65,7 @@ pub async fn list(
 
 /// `POST /api/v1/projects/{id}/kb/comments`
 ///
-/// Admin-only. The author defaults to the human.
+/// Admin-only. The comment is the human's.
 pub async fn create(
     State(state): State<AppState>,
     ProblemPath(project_id): ProblemPath<String>,
@@ -78,13 +75,15 @@ pub async fn create(
     kb::check_access(&state, &headers, &project_id).await?;
     let payload = json_body(body, "comment body must be JSON with path and body fields")?;
     let path = kb::page_path(&payload.path)?;
-    let author = payload.author.as_deref().unwrap_or("human");
+    // The route is the human's, so the comment is the human's: who wrote it
+    // is never a value the request names.
+    let writer = crate::author::Writer::human();
 
     let comment = page_comments::add_comment(
         &state.db,
         &project_id,
         &path,
-        author,
+        &writer,
         &payload.body,
         payload.anchor,
     )
@@ -99,7 +98,7 @@ pub async fn create(
             path: &path,
         },
         &comment.id,
-        &comment.author,
+        &writer,
     )
     .await;
 

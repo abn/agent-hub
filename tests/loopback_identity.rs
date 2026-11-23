@@ -142,11 +142,12 @@ fn loopback_defaults_identity_and_opens_the_control_surface() {
 async fn loopback_with_a_token_reads_the_header_as_attribution_only() {
     let data_dir = TempDir::new("loopback-token-and-header");
     let db = common::store::open(data_dir.path()).await;
-    agent_hub::store::identity::create_agent(&db, "host-a", "Host A")
+    agent_hub::store::identity::create_member(&db, "host-a", "Host A")
         .await
         .expect("create agent");
-    let token = agent_hub::store::identity::issue_token(&db, "host-a")
+    let token = agent_hub::store::identity::issue_member_token(&db, "host-a")
         .await
+        .map(|(issued, _)| issued)
         .expect("issue token")
         .token;
     drop(db);

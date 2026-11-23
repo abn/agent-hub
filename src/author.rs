@@ -284,33 +284,6 @@ impl Writer {
     }
 }
 
-/// Transitional: a bare actor label is a legacy writer. Lets the store take
-/// `impl Into<Writer>` while callers still pass labels; it goes once every
-/// caller passes a writer.
-impl From<&str> for Writer {
-    fn from(label: &str) -> Self {
-        if label == HUMAN_KEY {
-            return Self::human();
-        }
-        Self::call(Author::Legacy {
-            label: label.to_string(),
-        })
-    }
-}
-
-/// Transitional, as `From<&str>`.
-impl From<&String> for Writer {
-    fn from(label: &String) -> Self {
-        Self::from(label.as_str())
-    }
-}
-
-impl From<&Writer> for Writer {
-    fn from(writer: &Writer) -> Self {
-        writer.clone()
-    }
-}
-
 /// The delivery key of one participant: cursors and subscriptions are keyed
 /// by it. Agent `''` is a migrated participant whose agent was not recorded.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -320,15 +293,6 @@ pub struct ParticipantKey {
 }
 
 impl ParticipantKey {
-    /// Transitional: a bare label keys as a member with no agent. It goes
-    /// with the last caller that keys by label.
-    pub fn from_label(label: &str) -> Self {
-        Self {
-            member: label.to_string(),
-            agent: String::new(),
-        }
-    }
-
     /// Whether an audience entry matches this key: an entry with agent `''`
     /// matches every agent of its member.
     pub fn matches(&self, entry: &ParticipantKey) -> bool {
@@ -489,7 +453,10 @@ mod tests {
             member: "laptop".into(),
             agent: "claude-code".into(),
         };
-        assert!(key.matches(&ParticipantKey::from_label("laptop")));
+        assert!(key.matches(&ParticipantKey {
+            member: "laptop".into(),
+            agent: String::new(),
+        }));
         assert!(!key.matches(&ParticipantKey {
             member: "laptop".into(),
             agent: "opencode".into()

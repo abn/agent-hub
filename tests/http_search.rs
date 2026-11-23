@@ -21,7 +21,7 @@ async fn seed(state: &AppState) {
     append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -100,7 +100,7 @@ async fn results_carry_the_hit_count_and_how_long_the_query_took() {
         append(
             &state.db,
             0,
-            "agent-one",
+            &common::seed::writer("agent-one"),
             None,
             NewEvent {
                 project_id: "proj".to_string(),
@@ -368,13 +368,12 @@ async fn plant_brain_entry(state: &AppState, project_id: &str, session_id: &str,
 #[tokio::test]
 async fn a_hit_carries_what_its_row_shows_for_its_family() {
     use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
-    use agent_hub::store::sessions;
 
     let state = state().await;
     append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -392,7 +391,7 @@ async fn a_hit_carries_what_its_row_shows_for_its_family() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "needle chart",
             description: "",
@@ -409,7 +408,7 @@ async fn a_hit_carries_what_its_row_shows_for_its_family() {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"needle, second cut",
         EnvelopeUpdate::Keep,
@@ -418,11 +417,11 @@ async fn a_hit_carries_what_its_row_shows_for_its_family() {
     )
     .await
     .expect("update");
-    let session = sessions::start(&state.db, "proj", "nightly-run", "agent-two")
+    let session = common::seed::start_session(&state.db, "proj", "nightly-run", "agent-two")
         .await
         .expect("start");
     plant_brain_entry(&state, "proj", &session.id, "needle notes").await;
-    sessions::end(&state.db, &session.id, "agent-two", None, None)
+    common::seed::end_session(&state.db, &session.id, "agent-two", None)
         .await
         .expect("end");
 

@@ -457,7 +457,7 @@ fn seed_event(data_dir: &Path, project_id: &str, summary: &str) -> String {
         agent_hub::store::events::append(
             &db,
             0,
-            "seeder",
+            &common::seed::writer("seeder"),
             None,
             agent_hub::store::events::NewEvent {
                 project_id: project_id.to_string(),

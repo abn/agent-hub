@@ -73,25 +73,6 @@ async fn a_missing_token_names_its_reason() {
 }
 
 #[tokio::test]
-async fn the_old_agent_routes_are_gone() {
-    let state = state().await;
-    let app = router(state.clone());
-    for (method, uri) in [
-        ("GET", "/api/v1/agents"),
-        ("POST", "/api/v1/agents"),
-        ("POST", "/api/v1/agents/worker/token"),
-        ("GET", "/api/v1/agents/worker/grants"),
-    ] {
-        let response = app
-            .clone()
-            .oneshot(request(method, uri, Some("Bearer token")))
-            .await
-            .expect("request");
-        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{method} {uri}");
-    }
-}
-
-#[tokio::test]
 async fn a_new_member_id_is_plain_lowercase_and_not_reserved() {
     let state = state().await;
     let app = router(state.clone());

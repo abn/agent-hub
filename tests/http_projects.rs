@@ -44,7 +44,7 @@ async fn signal(state: &AppState, project_id: &str, summary: &str) -> String {
     events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: project_id.to_string(),
@@ -293,7 +293,7 @@ async fn a_patch_that_names_nothing_changes_nothing() {
 #[tokio::test]
 async fn an_agents_personal_space_is_settable_though_it_cannot_be_deleted() {
     let state = state().await;
-    let agent = agent_hub::store::identity::create_agent(&state.db, "laptop", "Laptop")
+    let agent = agent_hub::store::identity::create_member(&state.db, "laptop", "Laptop")
         .await
         .expect("create agent");
     let space = agent.personal_project_id;
@@ -333,7 +333,7 @@ async fn the_listing_marks_a_personal_space_and_not_an_ordinary_project() {
     projects::create(&state.db, "homelab", "Homelab")
         .await
         .expect("create project");
-    let other = agent_hub::store::identity::create_agent(&state.db, "other", "Other")
+    let other = agent_hub::store::identity::create_member(&state.db, "other", "Other")
         .await
         .expect("create agent");
     let space = other.personal_project_id;
@@ -455,7 +455,7 @@ async fn project_stats_report_threads_members_written_and_disk_bytes() {
     let q1 = events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "homelab".to_string(),
@@ -473,7 +473,7 @@ async fn project_stats_report_threads_members_written_and_disk_bytes() {
     events::append(
         &state.db,
         0,
-        "agent-two",
+        &common::seed::writer("agent-two"),
         None,
         NewEvent {
             project_id: "homelab".to_string(),
@@ -491,7 +491,7 @@ async fn project_stats_report_threads_members_written_and_disk_bytes() {
     events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "homelab".to_string(),
@@ -517,11 +517,12 @@ async fn project_stats_report_threads_members_written_and_disk_bytes() {
 #[tokio::test]
 async fn confidential_projects_are_absent_without_grant_and_byte_for_byte_identical_to_404() {
     let state = state().await;
-    let agent = agent_hub::store::identity::create_agent(&state.db, "agent-one", "Agent One")
+    let agent = agent_hub::store::identity::create_member(&state.db, "agent-one", "Agent One")
         .await
         .expect("create agent");
-    let token = agent_hub::store::identity::issue_token(&state.db, &agent.id)
+    let token = agent_hub::store::identity::issue_member_token(&state.db, &agent.id)
         .await
+        .map(|(issued, _)| issued)
         .expect("issue token")
         .token;
     let agent_auth = format!("Bearer {token}");
@@ -634,13 +635,15 @@ async fn confidential_projects_are_absent_without_grant_and_byte_for_byte_identi
     // Query a nonexistent project with the exact same id "secret-work" on another clean state
     let clean_state = common::state::open("http-projects-clean").await;
     let clean_agent =
-        agent_hub::store::identity::create_agent(&clean_state.db, "agent-one", "Agent One")
+        agent_hub::store::identity::create_member(&clean_state.db, "agent-one", "Agent One")
             .await
             .expect("clean agent");
-    let clean_token = agent_hub::store::identity::issue_token(&clean_state.db, &clean_agent.id)
-        .await
-        .expect("clean token")
-        .token;
+    let clean_token =
+        agent_hub::store::identity::issue_member_token(&clean_state.db, &clean_agent.id)
+            .await
+            .map(|(issued, _)| issued)
+            .expect("clean token")
+            .token;
     let clean_auth = format!("Bearer {clean_token}");
     let res_clean_ghost = call_with_auth(
         &clean_state,
@@ -725,11 +728,12 @@ async fn confidential_projects_are_absent_without_grant_and_byte_for_byte_identi
 #[tokio::test]
 async fn an_agent_may_lock_a_project_and_only_the_admin_may_unlock_it() {
     let state = state().await;
-    let agent = agent_hub::store::identity::create_agent(&state.db, "locker", "Locker")
+    let agent = agent_hub::store::identity::create_member(&state.db, "locker", "Locker")
         .await
         .expect("create agent");
-    let token = agent_hub::store::identity::issue_token(&state.db, &agent.id)
+    let token = agent_hub::store::identity::issue_member_token(&state.db, &agent.id)
         .await
+        .map(|(issued, _)| issued)
         .expect("issue token")
         .token;
     let agent_auth = format!("Bearer {token}");
@@ -800,11 +804,12 @@ async fn an_agent_may_lock_a_project_and_only_the_admin_may_unlock_it() {
 #[tokio::test]
 async fn an_agent_tightening_a_project_leaves_a_signal() {
     let state = state().await;
-    let agent = agent_hub::store::identity::create_agent(&state.db, "agent-one", "Agent One")
+    let agent = agent_hub::store::identity::create_member(&state.db, "agent-one", "Agent One")
         .await
         .expect("create agent");
-    let token = agent_hub::store::identity::issue_token(&state.db, &agent.id)
+    let token = agent_hub::store::identity::issue_member_token(&state.db, &agent.id)
         .await
+        .map(|(issued, _)| issued)
         .expect("issue token")
         .token;
     let agent_auth = format!("Bearer {token}");
@@ -906,14 +911,15 @@ async fn an_agent_tightening_a_project_leaves_a_signal() {
 async fn a_declared_name_attributes_a_rest_change_and_grants_nothing() {
     let state = state().await;
     let token = {
-        agent_hub::store::identity::create_agent(&state.db, "agent-one", "Agent One")
+        agent_hub::store::identity::create_member(&state.db, "agent-one", "Agent One")
             .await
             .expect("create agent");
-        agent_hub::store::identity::create_agent(&state.db, "agent-two", "Agent Two")
+        agent_hub::store::identity::create_member(&state.db, "agent-two", "Agent Two")
             .await
             .expect("create agent");
-        agent_hub::store::identity::issue_token(&state.db, "agent-one")
+        agent_hub::store::identity::issue_member_token(&state.db, "agent-one")
             .await
+            .map(|(issued, _)| issued)
             .expect("issue token")
             .token
     };
@@ -945,16 +951,21 @@ async fn a_declared_name_attributes_a_rest_change_and_grants_nothing() {
     let conn = state.db.connect().expect("connect");
     let mut rows = conn
         .query(
-            "SELECT actor, summary FROM events WHERE project_id = 'open-work' AND kind = 'signal'",
+            "SELECT actor, summary, agent FROM events WHERE project_id = 'open-work' AND kind = 'signal'",
             (),
         )
         .await
         .expect("query");
     let row = rows.next().await.expect("row").expect("a signal row");
-    assert_eq!(row.get::<String>(0).expect("actor"), "agent-one/claude");
+    assert_eq!(row.get::<String>(0).expect("actor"), "agent-one");
     assert_eq!(
         row.get::<String>(1).expect("summary"),
-        "agent-one/claude made Open Work confidential"
+        "agent-one made Open Work confidential"
+    );
+    assert_eq!(
+        row.get::<String>(2).expect("agent"),
+        "claude-code",
+        "the declared name is the agent the change is attributed to"
     );
 
     // The project is confidential now and agent-two holds the grant. Naming

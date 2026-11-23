@@ -30,7 +30,7 @@ async fn delete_project_cascades_its_data() {
     let event = events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "homelab".to_string(),
@@ -49,7 +49,7 @@ async fn delete_project_cascades_its_data() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "homelab",
             title: "Note",
             kind: "markdown",
@@ -64,7 +64,7 @@ async fn delete_project_cascades_its_data() {
     .await
     .expect("publish artifact");
 
-    let session = sessions::start(&state.db, "homelab", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "homelab", "nightly", "agent-one")
         .await
         .expect("start session");
     let brain = state
@@ -107,7 +107,7 @@ async fn delete_project_cascades_its_data() {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"hello cascade v2",
         EnvelopeUpdate::Keep,
@@ -120,7 +120,7 @@ async fn delete_project_cascades_its_data() {
         .data_dir
         .join(format!("artifacts/homelab/{}/v2.md", artifact.id));
 
-    let agent = identity::create_agent(&state.db, "laptop", "Laptop")
+    let agent = identity::create_member(&state.db, "laptop", "Laptop")
         .await
         .expect("create agent");
     identity::add_grant(&state.db, "laptop", "homelab")
@@ -252,7 +252,7 @@ async fn delete_project_cascades_its_data() {
     let reused = events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         Some("retry-key"),
         NewEvent {
             project_id: "homelab".to_string(),
@@ -286,7 +286,7 @@ async fn delete_leaves_other_projects_untouched() {
         events::append(
             &state.db,
             0,
-            "agent-one",
+            &common::seed::writer("agent-one"),
             None,
             NewEvent {
                 project_id: id.to_string(),
@@ -333,7 +333,7 @@ async fn delete_leaves_other_projects_untouched() {
 #[tokio::test]
 async fn delete_refuses_a_personal_space() {
     let state = state().await;
-    let agent = identity::create_agent(&state.db, "laptop", "Laptop")
+    let agent = identity::create_member(&state.db, "laptop", "Laptop")
         .await
         .expect("create agent");
 
@@ -400,7 +400,7 @@ async fn delete_project_forgets_where_the_human_had_read_to() {
     let event = events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "homelab".to_string(),

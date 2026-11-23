@@ -29,7 +29,7 @@ async fn seed_question(state: &AppState, subject: &str) -> String {
         &agent_hub::limits::InboxCaps::disabled(),
         0,
         NewQuestion {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             subject,
             body: None,
@@ -50,7 +50,7 @@ async fn seed_question_with_options(state: &AppState, subject: &str, options: &[
         &agent_hub::limits::InboxCaps::disabled(),
         0,
         NewQuestion {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             subject,
             body: None,
@@ -69,7 +69,7 @@ async fn seed_finished(state: &AppState, summary: &str) -> String {
     events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -89,7 +89,7 @@ async fn seed_approval(state: &AppState, summary: &str) -> String {
     events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -148,7 +148,7 @@ async fn an_item_names_the_session_it_was_asked_in() {
         &agent_hub::limits::InboxCaps::disabled(),
         0,
         NewQuestion {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             subject: "Ship it?",
             body: None,
@@ -572,7 +572,7 @@ async fn the_inbox_listing_honours_the_limit() {
         events::append(
             &state.db,
             0,
-            "agent-one",
+            &common::seed::writer("agent-one"),
             None,
             NewEvent {
                 project_id: "proj".to_string(),
@@ -611,7 +611,7 @@ async fn seed_finished_in(state: &AppState, project_id: &str, summary: &str) -> 
     events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: project_id.to_string(),
@@ -1014,7 +1014,7 @@ async fn an_inbox_item_names_its_project() {
     let orphan = events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "no-such-project".to_string(),
@@ -1122,7 +1122,7 @@ async fn refused_options_post_no_question() {
         &agent_hub::limits::InboxCaps::disabled(),
         0,
         NewQuestion {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             subject: "Ship it?",
             body: None,

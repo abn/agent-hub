@@ -113,7 +113,7 @@ impl Default for FeedQuery {
 pub async fn append(
     db: &Database,
     events_per_project: i64,
-    writer: impl Into<crate::author::Writer>,
+    writer: &crate::author::Writer,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
@@ -142,7 +142,7 @@ pub async fn append_action(
     db: &Database,
     caps: &crate::limits::InboxCaps,
     events_per_project: i64,
-    writer: impl Into<crate::author::Writer>,
+    writer: &crate::author::Writer,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
@@ -173,7 +173,7 @@ pub async fn append_action_outcome(
     db: &Database,
     caps: &crate::limits::InboxCaps,
     events_per_project: i64,
-    writer: impl Into<crate::author::Writer>,
+    writer: &crate::author::Writer,
     idempotency_key: Option<&str>,
     event: NewEvent,
     deadline: Option<&crate::store::inbox::Deadline>,
@@ -199,7 +199,7 @@ pub async fn append_action_with_deadline(
     db: &Database,
     caps: &crate::limits::InboxCaps,
     events_per_project: i64,
-    writer: impl Into<crate::author::Writer>,
+    writer: &crate::author::Writer,
     idempotency_key: Option<&str>,
     event: NewEvent,
     deadline: Option<&crate::store::inbox::Deadline>,
@@ -263,7 +263,7 @@ async fn append_with_caps(
     db: &Database,
     caps: Option<&crate::limits::InboxCaps>,
     events_per_project: i64,
-    writer: impl Into<crate::author::Writer>,
+    writer: &crate::author::Writer,
     idempotency_key: Option<&str>,
     event: NewEvent,
     deadline: Option<&crate::store::inbox::Deadline>,
@@ -309,7 +309,7 @@ async fn append_with_caps_and_principal(
         &tx,
         caps,
         events_per_project,
-        writer,
+        &writer,
         idempotency_key,
         event,
     )
@@ -332,7 +332,7 @@ async fn append_with_caps_and_principal(
 pub(crate) async fn append_in_tx(
     tx: &crate::store::WriteTx,
     events_per_project: i64,
-    writer: impl Into<crate::author::Writer>,
+    writer: &crate::author::Writer,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
@@ -347,11 +347,10 @@ async fn append_in_tx_capped(
     tx: &crate::store::WriteTx,
     caps: Option<&crate::limits::InboxCaps>,
     events_per_project: i64,
-    writer: impl Into<crate::author::Writer>,
+    writer: &crate::author::Writer,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<Appended> {
-    let writer: crate::author::Writer = writer.into();
     let actor = writer.actor();
     validate_kind(&event.kind)?;
     let payload_text = event.payload.as_ref().map(|value| value.to_string());
@@ -790,41 +789,6 @@ pub(crate) async fn forget_session_dismissals_in_tx(
     Ok(())
 }
 
-/// An agent's own read position in one project's feed.
-///
-/// This is the durable, server-side cursor `feed_read` falls back to when the
-/// caller sends no `since`: the agent records no cursor itself and a restarted
-/// agent resumes where it stopped. The key is the resolved actor, the stable
-/// label on `events.actor` and `sessions.agent`, not the token.
-#[derive(Debug, Clone, Serialize)]
-pub struct AgentSeen {
-    pub project_id: String,
-    pub agent: String,
-    /// The newest event this agent has read, absent until it has read a page.
-    pub last_seen: Option<String>,
-    /// Whether this call moved the cursor.
-    pub advanced: bool,
-}
-
-/// The last event id one agent has read in one project.
-pub async fn agent_cursor(db: &Database, project_id: &str, agent: &str) -> Result<Option<String>> {
-    let conn = super::connect(db)?;
-    agent_cursor_on(&conn, project_id, agent).await
-}
-
-async fn agent_cursor_on(
-    conn: &Connection,
-    project_id: &str,
-    agent: &str,
-) -> Result<Option<String>> {
-    feed_cursor_on(
-        conn,
-        project_id,
-        &crate::author::ParticipantKey::from_label(agent),
-    )
-    .await
-}
-
 async fn feed_cursor_on(
     conn: &Connection,
     project_id: &str,
@@ -846,60 +810,6 @@ async fn feed_cursor_on(
         Some(row) => text_at(&row, 0),
         None => Ok(None),
     }
-}
-
-/// Advance one agent's cursor in one project to an event it has read.
-///
-/// The cursor never moves backwards, and an id that is not an event of this
-/// project is ignored rather than trusted: it says nothing about this feed.
-/// The read and the write share an immediate transaction, so a cursor cannot
-/// step over an event committed between them. An empty id is likewise ignored,
-/// which lets a caller pass the `next_since` of an empty forward poll without
-/// moving the cursor or inserting an empty row.
-pub async fn advance_agent_cursor(
-    db: &Database,
-    project_id: &str,
-    agent: &str,
-    event_id: &str,
-) -> Result<AgentSeen> {
-    let tx = super::begin_write(db).await?;
-    let current = agent_cursor_on(&tx, project_id, agent).await?;
-    let belongs = !event_id.is_empty()
-        && get_on(&tx, event_id)
-            .await?
-            .is_some_and(|event| event.project_id == project_id);
-    let forward = belongs && current.as_deref().is_none_or(|seen| event_id > seen);
-    if !forward {
-        return Ok(AgentSeen {
-            project_id: project_id.to_string(),
-            agent: agent.to_string(),
-            last_seen: current,
-            advanced: false,
-        });
-    }
-
-    let key = crate::author::ParticipantKey::from_label(agent);
-    tx.execute(
-        "INSERT OR REPLACE INTO feed_cursors(project_id, member_id, agent, last_seen_event_id, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        vec![
-            Value::Text(project_id.to_string()),
-            Value::Text(key.member),
-            Value::Text(key.agent),
-            Value::Text(event_id.to_string()),
-            Value::Text(crate::store::now_rfc3339()),
-        ],
-    )
-    .await
-    .map_err(engine)?;
-    tx.commit().await.map_err(engine)?;
-
-    Ok(AgentSeen {
-        project_id: project_id.to_string(),
-        agent: agent.to_string(),
-        last_seen: Some(event_id.to_string()),
-        advanced: true,
-    })
 }
 
 /// Forget every agent's cursor for one project inside a caller's transaction,
@@ -1296,16 +1206,11 @@ pub async fn comment_event(
         }
     };
     audience.retain(|actor| actor != author);
-    audience.sort();
-    audience.dedup();
+    reached.retain(|row| row.actor != author);
     let mut payload = payload;
     payload["comment_id"] = serde_json::json!(comment_id);
     payload["author"] = serde_json::json!(author);
-    payload["audience"] = serde_json::json!(audience);
-    reached.retain(|row| row.actor != author);
-    let (sessions, participants) = audience_of(&reached);
-    payload["audience_sessions"] = serde_json::json!(sessions);
-    payload["audience_participants"] = serde_json::json!(participants);
+    payload["audience"] = audience_value(audience, &reached);
     Ok(NewEvent {
         project_id: project_id.to_string(),
         kind: "comment".to_string(),
@@ -1326,12 +1231,12 @@ pub async fn record_comment(
     events_per_project: i64,
     target: CommentTarget<'_>,
     comment_id: &str,
-    author: impl Into<crate::author::Writer>,
+    author: &crate::author::Writer,
 ) {
-    let writer: crate::author::Writer = author.into();
+    let writer = author;
     let appended = async {
         let event = comment_event(db, target, comment_id, writer.actor()).await?;
-        append(db, events_per_project, &writer, None, event).await
+        append(db, events_per_project, writer, None, event).await
     }
     .await;
     if let Err(err) = appended {
@@ -1377,7 +1282,10 @@ pub async fn page_event(
             member: written.member,
             agent: written.agent,
         });
-    let (sessions, participants) = audience_of(previous.as_slice());
+    let audience = audience_value(
+        audience.into_iter().map(str::to_string).collect(),
+        previous.as_slice(),
+    );
     Ok(Some(NewEvent {
         project_id: project_id.to_string(),
         kind: "page".to_string(),
@@ -1390,8 +1298,6 @@ pub async fn page_event(
             "action": if created { "created" } else { "updated" },
             "prev_actor": prev_actor,
             "audience": audience,
-            "audience_sessions": sessions,
-            "audience_participants": participants,
         })),
         needs_action: false,
         thread_id: None,
@@ -1427,6 +1333,26 @@ async fn reached_by(conn: &Connection, sql: &str, params: Vec<Value>) -> Result<
         });
     }
     Ok(out)
+}
+
+/// The `audience` of a comment or page event: the sessions and participants
+/// the writers it reaches name, and as `labels` the writers with no member (the
+/// human, a row written before members), kept for display. Delivery matches the
+/// sessions and participants; labels match nothing.
+fn audience_value(mut labels: Vec<String>, reached: &[Reached]) -> serde_json::Value {
+    let (sessions, participants) = audience_of(reached);
+    labels.retain(|label| {
+        !reached
+            .iter()
+            .any(|row| row.member.is_some() && &row.actor == label)
+    });
+    labels.sort();
+    labels.dedup();
+    serde_json::json!({
+        "sessions": sessions,
+        "participants": participants,
+        "labels": labels,
+    })
 }
 
 /// The sessions and participants a set of writers names, deduplicated.

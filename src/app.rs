@@ -396,15 +396,15 @@ impl AppState {
             }
         }
 
-        // An agent a store from before already holds under a reserved id would
+        // A member a store from before already holds under a reserved id would
         // sign as the hub itself, so its token goes before anything is served.
         // A store that cannot be made safe this way is not opened. The revoke
         // writes an audit event, so it runs after the id high-water mark is
         // seeded and its id sorts after every id the store holds.
-        for agent_id in store::identity::retire_reserved_agents(&db).await? {
+        for member in store::identity::retire_reserved_members(&db).await? {
             tracing::warn!(
-                agent_id = %agent_id,
-                "revoked the token of an agent whose id the hub now reserves; \
+                member = %member,
+                "revoked the token of a member whose id the hub now reserves; \
                  create it again under another id and give it the new token"
             );
         }

@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::app::AppState;
+use crate::author::Writer;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
 use crate::http::filters::Params;
@@ -482,7 +483,7 @@ pub async fn comment_post(
     let (comment, replayed) = comment_store::add_comment(
         &state.db,
         &artifact_id,
-        "human",
+        &Writer::human(),
         &payload.body,
         anchor,
         payload.anchor_version,
@@ -505,7 +506,7 @@ pub async fn comment_post(
                 title: &artifact.title,
             },
             &comment.id,
-            "human",
+            &Writer::human(),
         )
         .await;
     }
@@ -580,9 +581,14 @@ pub async fn destroy(
 ) -> std::result::Result<Json<DestroyResult>, Problem> {
     let principal = crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
-    artifact_store::delete(&state.db, &state.data_dir, &principal.actor, &artifact_id)
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
+    artifact_store::delete(
+        &state.db,
+        &state.data_dir,
+        &principal.writer(None),
+        &artifact_id,
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
 
     state.notify();
     Ok(Json(DestroyResult { ok: true }))
@@ -846,7 +852,7 @@ async fn live_state(state: &AppState, artifact: &Artifact) -> LiveState {
     if let Some(session_id) = artifact.live_session.as_deref()
         && let Ok(Some(session)) = crate::store::sessions::get(&state.db, session_id).await
     {
-        actor = Some(session.agent);
+        actor = Some(session.started_label);
         active =
             session.deleted_at.is_none() && session.last_activity >= state.config.active_since();
     }
@@ -1655,7 +1661,7 @@ fn thread_html(thread: &[Comment], shown: i64) -> String {
     }
     let mut items = String::new();
     for comment in &visible {
-        let author = escape_html(&comment.author);
+        let author = escape_html(&comment.actor);
         let time = escape_html(&relative_age(&comment.created_at));
         let full_time = escape_html(&comment.created_at);
         let body = escape_html(&comment.body);

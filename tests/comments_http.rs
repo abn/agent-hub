@@ -25,7 +25,7 @@ async fn publish(state: &AppState, title: &str, content: &[u8]) -> String {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title,
             kind: "html",
@@ -47,7 +47,7 @@ async fn publish_protected(state: &AppState, title: &str, content: &[u8]) -> Str
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title,
             kind: "html",
@@ -89,7 +89,8 @@ async fn comment_routes_round_trip() {
     let posted = json_body(response).await;
     let comment_id = posted["id"].as_str().expect("comment id").to_string();
     assert_eq!(posted["body"], "Needs a second look");
-    assert_eq!(posted["author"], "human");
+    assert_eq!(posted["actor"], "human");
+    assert_eq!(posted["author"]["kind"], "human");
     assert_eq!(posted["done"], false);
     assert!(
         posted.get("delete_token").is_none() && posted.get("delete_token_hash").is_none(),
@@ -377,7 +378,7 @@ async fn host_shows_the_thread_only_when_non_empty() {
     comments::add_comment(
         &state.db,
         &id,
-        "human",
+        &common::seed::writer("human"),
         "Needs a second look",
         None,
         None,
@@ -409,7 +410,7 @@ async fn host_escapes_comment_bodies_and_quotes() {
     comments::add_comment(
         &state.db,
         &id,
-        "\"><img src=x onerror=alert(3)>",
+        &common::seed::writer("\"><img src=x onerror=alert(3)>"),
         "</script><script>alert(1)</script>",
         Some(AnchorInput::Text {
             quote: "</script><script>alert(2)</script>".to_string(),
@@ -449,7 +450,7 @@ async fn locked_shell_carries_no_thread() {
     comments::add_comment(
         &state.db,
         &id,
-        "human",
+        &common::seed::writer("human"),
         "Discussion of the secret",
         None,
         None,
@@ -484,7 +485,7 @@ async fn host_filters_comments_by_shown_version() {
     comments::add_comment(
         &state.db,
         &id,
-        "human",
+        &common::seed::writer("human"),
         "On the first version",
         None,
         Some(1),
@@ -496,7 +497,7 @@ async fn host_filters_comments_by_shown_version() {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &id,
         b"<p>v2</p>",
         EnvelopeUpdate::Keep,
@@ -513,7 +514,7 @@ async fn host_filters_comments_by_shown_version() {
     comments::add_comment(
         &state.db,
         &id,
-        "human",
+        &common::seed::writer("human"),
         "On the second version",
         None,
         Some(2),
@@ -592,18 +593,29 @@ async fn a_human_comment_appends_one_event_naming_the_publisher() {
     assert_eq!(payload["artifact_id"], id.as_str());
     assert_eq!(payload["comment_id"], posted["id"]);
     assert_eq!(payload["author"], "human");
-    assert_eq!(payload["audience"], json!(["agent-one"]));
+    assert_eq!(
+        payload["audience"],
+        json!({"sessions": [], "participants": [{"member": "agent-one", "agent": "cli"}], "labels": []})
+    );
 }
 
 #[tokio::test]
 async fn the_audience_grows_with_earlier_commenters_and_leaves_out_the_author() {
     let state = state().await;
     let id = publish(&state, "Report", b"<p>body</p>").await;
-    let earlier =
-        comments::add_comment(&state.db, &id, "agent-two", "First", None, None, None, None)
-            .await
-            .expect("comment")
-            .0;
+    let earlier = comments::add_comment(
+        &state.db,
+        &id,
+        &common::seed::writer("agent-two"),
+        "First",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("comment")
+    .0;
     assert!(!earlier.id.is_empty());
 
     let app = router(state.clone());
@@ -622,7 +634,7 @@ async fn the_audience_grows_with_earlier_commenters_and_leaves_out_the_author() 
     assert_eq!(found.len(), 1);
     assert_eq!(
         found[0].payload.as_ref().expect("payload")["audience"],
-        json!(["agent-one", "agent-two"]),
+        json!({"sessions": [], "participants": [{"member": "agent-one", "agent": "cli"}, {"member": "agent-two", "agent": "cli"}], "labels": []}),
         "the publisher and the earlier commenter, not the human who wrote it"
     );
 }
@@ -668,7 +680,7 @@ async fn only_a_publish_or_an_update_puts_an_actor_in_an_artifacts_audience() {
     events::append(
         &state.db,
         0,
-        "agent-legacy",
+        &common::seed::writer("agent-legacy"),
         None,
         events::NewEvent {
             project_id: "proj".to_string(),
@@ -701,7 +713,7 @@ async fn only_a_publish_or_an_update_puts_an_actor_in_an_artifacts_audience() {
     let found = comment_events(&state).await;
     assert_eq!(
         found[0].payload.as_ref().expect("payload")["audience"],
-        json!(["agent-one"]),
+        json!({"sessions": [], "participants": [{"member": "agent-one", "agent": "cli"}], "labels": []}),
         "an actor who only commented on it in the old way is not its owner"
     );
 }
@@ -710,14 +722,23 @@ async fn only_a_publish_or_an_update_puts_an_actor_in_an_artifacts_audience() {
 async fn a_comment_is_not_told_about_comments_posted_after_it() {
     let state = state().await;
     let id = publish(&state, "Report", b"<p>body</p>").await;
-    let first = comments::add_comment(&state.db, &id, "agent-two", "First", None, None, None, None)
-        .await
-        .expect("first")
-        .0;
+    let first = comments::add_comment(
+        &state.db,
+        &id,
+        &common::seed::writer("agent-two"),
+        "First",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("first")
+    .0;
     comments::add_comment(
         &state.db,
         &id,
-        "agent-three",
+        &common::seed::writer("agent-three"),
         "Second",
         None,
         None,
@@ -741,7 +762,7 @@ async fn a_comment_is_not_told_about_comments_posted_after_it() {
     .expect("event");
     assert_eq!(
         event.payload.as_ref().expect("payload")["audience"],
-        json!(["agent-one"]),
+        json!({"sessions": [], "participants": [{"member": "agent-one", "agent": "cli"}], "labels": []}),
         "the later commenter is not an earlier one"
     );
 }

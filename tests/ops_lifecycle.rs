@@ -51,7 +51,7 @@ fn seed_corrupt_store(data: &std::path::Path) -> (u64, u64) {
             agent_hub::store::events::append(
                 &db,
                 1_000_000,
-                "corrupt-seed",
+                &common::seed::writer("corrupt-seed"),
                 None,
                 agent_hub::store::events::NewEvent {
                     project_id: "homelab".to_string(),
@@ -183,7 +183,7 @@ fn backup_without_data_dir_ignores_a_non_loopback_bind() {
 }
 
 #[test]
-fn the_mcp_gate_refuses_a_missing_token_with_401() {
+fn the_mcp_gate_refuses_an_unknown_token_with_401() {
     let root = TempDir::new("ops-mcp-gate");
     let data = root.join("data");
     seed_store(&data);
@@ -191,19 +191,22 @@ fn the_mcp_gate_refuses_a_missing_token_with_401() {
     let hub = common::process::HubProcess::serve(&data, "admin-token", &[]);
     let port = hub.port();
 
-    // A missing token is `unauthenticated`, which the gate maps to 401 through
-    // the shared status map. The point of the fix is that this is the only code
-    // that yields 401: a store failure yields 503.
+    // A token the hub does not know is `unauthenticated`, which the gate maps
+    // to 401 through the shared status map. The point of the fix is that this
+    // is the only code that yields 401: a store failure yields 503. A caller
+    // with no token at all is not refused: it reaches the enrol surface.
     let body = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\
                  \"protocolVersion\":\"2024-11-05\",\"capabilities\":{},\
                  \"clientInfo\":{\"name\":\"gate\",\"version\":\"0.0.0\"}}}";
-    let response = common::wire::mcp_post(port, body, None, None);
+    let response = common::wire::mcp_post(port, body, Some("not-a-token"), None);
     assert_eq!(response.status, 401, "{}", response.raw);
     assert!(
         response.raw.contains("\"code\":\"unauthenticated\""),
         "the body carries the code: {}",
         response.raw
     );
+    let anonymous = common::wire::mcp_post(port, body, None, None);
+    assert_eq!(anonymous.status, 200, "{}", anonymous.raw);
 
     drop(hub);
 }

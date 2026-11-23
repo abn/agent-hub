@@ -532,7 +532,7 @@ impl HubServer {
             let written = knowledge::put(
                 &self.state,
                 &project_id,
-                &principal.actor,
+                &principal.writer(resolved.session_id()),
                 &params.path,
                 &params.content,
                 params.if_version.as_deref(),
@@ -687,7 +687,7 @@ impl HubServer {
             let path = knowledge::delete(
                 &self.state,
                 &project_id,
-                &principal.actor,
+                &principal.writer(resolved.session_id()),
                 resolved.session_id(),
                 &params.path,
                 params.if_version.as_deref(),
@@ -904,7 +904,7 @@ impl HubServer {
         let written = knowledge::revert(
             &self.state,
             &project_id,
-            &principal.actor,
+            &principal.writer(resolved.session_id()),
             resolved.session_id(),
             &params.path,
             &params.version,
@@ -960,7 +960,7 @@ impl HubServer {
         let written = knowledge::promote(
             &self.state,
             &project_id,
-            &principal.actor,
+            &principal.writer(Some(&session.id)),
             &knowledge::Promotion {
                 session: &session,
                 from_path: &params.from_path,

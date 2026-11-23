@@ -1,7 +1,6 @@
 //! HTTP session brain entry route: read one KV value or FS file.
 
 use agent_hub::http::router;
-use agent_hub::store::sessions;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use serde_json::Value;
@@ -25,7 +24,7 @@ fn request(method: &str, uri: &str, auth: Option<&str>) -> Request<Body> {
 #[tokio::test]
 async fn kv_write_through_store_read_over_route_content_equal() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -61,7 +60,7 @@ async fn kv_write_through_store_read_over_route_content_equal() {
 #[tokio::test]
 async fn fs_file_write_through_store_read_over_route_content_equal() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -100,7 +99,7 @@ async fn fs_file_write_through_store_read_over_route_content_equal() {
 #[tokio::test]
 async fn absent_path_answers_404_naming_path() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -165,7 +164,7 @@ async fn absent_path_answers_404_naming_path() {
 #[tokio::test]
 async fn directory_path_answers_409() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -240,7 +239,7 @@ async fn directory_path_answers_409() {
 #[tokio::test]
 async fn invalid_utf8_bytes_answer_422() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -297,7 +296,7 @@ async fn invalid_utf8_bytes_answer_422() {
 #[tokio::test]
 async fn session_with_no_brain_answers_404_and_leaves_no_brain_file() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -337,7 +336,7 @@ async fn session_with_no_brain_answers_404_and_leaves_no_brain_file() {
 #[tokio::test]
 async fn missing_path_query_parameter_is_a_problem_naming_path() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 

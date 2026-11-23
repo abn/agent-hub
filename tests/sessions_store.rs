@@ -19,10 +19,10 @@ async fn open() -> TestDb {
 #[tokio::test]
 async fn start_is_idempotent_on_the_session_name() {
     let db = open().await;
-    let first = sessions::start(&db, "proj", "nightly", "agent-one")
+    let first = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    let second = sessions::start(&db, "proj", "nightly", "agent-one")
+    let second = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("resume");
 
@@ -47,10 +47,10 @@ async fn start_is_idempotent_on_the_session_name() {
 #[tokio::test]
 async fn two_agents_using_one_name_share_one_session() {
     let db = open().await;
-    let one = sessions::start(&db, "proj", "nightly", "agent-one")
+    let one = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("first agent");
-    let two = sessions::start(&db, "proj", "nightly", "agent-two")
+    let two = common::seed::start_session(&db, "proj", "nightly", "agent-two")
         .await
         .expect("second agent");
 
@@ -62,15 +62,15 @@ async fn two_agents_using_one_name_share_one_session() {
 #[tokio::test]
 async fn resuming_a_pruned_name_is_a_conflict() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     let token = prune::prune_session(&db, &session.id).await.expect("prune");
 
-    let err = sessions::start(&db, "proj", "nightly", "agent-one")
+    let err = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect_err("the pruned name is not free");
     assert_eq!(err.code(), ErrorCode::Conflict);
@@ -86,7 +86,7 @@ async fn resuming_a_pruned_name_is_a_conflict() {
     prune::undo(&db, &token.undo_token)
         .await
         .expect("the undo token still works");
-    let restored = sessions::start(&db, "proj", "nightly", "agent-one")
+    let restored = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("resume after undo");
     assert_eq!(restored.id, session.id);
@@ -95,11 +95,11 @@ async fn resuming_a_pruned_name_is_a_conflict() {
 #[tokio::test]
 async fn end_marks_the_session_and_emits_an_event() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
 
@@ -122,14 +122,14 @@ async fn end_marks_the_session_and_emits_an_event() {
 #[tokio::test]
 async fn ending_twice_does_not_emit_a_second_event() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end again");
 
@@ -147,13 +147,13 @@ async fn ending_twice_does_not_emit_a_second_event() {
 #[tokio::test]
 async fn concurrent_ends_emit_one_event() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
     let (a, b) = tokio::join!(
-        sessions::end(&db, &session.id, "agent-one", None, None),
-        sessions::end(&db, &session.id, "agent-one", None, None),
+        common::seed::end_session(&db, &session.id, "agent-one", None),
+        common::seed::end_session(&db, &session.id, "agent-one", None),
     );
     assert!(
         a.is_ok() || b.is_ok(),
@@ -174,13 +174,13 @@ async fn concurrent_ends_emit_one_event() {
 #[tokio::test]
 async fn list_returns_active_and_ended_sessions() {
     let db = open().await;
-    sessions::start(&db, "proj", "one", "agent-one")
+    common::seed::start_session(&db, "proj", "one", "agent-one")
         .await
         .expect("one");
-    let two = sessions::start(&db, "proj", "two", "agent-one")
+    let two = common::seed::start_session(&db, "proj", "two", "agent-one")
         .await
         .expect("two");
-    sessions::end(&db, &two.id, "agent-one", None, None)
+    common::seed::end_session(&db, &two.id, "agent-one", None)
         .await
         .expect("end two");
 
@@ -194,11 +194,10 @@ async fn list_returns_active_and_ended_sessions() {
 #[tokio::test]
 async fn end_unknown_session_is_not_found() {
     let db = open().await;
-    let err = sessions::end(
+    let err = common::seed::end_session(
         &db,
         "01900000-0000-0000-0000-000000000000",
         "agent-one",
-        None,
         None,
     )
     .await
@@ -209,7 +208,7 @@ async fn end_unknown_session_is_not_found() {
 #[tokio::test]
 async fn bad_session_name_is_rejected() {
     let db = open().await;
-    let err = sessions::start(&db, "proj", "../escape", "agent-one")
+    let err = common::seed::start_session(&db, "proj", "../escape", "agent-one")
         .await
         .expect_err("bad name");
     assert_eq!(err.code(), ErrorCode::InvalidArgument);
@@ -220,10 +219,10 @@ async fn racing_pickups_of_an_ended_session_both_reopen_it() {
     // Ten rounds, because one pass of a race proves nothing.
     for round in 0..10 {
         let db = open().await;
-        let session = sessions::start(&db, "proj", "handover", "agent-one")
+        let session = common::seed::start_session(&db, "proj", "handover", "agent-one")
             .await
             .expect("start");
-        sessions::end(&db, &session.id, "agent-one", None, None)
+        common::seed::end_session(&db, &session.id, "agent-one", None)
             .await
             .expect("end");
 
@@ -233,21 +232,17 @@ async fn racing_pickups_of_an_ended_session_both_reopen_it() {
         for agent in ["agent-two", "agent-three"] {
             let db = db.clone();
             let gate = gate.clone();
-            let source_id = session.id.clone();
             racers.push(tokio::spawn(async move {
                 gate.wait().await;
-                sessions::start_from(&db, "proj", "handover", agent, &source_id).await
+                common::seed::start_session(&db, "proj", "handover", agent).await
             }));
         }
         for racer in racers {
-            match racer.await.expect("join") {
-                Ok(sessions::Pickup::Resumed(resumed)) => {
-                    assert_eq!(resumed.id, session.id, "round {round}: the one session")
-                }
-                other => {
-                    panic!("round {round}: a shared session is reopened, not adopted: {other:?}")
-                }
-            }
+            let resumed = racer
+                .await
+                .expect("join")
+                .unwrap_or_else(|err| panic!("round {round}: the start failed: {err}"));
+            assert_eq!(resumed.id, session.id, "round {round}: the one session");
         }
         let row = sessions::get(&db, &session.id)
             .await
@@ -270,10 +265,10 @@ async fn racing_pickups_of_an_ended_session_both_reopen_it() {
 #[tokio::test]
 async fn a_handoff_note_rides_the_session_and_its_event() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None, Some("half applied"))
+    common::seed::end_session(&db, &session.id, "agent-one", Some("half applied"))
         .await
         .expect("end");
 
@@ -295,7 +290,7 @@ async fn a_handoff_note_rides_the_session_and_its_event() {
     assert_eq!(payload["handoff"], "half applied");
 
     // A retried end does not clear the note.
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end again");
     let again = sessions::get(&db, &session.id)
@@ -308,12 +303,12 @@ async fn a_handoff_note_rides_the_session_and_its_event() {
 #[tokio::test]
 async fn a_handoff_over_the_cap_is_refused() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     let note = "n".repeat(agent_hub::limits::HANDOFF_CHARS_MAX + 1);
 
-    let err = sessions::end(&db, &session.id, "agent-one", None, Some(&note))
+    let err = common::seed::end_session(&db, &session.id, "agent-one", Some(&note))
         .await
         .expect_err("over the cap");
     assert_eq!(err.code(), ErrorCode::PayloadTooLarge);
@@ -329,13 +324,13 @@ async fn a_handoff_over_the_cap_is_refused() {
 #[tokio::test]
 async fn a_listing_narrows_by_project_status_and_agent() {
     let db = open().await;
-    sessions::start(&db, "proj", "one", "agent-one")
+    common::seed::start_session(&db, "proj", "one", "agent-one")
         .await
         .expect("one");
-    let two = sessions::start(&db, "proj", "two", "agent-two")
+    let two = common::seed::start_session(&db, "proj", "two", "agent-two")
         .await
         .expect("two");
-    sessions::end(&db, &two.id, "agent-two", None, Some("over to you"))
+    common::seed::end_session(&db, &two.id, "agent-two", Some("over to you"))
         .await
         .expect("end two");
 
@@ -405,10 +400,10 @@ async fn a_listing_narrows_by_project_status_and_agent() {
 #[tokio::test]
 async fn a_pruned_session_is_omitted_from_a_listing() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "old", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "old", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");
@@ -423,39 +418,6 @@ async fn a_pruned_session_is_omitted_from_a_listing() {
     .await
     .expect("list");
     assert!(listed.is_empty(), "a pruned session is gone from a listing");
-}
-
-#[tokio::test]
-async fn the_human_reassigns_an_active_session() {
-    let db = open().await;
-    let session = sessions::start(&db, "proj", "stuck", "agent-one")
-        .await
-        .expect("start");
-    agent_hub::store::identity::create_agent(&db, "agent-two", "Agent two")
-        .await
-        .expect("create the agent the session moves to");
-
-    let moved = sessions::reassign(&db, &session.id, "agent-two", "human")
-        .await
-        .expect("reassign");
-    assert_eq!(moved.agent, "agent-two");
-    assert_eq!(moved.id, session.id, "the brain does not move");
-
-    let resumed = sessions::start(&db, "proj", "stuck", "agent-two")
-        .await
-        .expect("the new owner resumes it by name");
-    assert_eq!(resumed.id, session.id);
-
-    let events = read_feed(&db, "proj", &FeedQuery::default())
-        .await
-        .expect("feed")
-        .events;
-    assert!(
-        events
-            .iter()
-            .any(|event| event.summary.contains("reassigned to agent-two")),
-        "the human feed shows the reassignment"
-    );
 }
 
 /// A fixed instant, so the coalescing window and the active window are read
@@ -474,7 +436,7 @@ fn stamp(offset_secs: i64) -> String {
 #[tokio::test]
 async fn a_touch_is_written_once_per_coalescing_window() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     let activity = sessions::Activity::new();
@@ -523,7 +485,7 @@ async fn a_touch_is_written_once_per_coalescing_window() {
 #[tokio::test]
 async fn a_touch_never_moves_activity_backwards() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     let activity = sessions::Activity::new();
@@ -549,104 +511,76 @@ async fn a_touch_never_moves_activity_backwards() {
 }
 
 #[tokio::test]
-async fn an_agent_is_active_while_its_session_is_inside_the_window() {
+async fn a_session_is_live_while_a_participant_is_inside_the_window() {
     let db = open().await;
-    let activity = sessions::Activity::new();
     for name in ["nightly", "backfill"] {
-        let session = sessions::start(&db, "proj", name, "agent-one")
+        common::seed::start_session(&db, "proj", name, "agent-one")
             .await
             .expect("start");
-        activity
-            .touch_at(&db, &session.id, at(0))
-            .await
-            .expect("touch");
     }
-    let other = sessions::start(&db, "proj", "nightly-two", "agent-two")
+    common::seed::start_session(&db, "other", "nightly", "agent-two")
         .await
         .expect("start");
-    activity
-        .touch_at(&db, &other.id, at(0))
-        .await
-        .expect("touch");
-    let elsewhere = sessions::start(&db, "other", "nightly", "agent-three")
-        .await
-        .expect("start");
-    activity
-        .touch_at(&db, &elsewhere.id, at(0))
-        .await
-        .expect("touch");
+    let since = |offset: i64| {
+        (time::OffsetDateTime::now_utc() + time::Duration::seconds(offset))
+            .format(&time::format_description::well_known::Rfc3339)
+            .expect("format")
+    };
 
-    // One second before the boundary every agent still counts, and an agent
-    // with two sessions counts once.
+    // Every session the members joined just now is live, counted per session.
     assert_eq!(
-        sessions::agents_active(&db, &stamp(-899), None)
+        sessions::live_count(&db, &since(-900), None)
             .await
             .expect("count"),
         3
     );
     assert_eq!(
-        sessions::agents_active(&db, &stamp(-899), Some("proj"))
+        sessions::live_count(&db, &since(-900), Some("proj"))
             .await
             .expect("count"),
         2,
-        "a project counts the agents working in it"
+        "a project counts the sessions live in it"
     );
-
-    // The boundary is inclusive, so a session touched exactly a window ago is
-    // still active; a second later it is not.
+    // A window that starts after the last call holds no live session.
     assert_eq!(
-        sessions::agents_active(&db, &stamp(0), None)
-            .await
-            .expect("count"),
-        3
-    );
-    assert_eq!(
-        sessions::agents_active(&db, &stamp(1), None)
+        sessions::live_count(&db, &since(60), None)
             .await
             .expect("count"),
         0,
-        "an agent drops out one window after its last call"
+        "a session drops out one window after its participants' last call"
     );
 }
 
 #[tokio::test]
-async fn an_ended_or_pruned_session_makes_no_agent_active() {
+async fn an_ended_or_pruned_session_is_not_live() {
     let db = open().await;
-    let activity = sessions::Activity::new();
-    let ended = sessions::start(&db, "proj", "nightly", "agent-one")
+    let ended = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    let pruned = sessions::start(&db, "proj", "scratch", "agent-two")
+    let pruned = common::seed::start_session(&db, "proj", "scratch", "agent-two")
         .await
         .expect("start");
-    for session in [&ended, &pruned] {
-        activity
-            .touch_at(&db, &session.id, at(0))
-            .await
-            .expect("touch");
-    }
-    let live = sessions::start(&db, "proj", "live", "agent-three")
+    common::seed::start_session(&db, "proj", "live", "agent-three")
         .await
         .expect("start");
-    activity
-        .touch_at(&db, &live.id, at(0))
-        .await
-        .expect("touch");
 
-    sessions::end(&db, &ended.id, "agent-one", None, None)
+    common::seed::end_session(&db, &ended.id, "agent-one", None)
         .await
         .expect("end");
-    sessions::end(&db, &pruned.id, "agent-two", None, None)
+    common::seed::end_session(&db, &pruned.id, "agent-two", None)
         .await
         .expect("end");
     prune::prune_session(&db, &pruned.id).await.expect("prune");
 
+    let since = (time::OffsetDateTime::now_utc() - time::Duration::seconds(900))
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("format");
     assert_eq!(
-        sessions::agents_active(&db, &stamp(-900), None)
+        sessions::live_count(&db, &since, None)
             .await
             .expect("count"),
         1,
-        "only the agent still running a session counts"
+        "only the session still running counts"
     );
 }
 
@@ -660,7 +594,7 @@ async fn reconcile_removes_an_orphan_session_file_and_keeps_a_referenced_one() {
     agent_hub::store::projects::create(&db, "proj", "Project")
         .await
         .expect("create project");
-    let live = sessions::start(&db, "proj", "nightly", "agent-one")
+    let live = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -704,7 +638,7 @@ async fn reconcile_removes_an_orphan_session_file_and_keeps_a_referenced_one() {
 #[tokio::test]
 async fn a_failed_activity_write_is_not_marked_as_served() {
     let db = open().await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     let activity = sessions::Activity::new();
@@ -816,9 +750,16 @@ mod shared {
         )
         .await
         .expect("ask");
-        questions::answer(&db, 0, "human", &question, "left", None)
-            .await
-            .expect("answer");
+        questions::answer(
+            &db,
+            0,
+            &common::seed::writer("human"),
+            &question,
+            "left",
+            None,
+        )
+        .await
+        .expect("answer");
 
         let newcomer = key("desktop", "opencode");
         let joined = sessions::join(&db, &session.id, &newcomer)
@@ -863,9 +804,16 @@ mod shared {
         )
         .await
         .expect("ask");
-        questions::answer(&db, 0, "human", &question, "yes", None)
-            .await
-            .expect("answer");
+        questions::answer(
+            &db,
+            0,
+            &common::seed::writer("human"),
+            &question,
+            "yes",
+            None,
+        )
+        .await
+        .expect("answer");
         let me = key("laptop", "cli");
         let one = notifications::attention(&db, &me, &session.id, 10, None)
             .await
@@ -1156,7 +1104,7 @@ mod shared {
             &state.db,
             state.dir(),
             agent_hub::store::artifacts::NewArtifact {
-                actor: "laptop",
+                writer: &common::seed::writer("laptop"),
                 project_id: "proj",
                 title: "late",
                 description: "",

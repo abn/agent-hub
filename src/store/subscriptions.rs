@@ -27,9 +27,6 @@ pub const DRAIN_LIMIT: i64 = 50;
 #[derive(Debug, Clone)]
 pub struct Subscription {
     pub id: String,
-    /// The member that registered it. Kept under its old name, the label a
-    /// subscription was keyed by, until every reader takes `participant`.
-    pub agent: String,
     /// The participant it drains for.
     pub participant: crate::author::ParticipantKey,
     /// Only events whose author passes this are reported; empty is every
@@ -40,9 +37,6 @@ pub struct Subscription {
     pub project_id: Option<String>,
     /// The event kinds it reports, in the order they were registered.
     pub kinds: Vec<String>,
-    /// Only events authored by this actor are reported when set; `None` means
-    /// every actor.
-    pub actor_filter: Option<String>,
     /// Whether the registering actor's own events are dropped at drain time.
     pub exclude_self: bool,
     /// Whether only events that name the registering actor in their payload's
@@ -58,43 +52,6 @@ pub struct Subscription {
     pub created_at: String,
 }
 
-/// Register a subscription that serves every session of the actor and return
-/// its id.
-///
-/// The cursor is passed in rather than read here: the caller establishes it
-/// against the events the principal may actually read, which is a policy
-/// question and not this table's business.
-pub async fn create(
-    db: &Database,
-    agent: &str,
-    project_id: Option<&str>,
-    kinds: &[String],
-    last_seen_event_id: &str,
-) -> Result<String> {
-    let registered = create_with_filters(
-        db,
-        agent,
-        None,
-        project_id,
-        kinds,
-        last_seen_event_id,
-        Filters::default(),
-    )
-    .await?;
-    Ok(registered.id)
-}
-
-/// The drain-time filters a subscription may carry.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct Filters<'a> {
-    /// Only events authored by this actor.
-    pub actor: Option<&'a str>,
-    /// Drop the registering actor's own events.
-    pub exclude_self: bool,
-    /// Keep only events that name the registering actor in their audience.
-    pub about_self: bool,
-}
-
 /// What a registration returned.
 #[derive(Debug, Clone)]
 pub struct Registered {
@@ -104,45 +61,6 @@ pub struct Registered {
     pub last_seen_event_id: String,
     /// False when an identical subscription already existed and was returned.
     pub created: bool,
-}
-
-/// Register a subscription with optional filters, or return the identical one
-/// the actor already holds.
-///
-/// Identical means the same session, project, kind set, actor filter and
-/// flags. The kinds compare as a set, so the order they were listed in does
-/// not make a second row. The lookup and the insert share one immediate
-/// transaction, so two calls that race register one row. A session that is not
-/// active takes no subscription: the check shares the transaction, so a
-/// subscription cannot land after the end that would have removed it.
-pub async fn create_with_filters(
-    db: &Database,
-    agent: &str,
-    session_id: Option<&str>,
-    project_id: Option<&str>,
-    kinds: &[String],
-    last_seen_event_id: &str,
-    filters: Filters<'_>,
-) -> Result<Registered> {
-    let key = crate::author::ParticipantKey::from_label(agent);
-    let author = crate::author::AuthorFilter {
-        label: filters.actor.map(str::to_string),
-        ..Default::default()
-    };
-    register_inner(
-        db,
-        &key,
-        &NewSubscription {
-            session_id,
-            project_id,
-            kinds,
-            last_seen_event_id,
-            author,
-            exclude_self: filters.exclude_self,
-            about_self: filters.about_self,
-        },
-    )
-    .await
 }
 
 async fn register_inner(
@@ -239,12 +157,6 @@ fn optional(value: Option<&str>) -> Value {
 /// [`subscription_from_row`] expects.
 const COLUMNS: &str = "id, member_id, project_id, kinds, last_seen_event_id, created_at, author_filter, exclude_self, about_self, session_id, agent";
 
-/// Every subscription one agent owns, whatever session it is bound to, oldest
-/// first.
-pub async fn list(db: &Database, agent: &str) -> Result<Vec<Subscription>> {
-    list_key(db, &crate::author::ParticipantKey::from_label(agent)).await
-}
-
 async fn list_key(db: &Database, key: &crate::author::ParticipantKey) -> Result<Vec<Subscription>> {
     let conn = super::connect(db)?;
     let mut rows = conn
@@ -261,53 +173,6 @@ async fn list_key(db: &Database, key: &crate::author::ParticipantKey) -> Result<
         subscriptions.push(subscription_from_row(&row)?);
     }
     Ok(subscriptions)
-}
-
-/// The subscriptions one agent owns that a call in one session scope drains:
-/// those bound to that session and those bound to none. A call with no
-/// session drains only the unbound ones.
-pub async fn list_in_scope(
-    db: &Database,
-    agent: &str,
-    session_id: Option<&str>,
-) -> Result<Vec<Subscription>> {
-    Ok(list(db, agent)
-        .await?
-        .into_iter()
-        .filter(|held| match held.session_id.as_deref() {
-            None => true,
-            Some(bound) => session_id == Some(bound),
-        })
-        .collect())
-}
-
-/// Remove one subscription the agent owns, reporting whether a row went.
-///
-/// The owner is part of the predicate, so an id belonging to another agent is
-/// indistinguishable from one that never existed.
-pub async fn delete(db: &Database, agent: &str, id: &str) -> Result<bool> {
-    delete_for(db, &crate::author::ParticipantKey::from_label(agent), id).await
-}
-
-/// Move one subscription's cursor forward to an event id it has reported.
-///
-/// A cursor never moves backwards: the predicate holds the update to an id
-/// above the stored one, so a drain that raced another leaves the later
-/// position and reports nothing twice.
-pub async fn set_cursor(db: &Database, id: &str, event_id: &str) -> Result<()> {
-    let _turn = super::write_turn().await?;
-    let conn = super::connect(db)?;
-    conn.execute(
-        "UPDATE notify_subscriptions SET last_seen_event_id = ?1
-         WHERE id = ?2 AND last_seen_event_id < ?1",
-        vec![
-            Value::Text(event_id.to_string()),
-            Value::Text(id.to_string()),
-        ],
-    )
-    .await
-    .map_err(engine)?;
-    Ok(())
 }
 
 /// The events above a cursor of one subscription that match its kinds, oldest
@@ -389,14 +254,12 @@ fn subscription_from_row(row: &Row) -> Result<Subscription> {
     };
     Ok(Subscription {
         id: required_text(row, 0)?,
-        agent: member.clone(),
         participant: crate::author::ParticipantKey {
             member,
             agent: text_at(row, 10)?.unwrap_or_default(),
         },
         project_id: text_at(row, 2)?,
         kinds,
-        actor_filter: author_filter.label.clone(),
         author_filter,
         exclude_self,
         about_self,

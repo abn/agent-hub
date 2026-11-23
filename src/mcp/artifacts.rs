@@ -68,7 +68,7 @@ impl HubServer {
             Some(&principal),
             self.state.config.events_per_project.per_project,
             NewArtifact {
-                actor: &principal.actor,
+                writer: &principal.writer(session_id.as_deref()),
                 project_id: &params.project_id,
                 title: &params.title,
                 description: &params.description,

@@ -29,7 +29,7 @@ async fn live_tokens(db: &turso::Database, agent_id: &str) -> i64 {
 #[tokio::test]
 async fn create_agent_creates_its_personal_space() {
     let db = fresh("identity-create").await;
-    let agent = identity::create_agent(&db, "claude-code/laptop", "Laptop")
+    let agent = identity::create_member(&db, "laptop", "Laptop")
         .await
         .expect("create");
 
@@ -39,21 +39,21 @@ async fn create_agent_creates_its_personal_space() {
         .await
         .expect("get space")
         .expect("the personal space exists");
-    assert_eq!(space.owner_agent.as_deref(), Some("claude-code/laptop"));
+    assert_eq!(space.owner_member.as_deref(), Some("laptop"));
 
-    let listed = identity::list_agents(&db).await.expect("list");
+    let listed = identity::list_members(&db).await.expect("list");
     assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].id, "claude-code/laptop");
+    assert_eq!(listed[0].id, "laptop");
 }
 
 #[tokio::test]
 async fn create_agent_rejects_a_duplicate() {
     let db = fresh("identity-duplicate").await;
-    let _agent = identity::create_agent(&db, "strict", "Strict")
+    let _agent = identity::create_member(&db, "strict", "Strict")
         .await
         .expect("create");
 
-    let duplicate = identity::create_agent(&db, "strict", "Other")
+    let duplicate = identity::create_member(&db, "strict", "Other")
         .await
         .expect_err("duplicate id");
     assert_eq!(duplicate.code(), ErrorCode::Conflict);
@@ -62,24 +62,27 @@ async fn create_agent_rejects_a_duplicate() {
 #[tokio::test]
 async fn a_reissue_replaces_the_token_and_revoke_is_agent_keyed() {
     let db = fresh("identity-tokens").await;
-    let agent = identity::create_agent(&db, "worker", "Worker")
+    let agent = identity::create_member(&db, "worker", "Worker")
         .await
         .expect("create");
 
-    let first = identity::issue_token(&db, &agent.id).await.expect("issue");
+    let first = identity::issue_member_token(&db, &agent.id)
+        .await
+        .map(|(issued, _)| issued)
+        .expect("issue");
     assert_eq!(first.token.len(), 64);
     assert_eq!(live_tokens(&db, "worker").await, 1);
     let first_hash = identity::hash_token(&first.token);
 
-    let resolved = identity::resolve_token(&db, &first_hash)
+    let resolved = common::seed::live_token(&db, &first_hash)
         .await
-        .expect("resolve")
         .expect("a live token resolves");
     assert_eq!(resolved.0, "worker");
     assert_eq!(resolved.1, "active");
 
-    let second = identity::issue_token(&db, &agent.id)
+    let second = identity::issue_member_token(&db, &agent.id)
         .await
+        .map(|(issued, _)| issued)
         .expect("reissue");
     assert_ne!(second.token, first.token);
     assert_eq!(
@@ -88,43 +91,35 @@ async fn a_reissue_replaces_the_token_and_revoke_is_agent_keyed() {
         "a reissue leaves exactly one live token"
     );
     assert!(
-        identity::resolve_token(&db, &first_hash)
-            .await
-            .expect("resolve")
-            .is_none(),
+        common::seed::live_token(&db, &first_hash).await.is_none(),
         "a reissue revokes the previous token"
     );
     let second_hash = identity::hash_token(&second.token);
     assert!(
-        identity::resolve_token(&db, &second_hash)
-            .await
-            .expect("resolve")
-            .is_some(),
+        common::seed::live_token(&db, &second_hash).await.is_some(),
         "the new token resolves"
     );
 
-    identity::revoke_token(&db, &agent.id)
+    identity::revoke_member_token(&db, &agent.id)
         .await
         .expect("revoke");
     assert_eq!(live_tokens(&db, "worker").await, 0);
     assert!(
-        identity::resolve_token(&db, &second_hash)
-            .await
-            .expect("resolve")
-            .is_none(),
+        common::seed::live_token(&db, &second_hash).await.is_none(),
         "a revoked token never resolves"
     );
-    identity::revoke_token(&db, &agent.id)
+    identity::revoke_member_token(&db, &agent.id)
         .await
         .expect("revoke is idempotent");
 
-    let unknown = identity::revoke_token(&db, "ghost")
+    let unknown = identity::revoke_member_token(&db, "ghost")
         .await
         .expect_err("unknown agent");
     assert_eq!(unknown.code(), ErrorCode::NotFound);
 
-    let unissued = identity::issue_token(&db, "ghost")
+    let unissued = identity::issue_member_token(&db, "ghost")
         .await
+        .map(|(issued, _)| issued)
         .expect_err("unknown agent");
     assert_eq!(unissued.code(), ErrorCode::NotFound);
 }
@@ -132,7 +127,7 @@ async fn a_reissue_replaces_the_token_and_revoke_is_agent_keyed() {
 #[tokio::test]
 async fn grants_are_upserted_and_removed() {
     let db = fresh("identity-grants").await;
-    identity::create_agent(&db, "worker", "Worker")
+    identity::create_member(&db, "worker", "Worker")
         .await
         .expect("create");
     projects::create(&db, "proj", "Project")
@@ -196,12 +191,12 @@ async fn grants_are_upserted_and_removed() {
 async fn agent_ids_and_names_are_validated() {
     let db = fresh("identity-validate").await;
 
-    let empty_id = identity::create_agent(&db, "  ", "Worker")
+    let empty_id = identity::create_member(&db, "  ", "Worker")
         .await
         .expect_err("empty id");
     assert_eq!(empty_id.code(), ErrorCode::InvalidArgument);
 
-    let empty_name = identity::create_agent(&db, "worker", "")
+    let empty_name = identity::create_member(&db, "worker", "")
         .await
         .expect_err("empty name");
     assert_eq!(empty_name.code(), ErrorCode::InvalidArgument);
@@ -210,10 +205,10 @@ async fn agent_ids_and_names_are_validated() {
 #[tokio::test]
 async fn two_agents_get_distinct_spaces() {
     let db = fresh("identity-spaces").await;
-    let first = identity::create_agent(&db, "a", "A")
+    let first = identity::create_member(&db, "a", "A")
         .await
         .expect("create a");
-    let second = identity::create_agent(&db, "b", "B")
+    let second = identity::create_member(&db, "b", "B")
         .await
         .expect("create b");
     assert_ne!(first.personal_project_id, second.personal_project_id);
@@ -222,7 +217,7 @@ async fn two_agents_get_distinct_spaces() {
 #[tokio::test]
 async fn a_grant_needs_a_real_project_and_agent() {
     let db = fresh("identity-grant-missing").await;
-    identity::create_agent(&db, "worker", "Worker")
+    identity::create_member(&db, "worker", "Worker")
         .await
         .expect("create");
 
@@ -246,12 +241,17 @@ async fn a_grant_needs_a_real_project_and_agent() {
 #[tokio::test]
 async fn renaming_a_pending_agent_moves_its_grants() {
     let db = fresh("identity-rename-grants").await;
-    identity::enrol_agent(
+    identity::enrol_member(
         &db,
-        "candidate",
-        "Candidate",
-        "a-harness",
-        "to test the rename",
+        &identity::Enrolment {
+            member: "candidate",
+            display_name: "Candidate",
+            source: "a-harness",
+            why: "to test the rename",
+            agent: "cli",
+            os: None,
+            host: None,
+        },
         20,
     )
     .await
@@ -263,7 +263,7 @@ async fn renaming_a_pending_agent_moves_its_grants() {
         .await
         .expect("grant");
 
-    identity::approve_enrolment(&db, "candidate", Some("candidate-v2"), None, None)
+    identity::approve_member(&db, "candidate", Some("candidate-v2"), None, None)
         .await
         .expect("approve under a new id");
 
@@ -309,10 +309,21 @@ async fn grants_carry_no_access_level() {
 #[tokio::test]
 async fn expiring_a_pending_enrolment_removes_its_event_and_search_row() {
     let db = fresh("identity-expire").await;
-    let (agent, _token) =
-        identity::enrol_agent(&db, "waiter", "Waiter", "10.0.0.9", "please let me in", 20)
-            .await
-            .expect("enrol");
+    let (agent, _token) = identity::enrol_member(
+        &db,
+        &identity::Enrolment {
+            member: "waiter",
+            display_name: "Waiter",
+            source: "10.0.0.9",
+            why: "please let me in",
+            agent: "cli",
+            os: None,
+            host: None,
+        },
+        20,
+    )
+    .await
+    .expect("enrol");
 
     let conn = db.connect().expect("connect");
     let count = |sql: &'static str, project: &str| {
@@ -365,14 +376,25 @@ async fn expiring_a_pending_enrolment_removes_its_event_and_search_row() {
 #[tokio::test]
 async fn refusing_an_enrolment_sweeps_its_space_dismissals() {
     let db = fresh("identity-refuse-dismiss").await;
-    let (agent, _token) =
-        identity::enrol_agent(&db, "waiter", "Waiter", "10.0.0.9", "please let me in", 20)
-            .await
-            .expect("enrol");
+    let (agent, _token) = identity::enrol_member(
+        &db,
+        &identity::Enrolment {
+            member: "waiter",
+            display_name: "Waiter",
+            source: "10.0.0.9",
+            why: "please let me in",
+            agent: "cli",
+            os: None,
+            host: None,
+        },
+        20,
+    )
+    .await
+    .expect("enrol");
     let event = append(
         &db,
         0,
-        "waiter",
+        &common::seed::writer("waiter"),
         None,
         NewEvent {
             project_id: agent.personal_project_id.clone(),
@@ -418,25 +440,28 @@ async fn refusing_an_enrolment_sweeps_its_space_dismissals() {
 #[tokio::test]
 async fn list_agents_reports_a_live_token() {
     let db = fresh("identity-has-live-token").await;
-    let agent = identity::create_agent(&db, "claude-code/laptop", "Laptop")
+    let agent = identity::create_member(&db, "laptop", "Laptop")
         .await
         .expect("create");
 
-    let listed = identity::list_agents(&db).await.expect("list");
+    let listed = identity::list_members(&db).await.expect("list");
     assert_eq!(listed.len(), 1);
     assert!(!listed[0].has_live_token, "a new agent has no token yet");
 
-    identity::issue_token(&db, &agent.id).await.expect("issue");
-    let listed = identity::list_agents(&db).await.expect("list");
+    identity::issue_member_token(&db, &agent.id)
+        .await
+        .map(|(issued, _)| issued)
+        .expect("issue");
+    let listed = identity::list_members(&db).await.expect("list");
     assert!(listed[0].has_live_token, "an issued token is live");
 
-    identity::revoke_token(&db, &agent.id)
+    identity::revoke_member_token(&db, &agent.id)
         .await
         .expect("revoke");
-    let listed = identity::list_agents(&db).await.expect("list");
+    let listed = identity::list_members(&db).await.expect("list");
     assert!(!listed[0].has_live_token, "a revoked token is not live");
 
-    let one = identity::get_agent(&db, &agent.id)
+    let one = identity::get_member(&db, &agent.id)
         .await
         .expect("get")
         .expect("exists");

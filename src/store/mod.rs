@@ -460,17 +460,12 @@ fn terminate_unc_root(wide: &mut Vec<u16>) {
     }
 }
 
-/// The refusal a declared function gives until its body is built.
-pub(crate) fn unbuilt(what: &str) -> Error {
-    Error::Unavailable(format!("{what} is not built yet"))
-}
-
 pub(crate) fn engine(err: turso::Error) -> Error {
     Error::Engine(err.to_string())
 }
 
 /// RFC 3339 UTC timestamp for now.
-pub(crate) fn now_rfc3339() -> String {
+pub fn now_rfc3339() -> String {
     time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_default()

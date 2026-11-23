@@ -327,7 +327,7 @@ fn seed_read_report(data_dir: &Path, summary: &str) -> String {
         let event_id = agent_hub::store::events::append(
             &db,
             0,
-            LOCAL_ACTOR,
+            &common::seed::writer(LOCAL_ACTOR),
             None,
             agent_hub::store::events::NewEvent {
                 project_id: "proj".to_string(),
@@ -389,9 +389,17 @@ fn decline_with_note(data_dir: &Path, approval_id: &str, note: &str) -> String {
             .await
             .expect("open engine");
         agent_hub::store::migrate(&db).await.expect("migrate");
-        agent_hub::store::questions::decide(&db, 0, "human", approval_id, false, Some(note), None)
-            .await
-            .expect("decide")
+        agent_hub::store::questions::decide(
+            &db,
+            0,
+            &common::seed::writer("human"),
+            approval_id,
+            false,
+            Some(note),
+            None,
+        )
+        .await
+        .expect("decide")
     })
 }
 
