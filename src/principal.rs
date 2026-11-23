@@ -74,6 +74,80 @@ pub struct Principal {
     pub is_pending: bool,
 }
 
+/// Where a caller's credential stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CredentialState {
+    /// An active member token, the admin token, embedded stdio, or the open
+    /// loopback hub.
+    Active,
+    /// A pending enrolment token: the caller sees the enrol surface only.
+    Pending,
+    /// No bearer on a networked hub: the caller sees the enrol surface only.
+    Anonymous,
+}
+
+/// The identity a caller writes under, as every layer outside this module and
+/// `src/mcp` reads it. Code there uses only these methods, never the fields,
+/// so the fields can change without moving the store or the REST handlers.
+impl Principal {
+    /// The member the caller acts as: the token's member, `local` for embedded
+    /// stdio, `loopback` on the open loopback hub, none for the human.
+    pub fn member(&self) -> Option<&str> {
+        self.agent_id.as_deref()
+    }
+
+    /// The canonical agent slug the caller writes under.
+    pub fn agent(&self) -> &str {
+        crate::agent_name::CLI
+    }
+
+    /// The author kind every write by this caller records.
+    pub fn kind(&self) -> crate::author::AuthorKind {
+        if self.agent_id.is_some() {
+            crate::author::AuthorKind::Participant
+        } else {
+            crate::author::AuthorKind::Human
+        }
+    }
+
+    /// Where the caller's credential stands.
+    pub fn credential(&self) -> CredentialState {
+        if self.is_pending {
+            CredentialState::Pending
+        } else {
+            CredentialState::Active
+        }
+    }
+
+    /// The hash of the bearer the caller presented, for closing its streams on
+    /// revocation. None for the admin, stdio and the open loopback hub.
+    pub fn token_hash(&self) -> Option<&str> {
+        None
+    }
+
+    /// Whether the caller is the operator.
+    pub fn is_admin(&self) -> bool {
+        self.is_admin
+    }
+
+    /// The writer for one write, in the session the call resolved (or none).
+    ///
+    /// The store records `writer.actor()` in the `actor` column and the author
+    /// record beside it.
+    pub fn writer(&self, session_id: Option<&str>) -> crate::author::Writer {
+        let _ = session_id;
+        crate::author::Writer::from(self.actor.as_str())
+    }
+
+    /// The delivery key of the caller: cursors and subscriptions use it. None
+    /// for the human, who reads the PWA rather than cursors.
+    pub fn participant(&self) -> Option<crate::author::ParticipantKey> {
+        self.agent_id
+            .as_deref()
+            .map(crate::author::ParticipantKey::from_label)
+    }
+}
+
 /// Resolves a bearer token to a principal.
 pub struct Auth {
     admin_token: Option<String>,

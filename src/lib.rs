@@ -1,6 +1,8 @@
 //! Agent Hub: a local-first operations layer for AI agents and their humans.
 
+pub mod agent_name;
 pub mod app;
+pub mod author;
 pub mod blob;
 pub mod brain;
 #[cfg(feature = "client")]
