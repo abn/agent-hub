@@ -1,7 +1,7 @@
 ---
 type: Guide
 title: Connect a harness
-description: Point a harness at the hub, over streamable HTTP or the stdio proxy
+description: Point a harness at the hub, with or without the agent-hub binary
 tags: [agent-author, mcp, config]
 status: stable
 ---
@@ -9,17 +9,22 @@ status: stable
 # Connect a harness
 
 By the end you will have an MCP-capable harness talking to the hub's endpoint
-with an agent token, and `whoami` resolving to the agent the token belongs to.
-If the agent has no token yet, start with
+as a member, and `whoami` resolving to that member and to the agent you are
+running. If the machine has no token yet, start with
 [Connect your first agent](/start/connect-first-agent.md); this page is the
 harness wiring in full.
+
+Three words: a **member** holds the token and was approved once, usually per
+machine. The **agent** is the program (`claude-code`, `opencode`), which the hub
+learns from the client's handshake. A **session** is a shared space of work.
 
 ## Before you start
 
 | Thing | Why |
 |---|---|
-| A running hub and an agent token | the endpoint refuses a request without a token |
-| The harness on the agent's machine | Claude Code, opencode, Gemini, or any MCP client |
+| A running hub | the endpoint |
+| A member token, or enrolment | with no token, a client still connects and sees the `enrol` and `whoami` tools |
+| The harness on the agent's machine | Claude Code, OpenCode, Antigravity, or any MCP client |
 
 ## Install the plugin first
 
@@ -31,15 +36,18 @@ without one. One install line per harness is in
 ## The endpoint
 
 Agents reach the hub over the Model Context Protocol, streamable HTTP on the
-hub's own listener at `/mcp`, with the agent's bearer token. The values are the
+hub's own listener at `/mcp`, with the member's bearer token. The values are the
 same everywhere: the hub URL, the `mcp` path, and the token. One MCP server
 exposes all the tools. The tool shapes are in
 [MCP tools](/reference/mcp-tools.md).
 
-## Claude Code
+## Without the binary
 
-Without the plugin, add the server in the project's `.mcp.json`, or register it
-with `claude mcp add`:
+A client that expands environment variables in its MCP config needs the URL and
+the token, and nothing installed. Put the token in `HUB_TOKEN` where the client
+starts. The client's own handshake tells the hub the agent, so no name is set.
+
+Claude Code, in the project's `.mcp.json`, or registered with `claude mcp add`:
 
 ```json
 {
@@ -47,46 +55,13 @@ with `claude mcp add`:
     "agent-hub": {
       "type": "http",
       "url": "http://hub.lan:8080/mcp",
-      "headers": { "Authorization": "Bearer <agent token>" }
+      "headers": { "Authorization": "Bearer ${HUB_TOKEN}" }
     }
   }
 }
 ```
 
-## A stdio-only harness
-
-For a harness that speaks stdio only, run `agent-hub mcp` as a proxy. It holds
-one connection to the hub for the life of the process and forwards every
-request, so the tools and the errors are the hub's and a tool the hub gains
-needs no new client. Because the hub tracks the active session per connection, a
-session started through the proxy stays active for the rest of that process.
-
-```json
-{
-  "mcpServers": {
-    "agent-hub": {
-      "command": "agent-hub",
-      "args": ["mcp", "--proxy"],
-      "env": { "HUB_URL": "http://hub.lan:8080", "HUB_TOKEN": "<agent token>" }
-    }
-  }
-}
-```
-
-The proxy reads its settings from the environment first, then from
-`config.toml` (`~/.config/agent-hub/config.toml`, layered over
-`/etc/agent-hub/config.toml`); `HUB_CONFIG` names another file. With no
-`HUB_URL` it serves the local data directory standalone instead, as the human
-admin, and says so on startup; that mode opens the data directory itself, so it
-cannot run beside a hub on the same directory. Always pass `--proxy` (or set
-`HUB_MODE=proxy`): it never falls back to the data directory, so a missing
-config fails loudly instead of opening a store as the local admin.
-
-## OpenCode and Antigravity
-
-OpenCode takes a remote HTTP entry in `opencode.jsonc`, with the token read from
-the `HUB_TOKEN` environment variable. Copy it from `[client] token` in
-`config.toml`, which `agent-hub enrol` writes:
+OpenCode, in `opencode.jsonc`:
 
 ```jsonc
 {
@@ -94,158 +69,128 @@ the `HUB_TOKEN` environment variable. Copy it from `[client] token` in
     "agent-hub": {
       "type": "remote",
       "url": "http://hub.lan:8080/mcp",
-      "headers": {
-        "Authorization": "Bearer {env:HUB_TOKEN}",
-        "X-Agent-Id": "opencode"
-      }
+      "headers": { "Authorization": "Bearer {env:HUB_TOKEN}" }
     }
   }
 }
 ```
 
-Antigravity takes the stdio proxy in its `mcp_config.json`, under `mcpServers`:
+Without a plugin, nothing adds `session` to your hub calls, so the agent passes
+it itself on every write, as [the skill](/guides/agents/skills.md) tells it.
+
+A hub URL in a shared project file must not carry the token. The variable keeps
+it out of the repository, so the entry above is safe to commit.
+
+## With the binary
+
+`agent-hub mcp` is a stdio server for a harness that cannot make HTTP calls, or
+that does not expand the environment (the Antigravity CLI did not, in tests).
+It holds one connection to the hub for the life of the process and forwards every
+request, so the tools and the errors are the hub's and a tool the hub gains needs
+no new client. It forwards the client's own `initialize`, so the hub still learns
+the agent, and it swaps in a token approved during the session without a restart.
 
 ```json
 {
   "mcpServers": {
     "agent-hub": {
       "command": "agent-hub",
-      "args": ["mcp", "--proxy"],
-      "env": { "HUB_AGENT_ID": "antigravity" }
+      "args": ["mcp"]
     }
   }
 }
 ```
 
-Its remote form uses `serverUrl`, not `url`. The command and its environment are
-the harness's, not the hub's: the hub serves every one of them the same endpoint
-and the same tools. Prefer remote HTTP where the harness supports it; the stdio
-proxy needs the binary on `PATH`.
+It reads the hub, the member and the token from the environment first, then from
+`config.toml` (`~/.config/agent-hub/config.toml`, layered over
+`/etc/agent-hub/config.toml`); `HUB_CONFIG` names another file. Set `env` on the
+entry only to override, for example `HUB_URL`. With no hub configured it exits
+with `no hub configured` and a hint, rather than opening a local store. To serve
+the local data directory standalone as the human admin, which cannot run beside a
+hub on the same directory, pass `--embedded`. `--proxy` is accepted and ignored.
+
+The Antigravity plugin writes this entry for you: `agent-hub setup antigravity`.
 
 > [!NOTE]
 > A project server entry lives with one repository and is shared with everyone
-> who reads it, so never put the token in it. A user entry reaches every project
-> and may carry the token. Where a project entry is wanted, use the stdio proxy
-> so the secret stays in `config.toml` outside the repo.
+> who reads it, so never put the token in it. Where a project entry is wanted,
+> use `agent-hub mcp` so the secret stays in `config.toml` outside the repo, and
+> pin the hub in `.agent-hub.toml`.
+
+## Pin a hub to a repository
+
+`.agent-hub.toml` at the git top level names the project, and optionally the hub
+and the member:
+
+```toml
+project = "homelab"
+url = "http://hub.lan:8080"
+member = "laptop-secret"
+```
+
+It holds no token, and a `token` key is an error, because the file is shared.
+A pairing it selects is trusted once on the machine, with `agent-hub trust`, and
+until then the client works without a token and says why. Use this for a
+confidential project that has its own member.
 
 ## Loopback: no token needed
 
-On a hub bound to `127.0.0.1` or `::1`, no agent token is required. The
-proxy forwards `HUB_AGENT_ID` as `X-Agent-Id`, the hub creates the agent and
-its personal space on first contact, and the control surface is open without
-an admin token. Set `HUB_AGENT_ID` per harness so two agents on one machine
-do not share an identity:
+On a hub bound to `127.0.0.1` or `::1`, no token is required. A call with none is
+the member `loopback`, the hub creates it and its personal space on first
+contact, the agent still comes from the client's handshake, and the control
+surface is open without an admin token.
 
 ```sh
-HUB_URL=http://127.0.0.1:8080 HUB_AGENT_ID=claude agent-hub mcp
+HUB_URL=http://127.0.0.1:8080 agent-hub mcp
 ```
 
 This exception ends at loopback; a hub bound past it keeps requiring tokens.
-With a token, `X-Agent-Id` means something else on any bind: see
-[One token per host](#one-token-per-host-one-name-per-agent).
 
-## One token per host, one name per agent
+## One member, many agents
 
-A token authenticates; it does not have to name one agent. Give a host one
-token and let every agent on it send its own name beside it in `X-Agent-Id`.
-The hub still resolves the token and nothing else about the call changes, but
-the work is attributed to `<token agent>/<name>`, so the feed, the sessions and
-the cursors tell the agents apart.
+A member authenticates a machine, and every agent on it uses the same token.
+The hub tells the agents apart by the name their client sends in the handshake,
+so Claude Code and OpenCode on one laptop write as two agents of one member.
+Every write records the member, the agent and the session, so the feed, the
+sessions and the cursors tell them apart, and the interface reads
+`laptop · claude-code · feat-redesign`.
 
-For a harness that sends headers itself, add one:
+A client that cannot name itself sets the name with `X-Agent-Id`, or
+`HUB_AGENT_ID` for `agent-hub mcp` and `agent-hub call`. A name is 1 to 64
+characters: letters and digits, then letters, digits, `.`, `_` or `-`. It needs
+no registration. It names the agent and grants nothing: the agent reaches exactly
+what the member's token reaches, and the admin token ignores the header and stays
+the human.
 
-```json
-{
-  "mcpServers": {
-    "agent-hub": {
-      "type": "http",
-      "url": "http://hub.lan:8080/mcp",
-      "headers": {
-        "Authorization": "Bearer <host token>",
-        "X-Agent-Id": "claude"
-      }
-    }
-  }
-}
-```
-
-The stdio proxy and `agent-hub call` send `HUB_AGENT_ID` as that header, so
-set it per harness and keep the one `HUB_TOKEN`:
-
-```sh
-HUB_URL=http://hub.lan:8080 HUB_TOKEN=<host token> HUB_AGENT_ID=claude agent-hub mcp
-```
-
-A name is 1 to 64 characters: letters and digits, then letters, digits, `.`,
-`_` or `-`. It needs no registration and creates no agent. The hub refuses a
-name that breaks the spelling, or that is sent twice, with `invalid_argument`,
-and one that would spell an existing agent's id with `conflict`. The proxy and
-`agent-hub call` leave off an id the hub would refuse and say so on stderr, so
-the call is the token's agent. Naming the token's own agent id changes nothing.
-
-A name is attribution only. It grants nothing and borrows nothing: the
-agent reaches exactly what the token reaches, a name that spells another agent
-does not become that agent, and the admin token ignores the header and stays
-the human. Two agents that start a session of the same name get two sessions,
-and a call with the bare token is a different actor from a call with a name.
-`whoami` reports both: `actor` is `host-a/claude` and `agent` is `host-a`.
-An agent that starts sending a name leaves its earlier sessions with the
-token's agent: pick them up with `from`.
+Two agents that join a session of the same name share that session and its
+brain, as two participants. A second member on one machine is for work that must
+not share a token, such as a confidential project: give it its own entry in
+`config.toml` and select it per repository with `.agent-hub.toml` or per shell
+with `HUB_MEMBER`.
 
 ## Prove it
 
-Ask the agent to call `whoami`. It reports the identity the token resolves to,
-its personal space, and the URL of the agent guide, which proves the token and
-the endpoint are right. Any agent that can reach the hub can also fetch
-`GET /bootstrap/SKILL.md`, a bootstrap guide with the hub's own address filled
-in, so it can recover the connection details and the tool list on its own.
+Ask the agent to call `whoami`. It reports the hub URL, the member and the agent
+the hub saw, the session, its personal space, a suggested session name, and the
+URL of the agent guide, which proves the token and the endpoint are right. Any
+agent that can reach the hub can also fetch `GET /bootstrap/SKILL.md`, a
+bootstrap guide with the hub's own address filled in, so it can recover the
+connection details and the tool list on its own.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../../assets/screens/connect-desktop-dark.png">
   <img src="../../assets/screens/connect-desktop-light.png" alt="The connect screen, with the MCP address and the bootstrap guide.">
 </picture>
 
-## Several agents on one machine
-
-The client config is per user, not per agent. Two agents running as the same
-user on one node therefore share `~/.config/agent-hub/config.toml`, and the
-second one finds the first one's token already in it. `agent-hub enrol` refuses
-rather than writing over a token nobody asked to lose, and says so with both
-ways out: `--force` enrols again over the token that is there, and
-`HUB_CONFIG=<path>` keeps the first agent's file untouched and gives this agent
-one of its own.
-
-```sh
-HUB_CONFIG=~/.config/agent-hub/second-agent.toml \
-  agent-hub enrol --id second-agent --name "Second Agent"
-```
-
-`--id` is the distinct identity the hub registers; without it the id is a slug
-of the name, which is how two agents end up fighting over one. `HUB_CONFIG`
-names the file the client both reads and writes, so it has to be set for every
-later command too, not only the enrolment, and the enrolment saves the token and
-the hub URL into that file.
-
-> [!IMPORTANT]
-> Two agents sharing one config file share one token, and the hub resolves
-> both to the same agent, so their sessions, their writes, and their ownership
-> of a session are one agent's. Either keep the files apart, or keep the token
-> and have each agent send its own name, as in
-> [One token per host](#one-token-per-host-one-name-per-agent).
-
-The alternative is one account per agent on the machine, which the per-user
-config path makes unnecessary. Nothing else in the hub changes: grants, project
-access, and the knowledge base are the same either way.
-
 ## You should now see
 
-An agent whose harness answers `whoami` with its own name, listed in the app
-under Access with its token. From here, give it
+A member listed in the app under Members, with its token, and a harness whose
+`whoami` answers with that member and its own agent name. From here, give it
 [Using the hub as a brain](/guides/agents/operating.md).
 
 ## See also
 
-- [Connect your first agent](/start/connect-first-agent.md) - create the agent and get its token
+- [Connect your first agent](/start/connect-first-agent.md) - join the hub and get a token
 - [Using the hub as a brain](/guides/agents/operating.md) - the session-start loop and the feed cursor
 - [The agent-hub skill](/guides/agents/skills.md) - the installable guide and the served bootstrap
 - [Operating model](/architecture/operating-model.md) - who may reach what

@@ -40,11 +40,19 @@ admin_token = "..."
 
 [client]
 url = "http://hub.lan:8080"
-token = "..."
-agent_id = "my-agent"
+member = "laptop"
 project = "homelab"
 timeout = 120
+
+[[credential]]
+url = "http://hub.lan:8080"
+member = "laptop"
+token = "..."
 ```
+
+A third table, `[trust]`, records the project pairings the user allowed (see
+below). The credential tables are written by `agent-hub enrol`, the stdio proxy
+and the OpenCode plugin, not by hand.
 
 ## Inspect it
 
@@ -68,9 +76,9 @@ took effect.
 | `admin_token` | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface. Required when the bind is not loopback; a loopback hub without one starts but its app refuses every request, so set it before opening the app. `service install` generates one (64 hex characters) when none is set and saves it here |
 | `node_name` | `HUB_NODE_NAME` | the host name | Name the human sees for this node; set it when the host name is a generated container id |
 | `public_url` | `HUB_PUBLIC_URL` | unset | External origin the hub is reached at, such as `https://hub.example`; overrides the address derived from the request |
-| `active_window_secs` | `HUB_ACTIVE_WINDOW_SECS` | `900` | How long after its last tool call a session still counts its owner as an agent at work; 1 to 2592000 seconds |
-| `inbox_action_per_agent` | `HUB_INBOX_ACTION_PER_AGENT` | `100` | Open action items one agent may leave waiting in one project; `0` disables the cap |
-| `inbox_action_per_project` | `HUB_INBOX_ACTION_PER_PROJECT` | `1000` | Open action items all agents together may leave waiting in one project; `0` disables the cap |
+| `active_window_secs` | `HUB_ACTIVE_WINDOW_SECS` | `900` | How long after a participant's last call a session still counts as live; 1 to 2592000 seconds |
+| `inbox_action_per_agent` | `HUB_INBOX_ACTION_PER_AGENT` | `100` | Open action items one participant may leave waiting in one project; `0` disables the cap |
+| `inbox_action_per_project` | `HUB_INBOX_ACTION_PER_PROJECT` | `1000` | Open action items all participants together may leave waiting in one project; `0` disables the cap |
 | `events_per_project` | `HUB_EVENTS_PER_PROJECT` | `1000000` | Most events one project may hold; a write past it is refused until events are removed, which pruning a session does; `0` disables the ceiling |
 | `enrol` | `HUB_ENROL` | `on` | Whether the unauthenticated enrolment endpoint is open; `off` closes it |
 | `enrol_pending_max` | `HUB_ENROL_PENDING_MAX` | `20` | Most pending enrolment requests the hub holds at once, across every source |
@@ -126,21 +134,113 @@ directory, and checks again with symlinks resolved before each backup.
 
 | Key | Variable | Default | Purpose |
 |---|---|---|---|
-| `url` | `HUB_URL` | unset | Base URL of a running hub; with none the proxy serves the local data directory standalone |
-| `token` | `HUB_TOKEN` | unset | Bearer token the hub resolves to an agent |
-| `agent_id` | `HUB_AGENT_ID` | unset | The name the client declares in `X-Agent-Id`. Beside a token it is a sub-identity of the token's agent, for attribution only; on a loopback hub with no token it is the agent's identity |
+| `url` | `HUB_URL` | unset | Base URL of the hub to use. With none, a client takes the only hub the credential file names, and `agent-hub mcp` exits rather than serve a local store |
+| `member` | `HUB_MEMBER` | unset | The member to use for the hub, when the credential file holds more than one |
+| `token` | `HUB_TOKEN` | unset | A bearer token. It counts only together with its `HUB_URL`, and only when no other member is selected |
 | `project` | `HUB_PROJECT` | unset | Project the knowledge-base shorthands act on when no flag names one |
 | `timeout` | `HUB_TIMEOUT` | `120` | Seconds one call may take, handshake to answer; a number above zero, fractional allowed (for example `2.5`) |
 
+`agent_id` is read and ignored, with the warning `agent_id no longer names the
+member; the agent comes from the client`. The agent is the program, named by its
+MCP handshake; `HUB_AGENT_ID` still sets the name the proxy sends in
+`X-Agent-Id`, as an override. A legacy `[client] token` with its `url` reads as
+one credential whose member is unknown.
+
 `service install` writes `url` as `http://<bind host>:<port>` when it is unset,
 so the stdio proxy (`mcp`) and the other client commands reach the local hub
-rather than falling back to the embedded store. `health` and `backup --url`
-take their address from `--url`, not from this key. It never writes the admin token as `token`: agents
+rather than needing a flag. `health` and `backup --url` take their address from
+`--url`, not from this key. It never writes the admin token as `token`: members
 do not use it.
 
-These settings are read by the binary's client commands: the stdio proxy, the
-one-shot `call`, the `kb` shorthands, and `enrol`. [CLI](/reference/cli.md)
-lists every subcommand that reads them.
+These settings are read by the binary's client commands: the stdio proxy
+(`mcp`), the one-shot `call`, the `kb` shorthands, `enrol` and `token`.
+[CLI](/reference/cli.md) lists every subcommand that reads them.
+
+### Credentials
+
+A credential is a hub URL, a member and the member's token. The file keeps one
+per pair:
+
+```toml
+[[credential]]
+url = "https://hub.example.net"
+member = "laptop"
+token = "..."
+```
+
+When several credentials share one hub URL, mark the one to use with
+`default = true`:
+
+```toml
+[[credential]]
+url = "https://hub.example.net"
+member = "laptop"
+token = "..."
+default = true
+```
+
+Every client entry point, which is the hooks, `agent-hub mcp`,
+`agent-hub token --headers` and the OpenCode plugin, resolves the credential with
+one rule, so a hook and the MCP connection never act as different members.
+URLs compare after lower-casing the scheme and host and dropping a default port
+and a trailing slash.
+
+| Step | Rule, first match wins |
+|---|---|
+| url | a pinned URL (`--url`, or the Claude plugin's hub URL), then `HUB_URL`, then the project file's `url`, then `[client] url`, then the only distinct URL in the credential file |
+| member | `HUB_MEMBER`, then the project file's `member` (when its `url` is absent or equal), then `[client] member`, then the only named member for the URL, or the one marked `default = true`; several members with none selected is `several_members` |
+| token | `HUB_TOKEN`, when `HUB_URL` equals the URL and `HUB_MEMBER` is unset or equal; then the credential for the pair; then a legacy credential with no member, only when no member was selected |
+| trust | a project file that supplied the URL or member selects a pairing the user has not trusted: no token is used, and the state is `needs_trust` |
+
+The Claude Code header helper (`agent-hub token --headers`) takes the only
+credential for the hub URL, else the one marked `default = true`, else sends no
+`Authorization`. A hook prints a mismatch line in its block when the project's
+member differs from the one the helper picked.
+
+The result carries a state: `ok`, `tokenless`, `no_hub`, `several_members` or
+`needs_trust`. A client with no token still connects and sees only the enrol
+surface.
+
+### The project file
+
+`.agent-hub.toml` at the git top level pins a repository to a hub:
+
+```toml
+project = "homelab"
+url = "https://hub.example.net"   # optional
+member = "laptop-secret"          # optional; never a token
+```
+
+The file is shared, so a `token` key is an error. A legacy `.agent-hub` file is
+ignored, with a context line saying which file the release reads. A pairing the
+file selects is sent a token only after the user trusts it, on this machine:
+
+```toml
+[trust]
+pairings = [ { path = "/path/to/secret-repo", url = "https://hub.example.net", member = "laptop-secret" } ]
+```
+
+`agent-hub trust [--path DIR]` records the pairing that the project file at `DIR`
+selects.
+
+### How the file is written
+
+Several writers share `config.toml`: `agent-hub enrol`, the stdio proxy, and the
+OpenCode plugin, which is JavaScript. They cannot share `flock`, so each uses one
+lock-directory protocol, and the plugin launcher's install uses the same one.
+
+| Step | Rule |
+|---|---|
+| Acquire | `mkdir config.toml.lock`, which is atomic on every platform, then write `owner` inside it as `<pid> <host> <epoch_ms>` through a temporary file and a rename |
+| Busy | `mkdir` fails because the directory exists: read `owner` and retry every 50 ms for up to 5 seconds, then fail with `config.toml is locked by pid <p> on <host>`. The launcher does not wait: it reports that it is installing and exits |
+| Stale | a lock older than the age limit (30 seconds for the config, 10 minutes for the launcher; age from `owner`, or the directory's modification time when `owner` is missing or unreadable) **and** one of: `owner` missing, a different host, or a pid that is not alive |
+| Break | rename `config.toml.lock` to `config.toml.lock.stale.<pid>.<epoch_ms>`, which exactly one breaker wins, remove it, and try to acquire once more |
+| Release | only the holder whose line is in `owner`: remove `owner`, then remove the directory |
+
+A writer takes the lock, re-reads the file, changes its entry, writes
+`config.toml.tmp.<pid>` with mode `0600`, flushes it, renames it over the file,
+and releases the lock. A lock that is held by a live process is never broken,
+however old.
 
 ## See also
 

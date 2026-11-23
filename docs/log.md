@@ -4,6 +4,24 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-11-24
+
+### Members docs checked against the server
+
+* **Update**: [REST API](/reference/rest-api.md) lists sessions by `project=`,
+  and `live=1`, `member` and `parent` need no project. [MCP tools](/reference/mcp-tools.md)
+  and the skill's tool list filter feed and artifact reads by `session_id`;
+  `session` names the call's own session and never filters.
+* **Update**: [Configuration](/reference/configuration.md) documents
+  `default = true` on a `[[credential]]`, which picks the member when several
+  credentials share a hub URL. The skill's bootstrap and harness pages say that
+  Antigravity passes `session` and leaves nothing on end, and no longer say the
+  plugin fills option values into the header.
+* **Update**: [Hook CLI contract](/reference/hook-cli.md) lists every event
+  each harness raises, including the OpenCode plugin's, the time limits the
+  manifests set (`timeout: 20` seconds for Antigravity), the owed-leave retry,
+  and that `session-end` and `subagent-stop` leave a session and never end it.
+
 ## 2026-11-23
 
 ### Native install: a per-user service with no container runtime

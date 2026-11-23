@@ -62,6 +62,64 @@ vX.Y.Z` pins a release, and an install of the version already present says so
 and changes nothing. [Run the hub as a native service](/operate/native-service.md)
 has the paths for each platform.
 
+### The upgrade to members, agents and sessions
+
+One release changes the identity model: what held a token is now a member, the
+program is an agent, and a session is shared by every participant that joins it
+([ADR 0039](/adr/0039-members-agents-and-sessions.md)). The upgrade moves the
+data for you, but it reads the old owners first, and it can stop to ask you
+before it changes anything.
+
+**Preflight.** Before the first write, the hub reads every owner label in the
+store (session owners, feed cursors, notification cursors, subscriptions) and
+places each as a member, or as a member and an agent when the label was
+`<member>/<name>`. Run it first, on a copy or a stopped hub, to see the plan:
+
+```sh
+agent-hub migrate --check --data-dir /path/to/data
+```
+
+It prints where each owner would go, which sessions would merge, and anything that
+would stop the upgrade. It writes nothing, exits 0 when the plan is clean and 78
+when it would stop, and 75 when a serving hub holds the store.
+
+**A stop.** An owner the hub cannot place, such as `claude` from a stdio setup, a
+name that is not a registered member, stops the start with exit 78 and the message
+`the store holds owners this release cannot place`, naming each owner. Nothing was
+changed. Write the mapping in `identity-map.toml` in the data directory, then
+start again:
+
+```toml
+[owners]
+"claude"  = { member = "laptop", agent = "claude-code" }
+"old-bot" = "human"        # or "local", or "drop"
+```
+
+`drop` clears a cursor or a subscription, but never a session owner: map those to
+a member.
+
+**What changes.** Two sessions in one project with the same name, which used to
+belong to `laptop/claude` and `laptop/opencode`, become one shared session with two
+participants. The newest active one survives and its brain takes the others'
+entries; an entry that would collide moves under `merged/<id>/` in the survivor's
+brain, and the session detail says it was merged on upgrade. The other brains are
+archived under `merged/<project>/` in the data directory, and follow the survivor
+through prune, undo and backup. Old session ids still resolve. The hub does not
+serve until every merge is finished, and a crash resumes from where it stopped.
+Rows written before the upgrade keep their old author label and render it as is.
+The old `/api/v1/agents` routes are gone, replaced by `/api/v1/members`, so update
+any script that calls them.
+
+**The backup.** Before it changes anything the hub takes a full backup set into
+`backups/pre-migration-v<from>-<stamp>/` (the store, every brain, the knowledge
+bases and the artifact blobs), and keeps the three newest sets.
+
+**Roll back.** Stop the hub, restore that whole set over the data directory
+(the store with its write-ahead log removed, every brain and the blobs), delete
+`merged/`, and start the previous release. **Every write made after the upgrade is
+lost.** The set is a full backup so that nothing deleted after the upgrade is
+revived without its blobs.
+
 ## You should now see
 
 The hub starts, prints its bound address, and answers its readiness probe:

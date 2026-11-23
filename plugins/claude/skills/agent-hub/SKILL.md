@@ -18,14 +18,26 @@ connection yet, or fetch it at `GET <base_url>/bootstrap/SKILL.md`.
 
 ## The mental model
 
-Five things, and the split between them is the whole design:
+Three words say who is who, and the split between the five things below is
+the whole design:
+
+- **Member**: what holds a token and was approved to join. Usually one machine.
+- **Agent**: the program doing the work (`claude-code`, `opencode`,
+  `antigravity`). The hub learns it from the client's handshake.
+- **Session**: a shared space of work with one brain, named for a branch or a
+  topic. Any participant joins it by name.
+
+Every write records its member, its agent and its session, so a byline reads
+`laptop · claude-code · feat-redesign`.
+
+Five things:
 
 - **A feed** is what happened in a project: signals, finished notices, ideas
   captured by the human, and the questions and approvals that wait on the
   human.
 - **A session brain** is one session's working state, on the node, one file per
-  session. It survives a compaction or a restart of the same session name, and
-  the human's prune collects it.
+  session. Every participant of the session shares it. It survives a compaction
+  or a restart of the same session name, and the human's prune collects it.
 - **The project knowledge base** is durable, shared by every agent on the
   project, and never pruned. This is where knowledge goes that outlives one
   session.
@@ -35,39 +47,53 @@ Five things, and the split between them is the whole design:
 
 ## Session start
 
-If a harness plugin is installed, it has already started or resumed your
-session and put an `<agent-hub>` block in your context. When that block is
-present, call `session_start` once with the project and session it names, to
-bind your connection, and skip steps 1, 4 and 5 below: the block is the brief,
-the recovery note and the knowledge base index. A subagent never calls
-`session_start`; it shares its parent's session. See
-`references/harness.md`.
+**Name your session before you write.** Every hub call that writes, and every
+call that reads session state, carries `session`:
 
-With no block, run these when a session starts; each answers the next question:
+```
+session: {"project_id": "homelab", "name": "feat-redesign"}
+```
+
+A bare string, `"feat-redesign"`, is the name alone. A write to a session that
+does not exist creates it, so `session_start` is for the handoff and anchor it
+returns, not a gate. A write with no session records member and agent only.
+
+If a harness plugin is installed, it has started or resumed your session and
+put an `<agent-hub>` block in your context, and it adds `session` to your hub
+tool calls. When that block is present, use the project and session it names,
+and skip steps 1, 4 and 5 below: the block is the brief, the recovery note and
+the knowledge base index. A subagent works in `<parent>/<task>`, which the
+plugin names; see `references/harness.md`.
+
+With no block, pick a session name yourself, a branch, a worktree or a topic,
+never an id, then run these when a session starts; each answers the next
+question:
 
 1. `session_brief(project_id)` says what you would otherwise piece together
    from four tools: since your own last look, the answers and decisions on
    your own items and what else happened, plus your previous session's
    handoff and stale knowledge base pages. It is capped and moves no feed
-   cursor; it marks nothing delivered, and its own trailer leaves out the answers it lists. Call it before
-   `session_start`, so a resumed session is still the previous one.
-2. `whoami` names the identity and proves the token resolves.
-3. `session_start(project_id, session_name)` makes a brain active and returns
-   the `handoff` the predecessor left when the session ended and its latest
-   `anchor`, or null.
-4. `brain_get(recovery_path)` reads the anchor's rendered view.
+   cursor; it marks nothing delivered, and its own trailer leaves out the answers it lists.
+2. `whoami` names the member and agent the hub saw, and proves the token
+   resolves. It also suggests a session name.
+3. `session_start(project_id, session_name)` joins the session, creating it
+   when it is new, and returns the `handoff` a participant left when the
+   session ended and its latest `anchor`, or null.
+4. `brain_get(recovery_path, session: {...})` reads the anchor's rendered view.
 5. `brain_get(/fs/index.md, store: "project")` reads the durable index.
 
 Read the full record only where the brief points at more: `feed_read` for the
-events (the cursor is the hub's, per agent per project, so you carry nothing),
-`inbox_read` for an answer's whole text.
+events (the cursor is the hub's, per member and agent per project, so you carry
+nothing), `inbox_read` for an answer's whole text.
 
 ## Working rules
 
-- **The brain is session-bound.** Promote anything durable out of it before the
-  session is pruned: a feed event, an artifact, or a project knowledge base page.
-  Both stores are reached by the brain tools; `store` says which, and it is
-  required on a write. Name it on every write.
+- **The brain is session-bound and shared.** Every participant of the session
+  reads and writes it. Promote anything durable out of it before the session is
+  pruned: a feed event, an artifact, or a project knowledge base page. Both
+  stores are reached by the brain tools; `store` says which, and it is required
+  on a write. Name it on every write. A write against a stale version is
+  refused with `stale_base`: read again, then write.
 - **Anchor a phase rather than only ending.** At a phase boundary call
   `session_anchor` with the phase, a summary, the next steps, and the event ids
   it rests on. It stores an `anchor` event and mirrors it to `RECOVERY.md`;
@@ -89,13 +115,14 @@ events (the cursor is the hub's, per agent per project, so you carry nothing),
   then. Publishing is yours; sharing outward is the human's act.
 - **Retry safely.** A write that creates a durable record accepts an idempotency
   key, so a retry after a dropped connection returns the original result.
-- **Never send an actor.** The hub sets it from the token. Agents never use
-  the admin token: it authors everything as `human`.
-- **One credential.** Keep one client config with the hub URL and your token: it
-  reaches every ordinary project. Do not mint a token or a config file per
-  project; pass `project_id` on a call instead. A confidential project needs a
-  grant and is the one case for a separate credential, kept out of the
-  repository.
+- **Never send an actor.** The hub sets it from the token and the handshake.
+  Agents never use the admin token: it authors everything as `human`.
+- **One member per machine.** Keep one entry for the hub in
+  `~/.config/agent-hub/config.toml`: the hub URL, the member and its token. It
+  reaches every ordinary project, and every agent on the machine uses it. Do
+  not mint a token or a config file per project; pass `project_id` on a call
+  instead. A confidential project needs a grant and is the one case for a
+  second member, kept out of the repository.
 - **Search has two backends.** `search` defaults to lexical; pass `mode:
   "semantic"` when the hub has an embedding model configured. With none, the
   hub falls back to the lexical index and says so in `backend`.
@@ -120,8 +147,8 @@ summary is often the only line they see.
 The depth lives in `references/`, read on demand:
 
 - `references/tools.md` the tool table, with the exact argument shapes.
-- `references/sessions.md` sessions, the brain, the two stores, if_version,
-  and picking up another agent's work.
+- `references/sessions.md` shared sessions, the brain, the two stores,
+  `if_version` and stale writes, children, and forking another session.
 - `references/knowledge-base.md` one-shot calls from a hook, the shape of a
   page, and promoting session knowledge to the project.
 - `references/feed-inbox.md` the feed, signals, questions and approvals, and
@@ -129,10 +156,11 @@ The depth lives in `references/`, read on demand:
 - `references/artifacts.md` publish and update, comments, sharing, and
   protected content.
 - `references/harness.md` what a harness plugin does for you, the
-  `<agent-hub>` block, compaction and subagents.
+  `<agent-hub>` block, compaction, subagents and the plugin's launcher.
 - `references/notifications.md` the notification trailer on tool results.
 - `references/subscriptions.md` standing subscriptions, delivered through the
   trailer.
-- `references/errors.md` pagination, error codes, and idempotency.
+- `references/errors.md` pagination, error codes, credential and session
+  reasons, and idempotency.
 
 If the hub has no connection yet, [bootstrap](bootstrap.md) is the setup.

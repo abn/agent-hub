@@ -74,7 +74,7 @@ not the model; `/` is accepted only under a live parent.
 
 Each write names its session. The connection-scoped lease ends: a write
 carries `session`, and a plugin adds it to every hub tool call (Claude Code
-`PreToolUse`, OpenCode `tool.execute.before`). A client without a plugin
+`PreToolUse`, OpenCode's `execute.before` tool hook). A client without a plugin
 passes it itself, as the skill tells it. A session is optional and strongly
 preferred; a write without one records member and agent only.
 
@@ -144,7 +144,10 @@ so a hook and the MCP connection never resolve different members.
 Two ways to connect, chosen by what the machine has:
 
 - **No binary.** HTTP MCP; the client expands the token from the environment
-  in its own syntax (`${HUB_TOKEN}`, `{env:HUB_TOKEN}`, `$HUB_TOKEN`).
+  in its own syntax (`${HUB_TOKEN}` in Claude Code, `{env:HUB_TOKEN}` in
+  OpenCode). The Antigravity CLI expanded no variable in an HTTP entry when
+  tested, so its entry is the stdio `agent-hub mcp`, which inherits the
+  environment and reads the credential file.
 - **Binary present.** `agent-hub mcp` with no arguments proxies: it resolves
   the credential pair, waits for the client's `initialize` and forwards it,
   so the hub still learns the agent. `--proxy` is accepted and ignored with a

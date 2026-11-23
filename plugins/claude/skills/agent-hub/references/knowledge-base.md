@@ -117,22 +117,18 @@ Exit 1 is the hub answering that the page is not there. Anything else means
 the hub did not answer or refused the token, and saying "nothing yet" then
 would tell the agent something false.
 
-Each call is its own connection, so a session started in one call is not
-active in the next: the CLI is for stateless reads and writes that name their
-target, and a hook writes its own session brain the same way, by naming that
-session:
+Each call is its own connection and holds no session, so the CLI is for
+stateless reads and writes that name their target, and a hook writes a session
+brain the same way, by naming the session on the call:
 
 ```sh
-agent-hub call session_start '{"project_id":"homelab","session_name":"hook"}'
 agent-hub call brain_put \
-  '{"store":"session","path":"/kv/cursor","content":"next_since=42","session":{"agent":"<your agent id>","name":"hook","project_id":"homelab"}}'
+  '{"store":"session","path":"/kv/cursor","content":"next_since=42","session":{"project_id":"homelab","name":"hook"}}'
 ```
 
-The write goes to the session the first call started, because the second call
-names it. Only your own session answers to that, and a write that names no
-session at all is still about the active session, which a one-shot call has
-none of. Through the proxy, the connection holds the session and the argument
-is not needed.
+A write to a session that does not exist creates it, so no `session_start` is
+needed first. A session-store write that names no session is refused with
+`session_required`.
 
 ## Hearing about page changes
 
@@ -204,7 +200,7 @@ call's `next_before`. From a shell, `agent-hub kb history <path>` and
 ## Promoting session knowledge to the project
 
 When a session note or runbook is ready to share with the whole project,
-`brain_promote` copies it from your active session brain into the project
+`brain_promote` copies it from a session brain into the project
 knowledge base:
 
 ```
@@ -215,7 +211,7 @@ brain_promote(from_path: "/fs/notes/tls.md", to_path: "/fs/services/caddy.md",
       -> {ok, path, version, lint[]}
 ```
 
-`from_path` is read from your active session and is left as it was. `to_path`
+`from_path` is read from the session you name and is left as it was. `to_path`
 is an `/fs/` page path in `project_id`, which defaults to the session's
 project and needs your write access. `type`, `title`, `description` and `tags`
 are patched into the page's frontmatter, creating the block when the entry has

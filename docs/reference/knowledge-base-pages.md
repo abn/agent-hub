@@ -94,7 +94,7 @@ the knowledge base.
 Every refusal is an `application/problem+json` document with the hub error
 `code`. The admin gate runs before a request's body is read, so a caller without
 the admin token gets 401 whatever body it sent (a query string that cannot be
-read is still a 400 first), and an agent token is not the admin token.
+read is still a 400 first), and a member token is not the admin token.
 
 | Status | `code` | When |
 |---|---|---|
@@ -451,7 +451,7 @@ carry the change across, or write the page with `agent-hub kb put`.
 `brain_get`, `brain_put`, `brain_list` and `brain_delete` reach the knowledge
 base with `store: "project"`, under the project's own read and write grants.
 `brain_promote(from_path, to_path, project_id?, type?, title?, description?,
-tags?, if_version?)` reads `from_path` from the caller's active session brain and
+tags?, if_version?)` reads `from_path` from the session brain the call names and
 returns `{ok, path, version, lint[]}`. A `brain_delete` of a page that does not
 exist is `not_found`.
 

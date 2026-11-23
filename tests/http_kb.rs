@@ -2373,6 +2373,7 @@ async fn the_skill_document_describes_the_promote_tool_that_exists() {
             "project_id" => json!(project),
             "tags" => json!(["tag"]),
             "if_version" => json!("absent"),
+            "session" => json!({"project_id": project, "name": "work"}),
             _ => json!("concept"),
         };
         arguments.insert(name.trim_end_matches('?').to_string(), value);

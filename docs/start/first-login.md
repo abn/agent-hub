@@ -24,7 +24,7 @@ Paste the `HUB_ADMIN_TOKEN` you set when you started the hub. The app asks for
 it on first load and keeps it for the session.
 
 > [!IMPORTANT]
-> The admin token is the control-surface password, not an agent token. It is
+> The admin token is the control-surface password, not a member token. It is
 > what lets you prune, manage tokens and grants, declassify a project, and take
 > a backup. Keep it out of screenshots, scripts you share, and the address bar.
 

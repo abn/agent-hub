@@ -10,7 +10,7 @@ status: stable
 
 An agent keeps its working state on the node rather than in a file under a
 tool's home directory, so it survives a compaction, a client restart, or a move
-to another machine. This page is the adoption path: the session-start sequence,
+to another machine. This page is the path in: the session-start sequence,
 the feed cursor, handoffs, deadlines, and what arrives without asking. The exact
 tool shapes are in [MCP tools](/reference/mcp-tools.md); this page is the loop.
 
@@ -33,12 +33,15 @@ silent either way. Name it on every write.
 
 ## Session start
 
-Run this sequence when a session starts:
+Name the session before you write: a branch, a worktree or a topic, never an id.
+Every call that writes or reads session state carries it, as `session: "nightly"`
+or `session: {"project_id": "homelab", "name": "nightly"}`; a plugin adds it for
+you. Run this sequence when a session starts:
 
 ```
 session_brief(project_id: "homelab")
 session_start(project_id: "homelab", session_name: "nightly")
-brain_get(path: "/fs/RECOVERY.md", store: "session")
+brain_get(path: "/fs/RECOVERY.md", store: "session", session: "nightly")
 brain_get(path: "/fs/index.md", store: "project")
 ```
 
@@ -51,12 +54,11 @@ Each call answers the next question:
    knowledge base pages past their `stale_after`. It moves no feed cursor, and
    marks nothing delivered: the trailer on the brief leaves out the
    answers it lists, and a later session's trailer still reports answers asked in
-   that session. Call it before `session_start`: after a resume, the resumed
-   session is the one the connection works, so the brief would name the session
-   before it instead.
-2. `session_start` registers or resumes the session and returns its
+   that session. Call it before `session_start`, so a resumed session is still
+   the previous one.
+2. `session_start` joins the session, creating it when it is new, and returns its
    `session_id`, the namespaces to address the brain with, `recovery_path`, and
-   `handoff`, the note the previous owner left when it ended the session. The
+   `handoff`, the note the last participant left when it ended the session. The
    notes are project and session name, never a file path.
 3. `brain_get` on `recovery_path` reads the session's own recovery document, the
    working note that orients a resumed agent.
@@ -67,14 +69,12 @@ When the brief's events are not enough, `feed_read` with no `since` reads the
 same events in full and advances the cursor.
 
 > [!NOTE]
-> Call `session_brief` before `session_start`. Called after one, the session the
-> connection now works is never the previous one, and an agent that has never
-> read the feed then gets events from that older session's last activity rather
-> than from the resumed one's.
+> Call `session_brief` before `session_start`, so the brief names your previous
+> session rather than the one you are joining.
 
 ## The feed cursor
 
-The cursor is the hub's, not the agent's. The hub keeps one per agent per
+The cursor is the hub's, not the agent's. The hub keeps one per member and agent per
 project, so `feed_read(project_id: "homelab")` with no `since` reads forward
 from wherever that agent last stopped and advances the stored cursor to the
 `next_since` it returns. An agent that restarts, moves to another machine, or
@@ -101,7 +101,8 @@ view. When you reach a boundary, call `session_anchor` with the five fields:
 - `next_steps`: one to ten short strings;
 - `source_ids`: up to 50 project event ids the summary rests on, optional, each
   one validated against a real event in the same project;
-- the owner: the hub sets it from your token, never a client field.
+- the author: the hub sets it from your token, your client's handshake and the
+  session, never a client field.
 
 `session_anchor` stores the `anchor` event and mirrors a rendered document to
 `/fs/RECOVERY.md`, best effort, returning `anchor`, `recovery_path` and
@@ -115,7 +116,8 @@ the latest anchor too, or null when the session has none, so a resumed agent can
 orient before it reads the log. The full log stays one cursor page away: pass
 `next_since` to `feed_read` for the rest.
 
-`session_end` still takes a `handoff` note, and a session that never anchored
+`session_end` takes a `handoff` note, and `session_leave` leaves a session
+without ending it for the others, and a session that never anchored
 resumes exactly as before: its handoff note and its full event log.
 
 ## Asking with a deadline
@@ -138,7 +140,8 @@ agent-hub call signal_append \
 ## What arrives without asking
 
 Under a [harness plugin](/guides/agents/plugins.md) the session start above runs
-for you, and the block it injects names the `session_start` call to make. Waiting
+for you, and the block it injects names the project and session to use, which the plugin
+adds to your hub calls where the harness lets it. Waiting
 items are added to each prompt, and an idle agent is woken by a watcher for an
 item addressed to it. Without a plugin, the trailer below is the channel.
 
@@ -149,23 +152,25 @@ registered with `notify_subscribe`. Each item is delivered once and is a nudge,
 not the record: the answer body, the decision note, and the full event are read
 with `inbox_read`, `inbox_wait`, or `feed_read`. A subscription is the feed read
 an agent would otherwise poll for, kept on the hub's side, and
-`notify_unsubscribe` removes one. Delivery is per session: two sessions of one
-agent each see their own items, and a subscription bound to a session is removed
-when that session ends. The trailer arrives only on the agent's next call, so an
+`notify_unsubscribe` removes one. Delivery is per participant: each agent in a session reads through its own
+cursor, so a reply to one agent's question reaches the others of the session
+too, and a subscription bound to a session is removed when that session ends. The trailer arrives only on the agent's next call, so an
 idle agent needs a plugin's watcher or a loop of `notify_wait`. Comments on an
 artifact or page, the human's included, and page writes are events too: subscribe
 with `comment` or `page` and `about_self` to hear about them.
 
-## Sessions belong to their agent
+## Sessions are shared
 
-A session belongs to the agent that started it, and a name is unique per owner
-inside a project, so two agents that both pick `nightly` get two sessions and
-two brains rather than silently sharing one. To pick up another agent's work,
-pass `from` to `session_start`, naming a session by id or by agent and name. The
-hub chooses the mechanism from the source's state: an ended session is adopted,
-keeping its id, brain, and handoff while ownership moves; a running session is
-forked into a new session whose brain is copied, leaving the source untouched.
-The result reports which happened.
+A session belongs to no one. Any agent joins it by name, and a name is unique
+inside a project, so two agents that both pick `nightly` share one session and
+one brain, each as its own participant, and every write records who wrote it. A
+write against a version the key has since moved past is refused with
+`stale_base`, so the agent rereads before it overwrites. A subagent works in its
+own `<parent>/<task>` session, which the plugin names. To branch from another
+session instead of sharing it, pass `from` to `session_start`, naming a session
+by id or by name: the new session's brain is a copy, and the source is
+untouched. `session_leave` says you are done without ending it for the others;
+`session_end` ends it for everyone, children included.
 
 ## What the hub does and what you wire
 
@@ -179,7 +184,7 @@ notes over is the operator's step.
 
 ## You should now see
 
-An agent that starts a session by name, reads back its own recovery document and
+An agent that names its session, reads back the recovery document and
 the project index, and resumes from the same cursor after a restart. The next
 steps are [Harness plugins](/guides/agents/plugins.md) to run this loop for you, [One-shot calls from a hook](/guides/agents/hooks.md) if the harness
 has no MCP client, and [Bring existing notes over](/guides/agents/migrate-notes.md)
