@@ -20,6 +20,8 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       windows: ${{ steps.filter.outputs.windows }}
+      web: ${{ steps.filter.outputs.web }}
+      plugins: ${{ steps.filter.outputs.plugins }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -32,12 +34,14 @@ jobs:
           if [ "$EVENT" != "pull_request" ]; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
             echo "windows=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            echo "plugins=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Inputs of the Rust build and tests, including what the binary
           # embeds (web/, skills/) and what tests read from the tree.
           git diff --name-only "$BASE_SHA" HEAD | tee "$RUNNER_TEMP/changed"
-          if grep -qE '^(src/|tests/|web/|skills/|plugins/contract/fixtures/|Cargo\.toml$|Cargo\.lock$|build\.rs$|Makefile$|AGENTS\.md$|DESIGN\.md$|docs/log\.md$|docs/reference/knowledge-base-pages\.md$|\.github/workflows/check\.yml$)' "$RUNNER_TEMP/changed"; then
+          if grep -qE '^(src/|tests/|web/|skills/|plugins/|Cargo\.toml$|Cargo\.lock$|build\.rs$|Makefile$|AGENTS\.md$|DESIGN\.md$|docs/log\.md$|docs/reference/knowledge-base-pages\.md$|\.github/workflows/check\.yml$)' "$RUNNER_TEMP/changed"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
@@ -49,6 +53,21 @@ jobs:
             echo "windows=true" >> "$GITHUB_OUTPUT"
           else
             echo "windows=false" >> "$GITHUB_OUTPUT"
+          fi
+          # web/crypto, web/units and web/styles read web/, the vitest tests
+          # and their fixtures, and the Node toolchain.
+          if grep -qE '^(web/|\.agents/js-tests/|tests/fixtures/frontmatter/|vitest\.config\.mjs$|package\.json$|package-lock\.json$|Makefile$|\.github/workflows/check\.yml$)' "$RUNNER_TEMP/changed"; then
+            echo "web=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "web=false" >> "$GITHUB_OUTPUT"
+          fi
+          # plugins/check tests the plugins, diffs skills/agent-hub against
+          # the Claude plugin's copy, and reads the version in Cargo.toml and
+          # the marketplace in .claude-plugin/.
+          if grep -qE '^(plugins/|skills/agent-hub/|\.claude-plugin/|Cargo\.toml$|package\.json$|package-lock\.json$|Makefile$|\.github/workflows/check\.yml$)' "$RUNNER_TEMP/changed"; then
+            echo "plugins=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "plugins=false" >> "$GITHUB_OUTPUT"
           fi
   lint:
     name: Lint and docs
@@ -76,6 +95,8 @@ jobs:
       - run: make lint lint/engine fmt/check
 
   web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
     name: Web
     runs-on: ubuntu-24.04
     steps:
@@ -84,7 +105,20 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: make web/crypto web/units web/styles plugins/check
+      - run: make web/crypto web/units web/styles
+
+  plugins:
+    needs: changes
+    if: needs.changes.outputs.plugins == 'true'
+    name: Plugins
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
+        with:
+          node-version: 22
+          cache: npm
+      - run: make plugins/check
 
   checks:
     needs: changes
