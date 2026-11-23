@@ -172,6 +172,15 @@ export function expiredWords(decision) {
   return "Expired: closed with no answer";
 }
 
+// A decision's reply reads as what was decided, "declined: Not now.", rather
+// than as an answer that happens to be the word Declined.
+function replySentence(reply) {
+  const verb = { approved: "approved", declined: "declined" }[reply.payload?.decision];
+  if (reply.kind !== "answer" || !verb || reply.payload?.expired) return replySentenceHTML(reply);
+  const note = typeof reply.payload.note === "string" ? reply.payload.note.trim() : "";
+  return `<b>${esc(reply.actor)}</b> ${verb}${note ? `: ${esc(note)}` : ""}`;
+}
+
 function decisionNote(event) {
   const payload = event.payload;
   if (event.kind === "answer" && payload && payload.expired === true) {
@@ -438,7 +447,7 @@ function threadRepliesHTML(replies) {
     .slice()
     .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
     .map(
-      (reply) => `<p class="feed-thread-reply">${replySentenceHTML(reply)} ${stamp(reply.created_at, clockTime)}</p>`,
+      (reply) => `<p class="feed-thread-reply">${replySentence(reply)} ${stamp(reply.created_at, clockTime)}</p>`,
     )
     .join("");
 }
@@ -841,7 +850,7 @@ export async function eventStage(event, projectId) {
     ? `<section class="item-thread feed-stage-thread" aria-labelledby="feed-thread-label">
         <h3 class="section-label" id="feed-thread-label">Thread</h3>
         ${row(event.kind, feedSentenceHTML(event, formatEventSummary(event)), event.created_at)}
-        ${threadReplies.map((reply) => row(reply.kind, replySentenceHTML(reply), reply.created_at)).join("")}
+        ${threadReplies.map((reply) => row(reply.kind, replySentence(reply), reply.created_at)).join("")}
       </section>`
     : "";
   const at = Date.parse(event.created_at);

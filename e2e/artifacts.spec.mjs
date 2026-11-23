@@ -186,6 +186,63 @@ test.describe("the artifacts list", () => {
     }
   };
 
+  test("a narrow row folds more chips into More rather than cutting names to a letter", async ({ hub, page }, testInfo) => {
+    test.skip(!isDesktop(testInfo), "the fold is a wide row's");
+    await page.setViewportSize({ width: 720, height: 900 });
+    await manyProjects(page, 8);
+    await openList(page, hub);
+    const bar = page.getByRole("toolbar", { name: "Filter artifacts" });
+    await fitsRow(bar);
+    const widths = await bar.locator("button.chip:visible .chip-label").evaluateAll((els) => els.map((el) => [el.textContent, el.clientWidth, el.scrollWidth]));
+    expect(widths.length).toBeGreaterThanOrEqual(2);
+    for (const [name, shown, full] of widths) {
+      expect(shown >= full || shown >= 48, `${name} is cut to ${shown}px of ${full}px`).toBe(true);
+    }
+    // A top project the row had no room for sits in More while folded, and
+    // comes back as a chip, and out of the menu, when the row widens.
+    const more = bar.getByRole("button", { name: "More" });
+    const menu = page.getByRole("menu", { name: "More projects" });
+    const folded = bar.getByRole("button", { name: "agents 4" });
+    await expect(folded).toHaveCount(0);
+    await more.click();
+    await expect(menu.getByRole("menuitemradio", { name: "agents 4" })).toBeVisible();
+    await expect(menu.getByRole("menuitemradio", { name: "sprind 3" })).toBeVisible();
+    await expect(menu.getByRole("menuitemradio", { name: /^roundhouse-with-a-long-name/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await expect(menu).toBeHidden();
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await expect(folded).toBeVisible();
+    await more.click();
+    await expect(menu.getByRole("menuitemradio", { name: "agents 4" })).toHaveCount(0);
+    await expect(menu.getByRole("menuitemradio", { name: "sprind 3" })).toBeVisible();
+  });
+
+  test("a pressed chip keeps its stripe and draws the focus ring", async ({ hub, page }, testInfo) => {
+    test.skip(!isDesktop(testInfo), "the chip row is a wide one's");
+    await manyProjects(page, 8);
+    await openList(page, hub);
+    const bar = page.getByRole("toolbar", { name: "Filter artifacts" });
+    const all = bar.getByRole("button", { name: "All", exact: true });
+    await expect(all).toHaveAttribute("aria-pressed", "true");
+    await page.keyboard.press("Tab");
+    await all.focus();
+    await expect(all).toBeFocused();
+    const { shadow, accent, ink } = await all.evaluate((el) => {
+      const colour = (name) => {
+        const probe = document.createElement("i");
+        probe.style.color = `var(${name})`;
+        document.body.append(probe);
+        const value = getComputedStyle(probe).color;
+        probe.remove();
+        return value;
+      };
+      return { shadow: getComputedStyle(el).boxShadow, accent: colour("--accent"), ink: colour("--ink") };
+    });
+    expect(shadow, "the focus ring is missing").toContain(accent);
+    expect(shadow, "the selection stripe is missing").toContain(ink);
+    expect(shadow, "the selection stripe is missing").toContain("inset");
+  });
+
   test("many projects fold into a More menu and the row keeps its hints", async ({ hub, page }, testInfo) => {
     test.skip(!isDesktop(testInfo), "the fold is a wide row's");
     await manyProjects(page, 8);

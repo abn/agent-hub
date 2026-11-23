@@ -87,7 +87,7 @@ main { flex: 1; width: 100%; min-width: 0; margin: 0; padding: var(--s-4) var(--
 .markdown-body li > ol { margin: 0; }
 .markdown-body li:has(> input[type="checkbox"], > p:first-child > input[type="checkbox"]) { list-style: none; position: relative; }
 .markdown-body li > input[type="checkbox"],
-.markdown-body li > p:first-child > input[type="checkbox"] { position: absolute; left: calc(-1 * var(--s-4)); top: 0.3em; width: 1em; height: 1em; min-height: 0; margin: 0; padding: 0; }
+.markdown-body li > p:first-child > input[type="checkbox"] { position: absolute; left: calc(-1 * var(--s-5)); top: 0.3em; width: 1em; height: 1em; min-height: 0; margin: 0; padding: 0; }
 .markdown-body pre { margin: var(--s-3) 0; padding: var(--s-3); overflow-x: auto; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-1); font-family: var(--font-mono); font-size: var(--t-13); line-height: 1.5; }
 .markdown-body pre code { font: inherit; }
 .markdown-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
@@ -230,6 +230,7 @@ pre, kbd, table { overflow-wrap: normal; }
   .arts-controls .chip-label { flex: 0 1 auto; min-width: 2ch; }
   .arts-controls .arts-hints { flex: none; }
 }
+.arts-more [data-group-menu] [hidden] { display: none; }
 .arts-check { display: inline-flex; width: 14px; flex: none; }
 .arts-more .shell-group-menu .chip-label { flex: 1; text-align: left; }
 .arts-more [aria-checked="false"] .arts-check { visibility: hidden; }
@@ -276,8 +277,14 @@ pre, kbd, table { overflow-wrap: normal; }
   font-weight: 600;
 }
 .chip:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid transparent;
   outline-offset: 2px;
+}
+/* The selection stripe is a shadow too, so a pressed chip that has focus draws
+   the stripe and the ring together; the transparent outline above is the
+   forced-colours fallback for both. */
+.chip[aria-pressed="true"]:focus-visible {
+  box-shadow: inset 0 -2px 0 var(--ink), var(--focus);
 }
 .chip-dot {
   width: 6px;
@@ -448,18 +455,22 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
     display: flex;
     flex-direction: column;
     align-items: center;
-    margin-bottom: var(--s-3);
+    justify-content: center;
+    height: 52px;
+    box-sizing: border-box;
+    margin: calc(-1 * var(--s-3)) 0 0;
   }
 
+  /* The icon rail is too narrow for the name on one line, so it breaks
+     between the two words and shows each whole. */
   .rail-title {
-    font-size: var(--t-13);
+    font-size: var(--t-12);
     font-weight: 600;
+    line-height: 1.2;
     color: var(--ink);
     letter-spacing: -0.02em;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
     text-align: center;
+    max-width: 100%;
   }
 
   .rail-nav,
@@ -546,13 +557,16 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 
   .rail-brand-group {
     align-items: flex-start;
+    justify-content: flex-start;
+    height: auto;
     padding: 0 var(--s-2);
-    margin-bottom: var(--s-3);
+    margin: 0 0 var(--s-3);
   }
 
   .rail-title {
     font-size: var(--t-15);
     font-weight: 600;
+    line-height: normal;
   }
 
   .rail-node {
@@ -2081,40 +2095,6 @@ button.empty-link {
 .storage-table td.cell-action {
   text-align: right;
 }
-/* The row's own prune sits in a 44px table row, so 32 is the inline height here
-   as everywhere else, and the coarse-pointer hit area below grows to 44 around
-   it. Its 12px label and 12px horizontal padding stay the row's own. */
-.storage-table .storage-prune {
-  min-height: 32px;
-  height: 32px;
-  padding: 0 var(--s-3);
-  font-size: var(--t-13);
-  font-weight: 600;
-  color: var(--ink);
-  background: transparent;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-1);
-  cursor: pointer;
-  position: relative;
-}
-.storage-table .storage-prune:hover {
-  background: var(--surface-2);
-}
-.storage-table .storage-prune:focus-visible {
-  outline: none;
-  box-shadow: var(--focus);
-}
-@media (pointer: coarse) {
-  .storage-table .storage-prune::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: -4px;
-    right: -4px;
-    height: 44px;
-    transform: translateY(-50%);
-  }
-}
 .storage-totals-row td {
   background: var(--surface-2);
   font-weight: 600;
@@ -3459,6 +3439,10 @@ a.item-step:hover { background: var(--surface-2); color: var(--ink); }
   display: flex;
   flex-direction: column;
 }
+/* The session detail view reads the brain tree alone, at every width. */
+.session-detail-view .session-tree-pane { width: 100%; flex: 1; border-right: none; }
+.session-detail-view .session-file-viewer { display: none; }
+.shell .session-back-bar { display: none; }
 @media (min-width: 1100px) {
   .session-stage-body {
     flex-direction: row;
@@ -3926,7 +3910,7 @@ a.session-back {
 }
 
 .hub-group-toggle:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid transparent;
   outline-offset: 2px;
 }
 
@@ -6305,13 +6289,6 @@ a.session-back {
   }
 }
 
-.settings-helper-line {
-  padding: var(--s-3) 0 0;
-  font-size: var(--t-13);
-  line-height: 1.5;
-  color: var(--ink-3);
-}
-
 @media (pointer: fine) {
   .coarse-only {
     display: none !important;
@@ -6813,7 +6790,7 @@ a.session-back {
   background: var(--surface-2);
 }
 .proj-overflow-btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid transparent;
   outline-offset: -2px;
 }
 .proj-overflow-btn svg {

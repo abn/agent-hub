@@ -38,6 +38,8 @@ test.describe("the feed stage", () => {
     await expect(stage(page).getByRole("button", { name: "Reply" })).toHaveCount(0);
     await expect(stage(page).getByRole("link", { name: "Answer" })).toHaveCount(0);
     await expect(stage(page).locator(".feed-stage-kind")).toContainText("Declined");
+    await expect(stage(page)).toContainText("declined: Not now.");
+    await expect(stage(page)).not.toContainText("answered: Declined");
   });
 
   test("the outcome holds under the kind filter, which loads no replies", async ({ hub, page }) => {
