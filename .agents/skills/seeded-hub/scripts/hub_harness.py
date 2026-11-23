@@ -931,6 +931,8 @@ def running_hub(name: str, override: str | None = None, cwd: str | None = None, 
         command[-1] = str(Path(command[-1]).resolve())
     else:
         command = binary.split()
+    # A bare agent-hub prints its status; the hub is the serve subcommand.
+    command.append("serve")
     hub = subprocess.Popen(
         command,
         env=env,

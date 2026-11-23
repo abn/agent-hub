@@ -42,6 +42,7 @@ impl HubProcess {
     ) -> Result<Self, String> {
         let mut command = Command::new(env!("CARGO_BIN_EXE_agent-hub"));
         command
+            .arg("serve")
             // Errors as before, and the one line that carries the address.
             .env("RUST_LOG", "error,agent_hub::app=info")
             .env("HUB_DATA_DIR", data_dir)

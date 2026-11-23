@@ -1,3 +1,5 @@
+mod daemon;
+
 use std::path::PathBuf;
 use std::process::ExitCode;
 
@@ -6,7 +8,14 @@ use agent_hub::error::{Error, Result};
 
 const USAGE: &str = "\
 usage:
-  agent-hub [serve]              serve the hub over HTTP (the default)
+  agent-hub                      show the hub's status and this usage
+  agent-hub serve                serve the hub over HTTP, in the foreground
+  agent-hub start                start the hub in the background
+  agent-hub stop [--force]       stop the hub, draining it first
+  agent-hub restart              stop the hub, then start it
+  agent-hub status [--json]      say whether the hub runs, and where
+  agent-hub logs [-f] [-n N]     print the hub's log, or follow it
+  agent-hub version              print the version (also --version)
   agent-hub mcp                  bridge stdio MCP to the hub named by HUB_URL
   agent-hub call <tool> [json]   call one tool and print its JSON result
   agent-hub tools                list the hub's tools
@@ -25,7 +34,8 @@ usage:
   agent-hub health [--url URL]   GET /readyz and exit non-zero when not ready
 
 Every command prints its own usage with --help or -h, and reads no settings
-and reaches nothing to do it.
+and reaches nothing to do it. A bare agent-hub never serves: run agent-hub
+serve, or agent-hub start for a background hub.
 
 The hub is configured by config.toml and environment variables.
 ";
@@ -34,10 +44,17 @@ const SERVE_USAGE: &str = "\
 usage:
   agent-hub serve
 
-Serve the hub over HTTP. With no subcommand, this is what runs. The bind, the
-data directory, the admin token and the optional tailnet come from config.toml
-and the environment; there are no flags, so an operator who asks a serving hub
-for help gets its usage rather than a second process on the data directory.
+Serve the hub over HTTP in the foreground. This is the container's command,
+and what `agent-hub start` runs in the background. The bind, the data
+directory, the admin token, the log file and the optional tailnet come from
+config.toml and the environment; there are no flags, so an operator who asks a
+serving hub for help gets its usage rather than a second process on the data
+directory.
+
+One process serves a data directory: the hub takes hub.lock there before it
+opens the store, and a second serve refuses, naming the first. With log_file
+(HUB_LOG_FILE) set, the log goes to that file, rolled at 10 MiB with three
+rolled files kept, instead of stderr.
 ";
 
 const MCP_USAGE: &str = "\
@@ -240,6 +257,9 @@ fn main() -> ExitCode {
         print!("{usage}");
         return ExitCode::SUCCESS;
     }
+    if matches!(args.as_slice(), [flag] if flag == "--version" || flag == "-V") {
+        return daemon::version_cmd();
+    }
 
     // A serving hub defaults to info, so an operator who set nothing still sees
     // a failure (a failed sweep, a dropped tailnet, a failed checkpoint); the
@@ -252,19 +272,32 @@ fn main() -> ExitCode {
     // and carries what went wrong: its filter is the one that keeps the
     // transport's line about its own teardown out of it.
     let filter = match args.first().map(String::as_str) {
-        None | Some("serve") => std::env::var("RUST_LOG")
+        Some("serve") => std::env::var("RUST_LOG")
             .unwrap_or_else(|_| "agent_hub=info,turso_core=error".to_string()),
         #[cfg(feature = "client")]
         _ => agent_hub::client::client_log_directives(std::env::var("RUST_LOG").ok()),
         #[cfg(not(feature = "client"))]
         _ => std::env::var("RUST_LOG").unwrap_or_else(|_| "error".to_string()),
     };
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::new(filter))
-        .with_writer(std::io::stderr)
-        .init();
+    let builder =
+        tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::new(filter));
+    match serve_log_sink(&args) {
+        Ok(Some(sink)) => builder.with_writer(sink).with_ansi(false).init(),
+        Ok(None) => builder.with_writer(std::io::stderr).init(),
+        Err(message) => {
+            eprintln!("agent-hub serve: {message}");
+            return ExitCode::FAILURE;
+        }
+    }
     match args.first().map(String::as_str) {
-        None | Some("serve") => report(serve()),
+        None => daemon::bare(USAGE),
+        Some("serve") => report(serve()),
+        Some("start") => daemon::start_cmd(&args[1..]),
+        Some("stop") => daemon::stop_cmd(&args[1..]),
+        Some("restart") => daemon::restart_cmd(&args[1..]),
+        Some("status") => daemon::status_cmd(&args[1..]),
+        Some("logs") => daemon::logs_cmd(&args[1..]),
+        Some("version") => daemon::version_cmd(),
         Some("mcp") => mcp(&args[1..]),
         Some("call") => call(&args[1..]),
         Some("tools") => tools(&args[1..]),
@@ -290,6 +323,31 @@ fn main() -> ExitCode {
     }
 }
 
+/// The rotating log file a serving hub writes to, when its settings name one.
+///
+/// Only `serve` writes to it. A log file that would land on the store's lock or
+/// its record is refused, and so is one that cannot be opened: the hub does not
+/// start rather than log somewhere nothing rotates.
+fn serve_log_sink(
+    args: &[String],
+) -> std::result::Result<Option<daemon::logfile::LogSink>, String> {
+    if args.first().map(String::as_str) != Some("serve") {
+        return Ok(None);
+    }
+    let path = match agent_hub::config::log_file_from_env() {
+        Ok(Some(path)) => path,
+        Ok(None) => return Ok(None),
+        // `serve` reports an unreadable configuration itself, once.
+        Err(_) => return Ok(None),
+    };
+    if let Ok(data_dir) = Config::data_dir_from_env() {
+        daemon::logfile::check_log_path(&path, &data_dir)?;
+    }
+    daemon::logfile::LogSink::open(&path)
+        .map(Some)
+        .map_err(|err| format!("could not open the log file {}: {err}", path.display()))
+}
+
 /// The usage a help flag asks for, or `None` when there is no help flag.
 ///
 /// `--help` or `-h` anywhere in the arguments answers for the subcommand in
@@ -307,6 +365,12 @@ fn usage_for(args: &[String]) -> Option<&'static str> {
 fn usage_of(command: &str) -> Option<&'static str> {
     Some(match command {
         "serve" => SERVE_USAGE,
+        "start" => daemon::START_USAGE,
+        "stop" => daemon::STOP_USAGE,
+        "restart" => daemon::RESTART_USAGE,
+        "status" => daemon::STATUS_USAGE,
+        "logs" => daemon::LOGS_USAGE,
+        "version" => daemon::VERSION_USAGE,
         "mcp" => MCP_USAGE,
         "call" => CALL_USAGE,
         "tools" => TOOLS_USAGE,
@@ -835,8 +899,24 @@ fn probe_readyz(base: &str) -> std::result::Result<(), String> {
 
 /// Serve the hub over HTTP.
 fn serve() -> Result<()> {
-    let (config, runtime) = server_runtime()?;
-    runtime.block_on(agent_hub::app::run(config))
+    let (config, mut hold, runtime) = server_runtime(daemon::lock::Mode::Serve)?;
+    let result = runtime.block_on(agent_hub::app::run_with(config, |address| {
+        hold.lock.record_bound(address)
+    }));
+    // Every task the runtime spawned ends here, before the lock is let go: a
+    // `stop` that sees the lock free, or a `restart` that opens the directory,
+    // must find nothing of this process still touching the store.
+    drop(runtime);
+    match result {
+        Ok(stopped) => {
+            // Said only for a checkpoint that returned success.
+            if stopped.checkpointed {
+                hold.lock.mark_clean_stop();
+            }
+            Ok(())
+        }
+        Err(err) => Err(err),
+    }
 }
 
 /// Serve MCP on stdio: a proxy to a running hub, or the embedded hub.
@@ -868,9 +948,15 @@ fn mcp(args: &[String]) -> ExitCode {
 }
 
 /// Serve the embedded MCP surface over the local data directory.
+///
+/// The embedded session does not checkpoint the store when it ends, so it never
+/// claims a clean stop in its record.
 fn embedded() -> Result<()> {
-    let (config, runtime) = server_runtime()?;
-    match runtime.block_on(agent_hub::mcp::serve_stdio(config)) {
+    let (config, hold, runtime) = server_runtime(daemon::lock::Mode::Mcp)?;
+    let result = runtime.block_on(agent_hub::mcp::serve_stdio(config));
+    drop(runtime);
+    drop(hold);
+    match result {
         Ok(()) => Ok(()),
         Err(err) if err.is_locked() => Err(Error::Conflict(
             "a hub is already using this directory; set HUB_URL to reach it instead".to_string(),
@@ -1761,8 +1847,22 @@ fn without_client() -> ExitCode {
     ExitCode::from(78)
 }
 
-/// The server configuration and the runtime, built in that order.
-fn server_runtime() -> Result<(Config, tokio::runtime::Runtime)> {
+/// What a process that serves the store holds on its directory.
+struct Hold {
+    lock: daemon::lock::HubLock,
+}
+
+/// The server configuration, the hold on the data directory, and the runtime.
+///
+/// `hub.lock` is taken after the configuration is known good and before
+/// anything opens the engine, so two processes never share a store, whichever
+/// way each was started. A restore takes the same lock, and the lock is checked
+/// to still be the file at its path once granted, so a hub that waited out a
+/// restore's swap opens the restored store, never the replaced one. The caller
+/// keeps the hold for as long as it serves, and must drop the runtime before
+/// it: the hold is returned ahead of the runtime so an unwinding caller drops
+/// them in that order too.
+fn server_runtime(mode: daemon::lock::Mode) -> Result<(Config, Hold, tokio::runtime::Runtime)> {
     let config = Config::from_env()?;
 
     // The embedded tailnet is validated here, before the store opens: a key on
@@ -1788,7 +1888,16 @@ fn server_runtime() -> Result<(Config, tokio::runtime::Runtime)> {
         }
     }
 
-    Ok((config, runtime()?))
+    agent_hub::config::private_dir(&config.data_dir)?;
+    let lock = daemon::lock::HubLock::acquire(&config.data_dir, daemon::lock::ACQUIRE_WAIT, mode)
+        .map_err(|err| match err {
+        daemon::lock::AcquireError::Held(holder) => Error::Conflict(daemon::lock::held_message(
+            &config.data_dir,
+            holder.as_deref(),
+        )),
+        daemon::lock::AcquireError::Io(err) => Error::Io(err),
+    })?;
+    Ok((config, Hold { lock }, runtime()?))
 }
 
 fn runtime() -> Result<tokio::runtime::Runtime> {

@@ -50,3 +50,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD ["/usr/local/bin/agent-hub", "health"]
 
 ENTRYPOINT ["/usr/local/bin/agent-hub"]
+# A bare agent-hub prints its status and exits, so the container names the
+# command it serves with.
+CMD ["serve"]
