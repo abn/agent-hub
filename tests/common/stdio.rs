@@ -82,7 +82,7 @@ impl StdioClient {
         }
     }
 
-    /// Run the stdio MCP server over a data directory.
+    /// Run the embedded stdio MCP server over a data directory.
     pub fn mcp(data_dir: &Path, env: &[(&str, &str)]) -> Self {
         let mut all = vec![("HUB_DATA_DIR", data_dir.to_string_lossy().into_owned())];
         // The config file of whoever runs the suite must never decide this
@@ -98,7 +98,7 @@ impl StdioClient {
                 .into_owned(),
         ));
         all.extend(env.iter().map(|(key, value)| (*key, value.to_string())));
-        Self::spawn(&["mcp"], &all)
+        Self::spawn(&["mcp", "--embedded"], &all)
     }
 
     pub fn send(&mut self, message: &Value) {

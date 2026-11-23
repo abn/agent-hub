@@ -19,7 +19,7 @@ usage:
   agent-hub service install      register the hub as a per-user service
   agent-hub uninstall [--purge]  remove the service and the binary
   agent-hub version              print the version (also --version)
-  agent-hub mcp                  bridge stdio MCP to the hub named by HUB_URL
+  agent-hub mcp                  bridge stdio MCP to the hub the settings name
   agent-hub call <tool> [json]   call one tool and print its JSON result
   agent-hub tools                list the hub's tools
   agent-hub kb <command>         read and write the project knowledge base
@@ -29,6 +29,9 @@ usage:
   agent-hub setup <harness>      install the hub plugin into a harness
   agent-hub config [flags]       inspect and validate configuration
   agent-hub enrol [why]          request enrolment and wait for operator approval
+  agent-hub token [--headers]    show the hub, member and credential in use
+  agent-hub trust [--path DIR]   allow a project's .agent-hub.toml pairing
+  agent-hub migrate --check      plan the members upgrade without changing the store
   agent-hub backup --out DIR     back up the store while no hub serves it
   agent-hub backup --url URL     ask a running hub to back itself up
   agent-hub restore --from DIR   restore the store from a backup
@@ -62,17 +65,22 @@ rolled files kept, instead of stderr.
 
 const MCP_USAGE: &str = "\
 usage:
-  agent-hub mcp [--proxy]
+  agent-hub mcp [--embedded] [--proxy]
 
-Serve MCP on stdio. With HUB_URL set, this bridges stdio to that hub and holds
-one connection for the life of the process, which is what keeps a session
-active across calls. If the hub restarts, the bridge reconnects once and binds
-the new connection to the last session it started. With no HUB_URL, it serves
-the local data directory standalone as the human admin, which fails while a
-hub is serving that directory.
+Serve MCP on stdio as a bridge to the hub the settings name: HUB_URL, a
+project's .agent-hub.toml, [client] url, or the one hub config.toml holds a
+credential for. The bridge opens the hub with the client's own handshake, so
+the hub reads the agent from it, and sends X-Agent-Id only when HUB_AGENT_ID is
+set. If the hub cannot be reached or refuses the token, the bridge still starts:
+it offers one local whoami that says why, and keeps trying, so an approval or a
+fixed credential reaches the client as a changed tool list, with no restart.
 
---proxy (or HUB_MODE=proxy) never falls back to the local data directory: with
-no hub configured it exits 78 and touches nothing.
+With no hub configured it exits 78 and touches nothing.
+
+--embedded serves the local data directory standalone as the human admin
+instead, which fails while a hub is serving that directory.
+
+--proxy is accepted and ignored: the bridge is the default now.
 ";
 
 const CALL_USAGE: &str = "\
@@ -141,6 +149,20 @@ Run the engine's integrity check on the hub database and every session brain
 and project knowledge file, verify a backup manifest when one is present, and
 report artifact blobs the store names but the tree is missing. Exits non-zero
 on any failure.
+";
+
+const MIGRATE_USAGE: &str = "\
+usage:
+  agent-hub migrate --check [--data-dir DIR]
+
+Plan the members upgrade for the store under the data directory and write
+nothing to it: where each old owner label would land, which live sessions of
+one name would merge, and what would stop the upgrade. A store older than the
+last release is copied into the cache and planned there, and the copy is
+removed after.
+
+Exit 0 when the upgrade would run, 78 when something stops it, 75 when a hub is
+serving the store (run it on a copy, or after stopping the hub).
 ";
 
 const HEALTH_USAGE: &str = "\
@@ -313,6 +335,9 @@ fn main() -> ExitCode {
         Some("setup") => setup(&args[1..]),
         Some("config") => config_cmd(&args[1..]),
         Some("enrol") => enrol(&args[1..]),
+        Some("token") => token(&args[1..]),
+        Some("trust") => trust(&args[1..]),
+        Some("migrate") => migrate_cmd(&args[1..]),
         Some("backup") => backup_cmd(&args[1..]),
         Some("restore") => restore_cmd(&args[1..]),
         Some("check") => check_cmd(&args[1..]),
@@ -393,6 +418,11 @@ fn usage_of(command: &str) -> Option<&'static str> {
         "config" => CONFIG_USAGE,
         #[cfg(feature = "client")]
         "enrol" => agent_hub::client::enrol::ENROL_USAGE,
+        #[cfg(feature = "client")]
+        "token" => agent_hub::client::cli::TOKEN_USAGE,
+        #[cfg(feature = "client")]
+        "trust" => agent_hub::client::cli::TRUST_USAGE,
+        "migrate" => MIGRATE_USAGE,
         "backup" => BACKUP_USAGE,
         "restore" => RESTORE_USAGE,
         "check" => CHECK_USAGE,
@@ -926,8 +956,23 @@ fn serve() -> Result<()> {
     }
 }
 
-/// Serve MCP on stdio: a proxy to a running hub, or the embedded hub.
+/// Serve MCP on stdio: a proxy to the hub the settings name, or with
+/// `--embedded` the local store.
 fn mcp(args: &[String]) -> ExitCode {
+    if args.iter().any(|arg| arg == "--proxy") {
+        eprintln!("agent-hub mcp: --proxy is the default now and is ignored");
+    }
+    if args.iter().any(|arg| arg == "--embedded") {
+        // The two modes differ in who the caller is: embedded stdio is the
+        // local human admin over the whole data directory, where the proxy is
+        // whatever the hub resolves the token to. So the mode a caller got is
+        // said out loud.
+        eprintln!(
+            "agent-hub mcp: standalone against the local data directory, as the local admin; \
+             leave out --embedded to reach a running hub as a member instead"
+        );
+        return report(embedded());
+    }
     let client = match ClientConfig::from_env() {
         Ok(client) => client,
         Err(err) => {
@@ -938,20 +983,11 @@ fn mcp(args: &[String]) -> ExitCode {
     if client.url.is_some() {
         return proxy(client);
     }
-    let proxy_only = args.iter().any(|arg| arg == "--proxy")
-        || std::env::var("HUB_MODE").is_ok_and(|mode| mode.eq_ignore_ascii_case("proxy"));
-    if proxy_only {
-        eprintln!("agent-hub mcp: no hub configured: set HUB_URL or [client].url");
-        return ExitCode::from(78);
-    }
-    // The two modes differ in who the caller is: embedded stdio is the local
-    // human admin over the whole data directory, where the proxy is whatever
-    // the hub resolves the token to. So the mode a caller got is said out loud.
     eprintln!(
-        "agent-hub mcp: standalone against the local data directory, as the local admin; \
-         set HUB_URL to reach a running hub as the token's agent instead"
+        "agent-hub mcp: no hub configured: set HUB_URL, run agent-hub enrol --url <hub>, or pass \
+         --embedded for the local store"
     );
-    report(embedded())
+    ExitCode::from(78)
 }
 
 /// Serve the embedded MCP surface over the local data directory.
@@ -966,7 +1002,8 @@ fn embedded() -> Result<()> {
     match result {
         Ok(()) => Ok(()),
         Err(err) if err.is_locked() => Err(Error::Conflict(
-            "a hub is already using this directory; set HUB_URL to reach it instead".to_string(),
+            "a hub is already using this directory; leave out --embedded to reach it instead"
+                .to_string(),
         )),
         Err(err) => Err(err),
     }
@@ -1848,6 +1885,165 @@ fn enrol(_args: &[String]) -> ExitCode {
     without_client()
 }
 
+#[cfg(feature = "client")]
+fn token(args: &[String]) -> ExitCode {
+    ExitCode::from(agent_hub::client::cli::run_token(args))
+}
+
+#[cfg(feature = "client")]
+fn trust(args: &[String]) -> ExitCode {
+    ExitCode::from(agent_hub::client::cli::run_trust(args))
+}
+
+#[cfg(not(feature = "client"))]
+fn token(_args: &[String]) -> ExitCode {
+    without_client()
+}
+
+#[cfg(not(feature = "client"))]
+fn trust(_args: &[String]) -> ExitCode {
+    without_client()
+}
+
+/// Plan the members upgrade without changing the store.
+fn migrate_cmd(args: &[String]) -> ExitCode {
+    let mut check = false;
+    let mut data_dir: Option<String> = None;
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--check" => check = true,
+            "--data-dir" => match iter.next() {
+                Some(value) => data_dir = Some(value.clone()),
+                None => {
+                    eprintln!("agent-hub migrate: --data-dir needs a value");
+                    return ExitCode::from(2);
+                }
+            },
+            other => {
+                eprintln!("agent-hub migrate: unknown option '{other}'");
+                eprint!("{MIGRATE_USAGE}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    if !check {
+        eprintln!(
+            "agent-hub migrate: only --check is available; the upgrade runs when the hub starts"
+        );
+        eprint!("{MIGRATE_USAGE}");
+        return ExitCode::from(2);
+    }
+    let data_dir = match ops_data_dir(data_dir) {
+        Ok(dir) => dir,
+        Err(message) => {
+            eprintln!("agent-hub: {message}");
+            return ExitCode::from(78);
+        }
+    };
+    let runtime = match runtime() {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            eprintln!("agent-hub: {err}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let staging = migrate_staging_root();
+    let outcome = runtime.block_on(agent_hub::store::migrate::check(&data_dir, &staging));
+    // The check removes its own copy; the dated folder around it is ours.
+    let _ = std::fs::remove_dir(&staging);
+    match outcome {
+        Ok(plan) => {
+            print_plan(&data_dir, &plan);
+            if plan.is_clean() {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(78)
+            }
+        }
+        Err(err) if err.is_locked() => {
+            eprintln!(
+                "agent-hub migrate: a hub is serving {}; run --check on a copy of the data \
+                 directory, or stop the hub first",
+                data_dir.display()
+            );
+            ExitCode::from(75)
+        }
+        Err(err) => {
+            eprintln!("agent-hub migrate: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `${XDG_CACHE_HOME:-~/.cache}/agent-hub/migrate-check/<stamp>/`, made now.
+fn migrate_staging_root() -> PathBuf {
+    let base = std::env::var_os("XDG_CACHE_HOME")
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+        .unwrap_or_else(std::env::temp_dir);
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let dir = base
+        .join("agent-hub")
+        .join("migrate-check")
+        .join(format!("{stamp}-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+fn print_plan(data_dir: &std::path::Path, plan: &agent_hub::store::migrate::Plan) {
+    use agent_hub::store::migrate::Placement;
+    println!(
+        "migrate --check: {} at schema version {}",
+        data_dir.display(),
+        plan.from_version
+    );
+    println!("labels: {}", plan.labels.len());
+    for placed in &plan.labels {
+        let target = match &placed.placement {
+            Placement::Participant { member, agent } => {
+                format!(
+                    "participant {member} / {}",
+                    if agent.is_empty() {
+                        "(any agent)"
+                    } else {
+                        agent
+                    }
+                )
+            }
+            Placement::Local { agent } => format!("local / {agent}"),
+            Placement::Human { .. } => "human".to_string(),
+            Placement::Drop => "dropped".to_string(),
+            Placement::Unplaced => "UNPLACED".to_string(),
+        };
+        println!(
+            "  {:<24} -> {target}  ({} sessions, {} cursors, {} subscriptions)",
+            placed.label, placed.sessions, placed.cursors, placed.subscriptions
+        );
+    }
+    println!("merge groups: {}", plan.groups.len());
+    for group in &plan.groups {
+        println!(
+            "  {}/{}: keep {}, merge {}",
+            group.project_id,
+            group.session_name,
+            group.survivor,
+            group.losers.join(", ")
+        );
+    }
+    if plan.stops.is_empty() {
+        println!("clean: the upgrade would run");
+    } else {
+        println!("stops: {}", plan.stops.len());
+        for stop in &plan.stops {
+            println!("  {stop}");
+        }
+    }
+}
+
 #[cfg(not(feature = "client"))]
 fn without_client() -> ExitCode {
     eprintln!("agent-hub: this binary was built without the client feature");
@@ -1918,6 +2114,12 @@ fn runtime() -> Result<tokio::runtime::Runtime> {
 fn report(result: Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
+        // An upgrade the store cannot take changed nothing: 78 tells a service
+        // manager that the configuration, not the process, needs the operator.
+        Err(err) if agent_hub::store::migrate::is_stop(&err) => {
+            eprintln!("agent-hub: {err}");
+            ExitCode::from(78)
+        }
         Err(err) => {
             eprintln!("agent-hub: {err}");
             ExitCode::FAILURE

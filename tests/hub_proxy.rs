@@ -196,71 +196,70 @@ fn a_legacy_client_keeps_the_legacy_result_shape() {
     );
 }
 
+/// The session a call names, which is how the hub knows where a write lands.
+fn in_session(name: &str) -> Value {
+    json!({"project_id": PROJECT, "name": name})
+}
+
 #[test]
 fn a_proxy_outlives_a_hub_restart() {
     let mut hub = Hub::start("proxy-restart");
     let mut proxy = proxy(&hub);
     proxy.initialize();
     let before = proxy.call_tool("whoami", json!({}));
-    assert_eq!(structured(&before)["actor"], AGENT, "{before}");
-    let started = proxy.call_tool(
-        "session_start",
-        json!({"project_id": PROJECT, "session_name": "long-run"}),
-    );
-    assert!(started.get("error").is_none(), "{started}");
-    let session_id = structured(&started)["session_id"]
-        .as_str()
-        .unwrap_or_else(|| panic!("session_start returns an id: {started}"))
-        .to_string();
+    assert_eq!(structured(&before)["member"], AGENT, "{before}");
     let noted = proxy.call_tool(
         "brain_put",
-        json!({"store": "session", "path": "/fs/plan.md", "content": "step two is next"}),
+        json!({
+            "session": in_session("long-run"),
+            "store": "session",
+            "path": "/fs/plan.md",
+            "content": "step two is next",
+        }),
     );
     assert!(noted.get("error").is_none(), "{noted}");
+    let session_id = structured(&noted)["session"]["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the write names its session: {noted}"))
+        .to_string();
 
     hub.stop();
     let down = proxy.call_tool("whoami", json!({}));
     assert!(
-        down.get("error").is_some(),
+        down.get("error").is_some() || down["result"]["isError"] == json!(true),
         "a call while the hub is down is an error, not a hang: {down}"
     );
     hub.start_again();
 
     // The harness owns this process and will not start it again, so a proxy
     // that answered every later call with the same error would be dead for the
-    // rest of the agent's run. The hub forgot the connection; the proxy makes
-    // a new one and the call goes through.
+    // rest of the agent's run. The proxy opens a new connection and the call
+    // goes through, and the session the call names is the one on disk.
     let after = proxy.call_tool("whoami", json!({}));
     assert_eq!(
-        structured(&after)["actor"],
+        structured(&after)["member"],
         AGENT,
         "the first call after the restart is answered by the hub: {after}"
     );
-
-    // The hub kept which session a connection was on in memory, so that is
-    // gone. The proxy remembers the session_start it forwarded and replays it
-    // on the new connection, so the write lands in the same session brain.
-    let plan = proxy.call_tool("brain_get", json!({"path": "/fs/plan.md"}));
-    assert_eq!(
-        structured(&plan)["content"],
-        "step two is next",
-        "the session is bound again with no new session_start: {plan}"
+    let plan = proxy.call_tool(
+        "brain_get",
+        json!({"session": in_session("long-run"), "store": "session", "path": "/fs/plan.md"}),
     );
+    assert_eq!(structured(&plan)["content"], "step two is next", "{plan}");
     let more = proxy.call_tool(
         "brain_put",
-        json!({"store": "session", "path": "/fs/after.md", "content": "written after the restart"}),
+        json!({
+            "session": in_session("long-run"),
+            "store": "session",
+            "path": "/fs/after.md",
+            "content": "written after the restart",
+        }),
     );
     assert!(more.get("error").is_none(), "{more}");
-    let after_put = proxy.call_tool("brain_get", json!({"path": "/fs/after.md"}));
-    assert_eq!(
-        structured(&after_put)["content"],
-        "written after the restart",
-        "{after_put}"
-    );
     let listing = hub.admin_get(&format!("/api/v1/sessions/{session_id}/brain"));
     assert!(
         listing.contains("/fs/after.md"),
-        "the replayed write landed in the session the agent started: {listing}"
+        "the write landed in the session the call named: {listing}"
     );
 }
 
@@ -272,24 +271,24 @@ fn refusal_reason(message: &Value) -> String {
 }
 
 #[test]
-fn a_refusal_for_want_of_a_session_carries_a_reason() {
+fn a_session_store_write_with_no_session_carries_a_reason() {
     let hub = Hub::start("proxy-reason");
     let mut proxy = proxy(&hub);
     proxy.initialize();
 
     let refused = proxy.call_tool(
         "brain_put",
-        json!({"store": "session", "path": "/fs/x.md", "content": "no session yet"}),
+        json!({"store": "session", "path": "/fs/x.md", "content": "no session named"}),
     );
-    assert_eq!(refusal_reason(&refused), "no_active_session", "{refused}");
+    assert_eq!(refusal_reason(&refused), "session_required", "{refused}");
     assert_eq!(
-        refused["error"]["data"]["error"]["code"], "conflict",
+        refused["error"]["data"]["error"]["code"], "invalid_argument",
         "{refused}"
     );
 }
 
 #[test]
-fn an_ended_session_is_not_reactivated_by_a_later_call() {
+fn an_ended_session_takes_no_write() {
     let hub = Hub::start("proxy-ended");
     let mut proxy = proxy(&hub);
     proxy.initialize();
@@ -301,14 +300,22 @@ fn an_ended_session_is_not_reactivated_by_a_later_call() {
         .as_str()
         .unwrap_or_else(|| panic!("session_start returns an id: {started}"))
         .to_string();
-    let ended = proxy.call_tool("session_end", json!({"session_id": session_id}));
+    let ended = proxy.call_tool(
+        "session_end",
+        json!({"session": {"session_id": session_id}}),
+    );
     assert!(ended.get("error").is_none(), "{ended}");
 
     let refused = proxy.call_tool(
         "brain_put",
-        json!({"store": "session", "path": "/fs/late.md", "content": "after the end"}),
+        json!({
+            "session": in_session("short-run"),
+            "store": "session",
+            "path": "/fs/late.md",
+            "content": "after the end",
+        }),
     );
-    assert_eq!(refusal_reason(&refused), "no_active_session", "{refused}");
+    assert_eq!(refusal_reason(&refused), "session_ended", "{refused}");
     let listing = hub.admin_get(&format!("/api/v1/sessions/{session_id}/brain"));
     assert!(
         !listing.contains("/fs/late.md"),
@@ -317,7 +324,7 @@ fn an_ended_session_is_not_reactivated_by_a_later_call() {
 }
 
 #[test]
-fn a_forked_session_is_replayed_as_a_resume_after_a_restart() {
+fn a_forked_session_takes_the_writes_that_name_it() {
     let mut hub = Hub::start("proxy-fork");
     let mut proxy = proxy(&hub);
     proxy.initialize();
@@ -342,14 +349,19 @@ fn a_forked_session_is_replayed_as_a_resume_after_a_restart() {
         .as_str()
         .unwrap_or_else(|| panic!("session_start returns an id: {child}"))
         .to_string();
-    assert_ne!(child_id, origin_id, "the pickup made a session of its own");
+    assert_ne!(child_id, origin_id, "the fork made a session of its own");
 
     hub.stop();
     hub.start_again();
 
     let written = proxy.call_tool(
         "brain_put",
-        json!({"store": "session", "path": "/fs/fork.md", "content": "after the restart"}),
+        json!({
+            "session": in_session("child"),
+            "store": "session",
+            "path": "/fs/fork.md",
+            "content": "after the restart",
+        }),
     );
     assert!(written.get("error").is_none(), "{written}");
     let listing = hub.admin_get(&format!("/api/v1/sessions/{child_id}/brain"));
@@ -365,67 +377,31 @@ fn a_forked_session_is_replayed_as_a_resume_after_a_restart() {
 }
 
 #[test]
-fn an_answer_drained_by_a_replay_survives_a_failed_retry() {
-    let mut hub = Hub::start("proxy-failed-retry");
-    let mut proxy = proxy(&hub);
-    proxy.initialize();
-    let started = proxy.call_tool(
-        "session_start",
-        json!({"project_id": PROJECT, "session_name": "asker"}),
-    );
-    assert!(started.get("error").is_none(), "{started}");
-    let asked = proxy.call_tool(
-        "question_post",
-        json!({"project_id": PROJECT, "subject": "Ship it?", "body": "Ready."}),
-    );
-    let question_id = structured(&asked)["question_id"]
-        .as_str()
-        .unwrap_or_else(|| panic!("question_post returns an id: {asked}"))
-        .to_string();
-    let answered = common::wire::rest(
-        hub.port,
-        "POST",
-        &format!("/api/v1/questions/{question_id}/answer"),
-        Some(common::hub::ADMIN_TOKEN),
-        Some(r#"{"body":"Yes"}"#),
-    );
-    assert_eq!(answered.status, 200, "{}", answered.raw);
-
-    hub.stop();
-    hub.start_again();
-
-    let missing = proxy.call_tool("brain_get", json!({"path": "/fs/missing.md"}));
-    assert_eq!(
-        missing["error"]["data"]["notifications"]["pending"][0]["kind"], "question_answered",
-        "the answer the replay drained is on the failed call: {missing}"
-    );
-}
-
-#[test]
-fn one_proxy_process_holds_one_session_through_the_hub() {
+fn one_proxy_process_reads_back_what_it_wrote_through_the_hub() {
     let hub = Hub::start("proxy-session");
     let mut proxy = proxy(&hub);
     proxy.initialize();
-
-    let started = proxy.call_tool(
-        "session_start",
-        json!({"project_id": PROJECT, "session_name": "hook-run"}),
-    );
-    let session_id = structured(&started)["session_id"]
-        .as_str()
-        .unwrap_or_else(|| panic!("session_start returns an id: {started}"))
-        .to_string();
+    let session = in_session("hook-run");
 
     let written = proxy.call_tool(
         "brain_put",
-        json!({"store": "session", "path": "/fs/handoff.md", "content": "picked up where I left off"}),
+        json!({
+            "session": session,
+            "store": "session",
+            "path": "/fs/handoff.md",
+            "content": "picked up where I left off",
+        }),
     );
-    assert!(
-        written.get("error").is_none(),
-        "a write on the session the same process started: {written}"
-    );
+    assert!(written.get("error").is_none(), "{written}");
+    let session_id = structured(&written)["session"]["id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("the write names its session: {written}"))
+        .to_string();
 
-    let read = proxy.call_tool("brain_get", json!({"path": "/fs/handoff.md"}));
+    let read = proxy.call_tool(
+        "brain_get",
+        json!({"session": session, "store": "session", "path": "/fs/handoff.md"}),
+    );
     assert_eq!(
         structured(&read)["content"],
         "picked up where I left off",
@@ -450,7 +426,10 @@ fn a_tool_error_comes_back_as_the_hubs_own() {
         json!({"project_id": PROJECT, "session_name": "errors"}),
     );
 
-    let missing = proxy.call_tool("brain_get", json!({"path": "/fs/absent.md"}));
+    let missing = proxy.call_tool(
+        "brain_get",
+        json!({"session": in_session("errors"), "store": "session", "path": "/fs/absent.md"}),
+    );
 
     let error = missing
         .get("error")
@@ -476,34 +455,41 @@ fn an_unknown_subcommand_is_a_usage_error() {
     assert_eq!(status.code(), Some(2), "an unknown subcommand exits 2");
 }
 
+/// A hub that cannot be reached does not stop the proxy: it answers the
+/// client's handshake itself and says why on its one local tool.
 #[test]
-fn an_unreachable_hub_is_named_and_exits_69() {
+fn an_unreachable_hub_is_named_by_the_local_whoami() {
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .expect("bind a free port")
         .local_addr()
         .expect("local addr")
         .port();
+    let url = format!("http://127.0.0.1:{port}");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_agent-hub"))
-        .arg("mcp")
-        .env("RUST_LOG", "error")
-        .env("HUB_URL", format!("http://127.0.0.1:{port}"))
-        .env("HUB_TOKEN", "no-hub-there")
-        .env("HUB_CONFIG", "/nonexistent/agent-hub/config")
-        .stdin(std::process::Stdio::null())
-        .output()
-        .expect("run the binary");
-
-    assert_eq!(output.status.code(), Some(69), "a dead hub exits 69");
-    assert!(
-        output.stdout.is_empty(),
-        "nothing is written to stdout: {:?}",
-        String::from_utf8_lossy(&output.stdout)
+    let mut proxy = StdioClient::spawn(
+        &["mcp"],
+        &[
+            ("HUB_URL", url.clone()),
+            ("HUB_TOKEN", "no-hub-there".to_string()),
+            ("HUB_CONFIG", "/nonexistent/agent-hub/config".to_string()),
+        ],
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let reported: Value = stderr
-        .lines()
-        .find_map(|line| serde_json::from_str(line).ok())
-        .unwrap_or_else(|| panic!("the failure is reported as JSON on stderr: {stderr}"));
-    assert_eq!(reported["error"]["code"], "unavailable", "{stderr}");
+    let init = proxy.initialize();
+    assert_eq!(init["result"]["serverInfo"]["name"], "agent-hub", "{init}");
+    assert_eq!(
+        init["result"]["capabilities"]["tools"]["listChanged"],
+        json!(true),
+        "{init}"
+    );
+    let listed = proxy.call("tools/list", json!({}));
+    let names: Vec<&str> = listed["result"]["tools"]
+        .as_array()
+        .unwrap_or_else(|| panic!("tools/list returns an array: {listed}"))
+        .iter()
+        .filter_map(|tool| tool["name"].as_str())
+        .collect();
+    assert_eq!(names, ["whoami"], "{listed}");
+    let who = proxy.call_tool("whoami", json!({}));
+    assert_eq!(structured(&who)["state"], "offline", "{who}");
+    assert_eq!(structured(&who)["hub_url"], url, "{who}");
 }
