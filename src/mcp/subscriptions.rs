@@ -1,15 +1,16 @@
-//! Standing subscriptions: an agent registers what it wants to be told about.
+//! Standing subscriptions: a participant registers what it wants to be told
+//! about.
 //!
 //! Polling is the alternative and every harness then keeps its own timer and
 //! cursor. A subscription is the same read the feed already offers, kept on the
 //! hub's side and delivered through the notification trailer, so the agent
 //! holds no state and reports nothing twice.
 //!
-//! The caller owns its rows: they are keyed by the resolved actor, never the
-//! token, so a rotated token keeps its place, and no agent reads or removes
-//! another's. A subscription reports feed events, so the project it is scoped
-//! to must be one the caller may read, checked when it is registered and again
-//! on every drain.
+//! The caller owns its rows: they are keyed by the participant (member and
+//! agent), never the token, so a rotated token keeps its place, and no
+//! participant reads or removes another's. A subscription reports feed events,
+//! so the project it is scoped to must be one the caller may read, checked when
+//! it is registered and again on every drain.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
@@ -19,13 +20,14 @@ use rmcp::{RoleServer, tool, tool_router};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::error::Error;
+use crate::author::{AuthorFilter, ParticipantKey};
+use crate::error::{Error, SessionReason};
 use crate::policy::{self, Access};
 use crate::store::events;
-use crate::store::subscriptions::{self, DRAIN_LIMIT, Subscription};
+use crate::store::subscriptions::{self, DRAIN_LIMIT, NewSubscription, Subscription};
 
-use super::brain::SessionRef;
-use super::notifications::Entry;
+use super::notifications::{Advance, Entry};
+use super::session_arg::{Mode, SessionArg};
 use super::{HubServer, to_error_data};
 
 /// The kinds an agent may subscribe to. `session` and `system` are the hub's
@@ -35,10 +37,19 @@ const SUBSCRIBABLE_KINDS: &[&str] = &[
     "comment", "page",
 ];
 
+/// Who a subscription reports: events by this member, by this agent, or both.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
+struct AuthorArg {
+    #[serde(default)]
+    member: Option<String>,
+    #[serde(default)]
+    agent: Option<String>,
+}
+
 #[tool_router(router = subscriptions_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Ask to be told about events of these kinds instead of polling for them. kinds is a comma-separated list from signal, finished, approval, question, answer, artifact, anchor, score, idea, comment, and page; an empty list or a kind outside that set is refused. project_id is optional and scopes the subscription to one project; omitted means every project you may read. The subscription starts at the newest matching event, so nothing from before it is reported, and returns its subscription_id, its cursor, created and the session_id it is bound to. It is bound to the session you name in session, else this connection's active session, else to none, which serves every session of yours; subscribing the same shape again returns the existing subscription with created false. about_self keeps only events that name you in their audience: comments on artifacts and pages you worked on, and edits to a page you wrote last. Matching events are delivered through the notifications member of a later tool result."
+        description = "Ask to be told about events of these kinds instead of polling for them. kinds is a comma-separated list from signal, finished, approval, question, answer, artifact, anchor, score, idea, comment, and page; an empty list or a kind outside that set is refused. project_id is optional and scopes the subscription to one project; omitted means every project you may read. The subscription starts at the newest matching event, so nothing from before it is reported, and returns its subscription_id, its cursor, created and the session_id it is bound to. It is bound to the session you name in session, else to none, which serves every session of yours; subscribing the same shape again returns the existing subscription with created false. author narrows it to events by a member, an agent, or both. exclude_self drops your own events (your member and agent). about_self keeps only events that name you in their audience: comments on artifacts and pages your session or you worked on, and edits to a page you wrote last. Matching events are delivered through the notifications member of a later tool result."
     )]
     async fn notify_subscribe(
         &self,
@@ -47,10 +58,32 @@ impl HubServer {
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let kinds = parse_kinds(&params.kinds).map_err(to_error_data)?;
         let principal = self.principal(&context);
-        let session = self
-            .subscribe_scope(&principal, params.session.as_ref())
+        let key = member_key(&principal).map_err(to_error_data)?;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                params.project_id.as_deref(),
+                Mode::Read,
+            )
             .await
             .map_err(to_error_data)?;
+        // A subscription is bound to a running session: naming one that has
+        // ended is refused rather than quietly bound to none.
+        if let Some(session) = resolved.session.as_ref()
+            && resolved.scope_id().is_none()
+        {
+            return Err(to_error_data(Error::Session(
+                SessionReason::Ended,
+                format!(
+                    "session '{}' is not running; call session_start to reopen it",
+                    session.session_name
+                ),
+                None,
+            )));
+        }
+        let session = resolved.scope_id().map(str::to_string);
         if let Some(project_id) = &params.project_id {
             policy::authorize(&self.state.db, &principal, project_id, Access::Read)
                 .await
@@ -59,26 +92,34 @@ impl HubServer {
         let visible = policy::visibility(&self.state.db, &principal)
             .await
             .map_err(to_error_data)?;
+        let author = params
+            .author
+            .as_ref()
+            .map(|author| AuthorFilter {
+                member: author.member.clone(),
+                agent: author.agent.as_deref().map(crate::agent_name::canonical),
+                ..AuthorFilter::default()
+            })
+            .unwrap_or_default();
         let cursor = newest_matching(
             &self.state.db,
             &visible,
             params.project_id.as_deref(),
             &kinds,
-            params.actor.as_deref(),
-            params.exclude_self,
-            &principal.actor,
+            &author,
+            params.exclude_self.then_some(&key),
         )
         .await
         .map_err(to_error_data)?;
-        let registered = subscriptions::create_with_filters(
+        let registered = subscriptions::register(
             &self.state.db,
-            &principal.actor,
-            session.as_deref(),
-            params.project_id.as_deref(),
-            &kinds,
-            &cursor,
-            subscriptions::Filters {
-                actor: params.actor.as_deref(),
+            &key,
+            &NewSubscription {
+                session_id: session.as_deref(),
+                project_id: params.project_id.as_deref(),
+                kinds: &kinds,
+                last_seen_event_id: &cursor,
+                author,
                 exclude_self: params.exclude_self,
                 about_self: params.about_self,
             },
@@ -95,7 +136,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Stop a subscription you registered, by its subscription_id. Returns removed true when it went. An id that does not exist or is not yours is refused as not_found, which is also what another agent's subscription returns."
+        description = "Stop a subscription you registered, by its subscription_id. Returns removed true when it went. An id that does not exist or is not yours is refused as not_found, which is also what another participant's subscription returns."
     )]
     async fn notify_unsubscribe(
         &self,
@@ -103,10 +144,21 @@ impl HubServer {
         Parameters(params): Parameters<NotifyUnsubscribeParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let removed =
-            subscriptions::delete(&self.state.db, &principal.actor, &params.subscription_id)
+        self.resolve_session(
+            &context,
+            &principal,
+            params.session.as_ref(),
+            None,
+            Mode::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
+        let removed = match principal.participant() {
+            Some(key) => subscriptions::delete_for(&self.state.db, &key, &params.subscription_id)
                 .await
-                .map_err(to_error_data)?;
+                .map_err(to_error_data)?,
+            None => false,
+        };
         if !removed {
             return Err(to_error_data(Error::NotFound(format!(
                 "subscription {} not found",
@@ -122,11 +174,24 @@ impl HubServer {
     async fn notify_list(
         &self,
         context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<crate::mcp::SessionOnlyParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let owned = subscriptions::list(&self.state.db, &principal.actor)
-            .await
-            .map_err(to_error_data)?;
+        self.resolve_session(
+            &context,
+            &principal,
+            params.session.as_ref(),
+            None,
+            Mode::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
+        let owned = match principal.participant() {
+            Some(key) => subscriptions::list_for(&self.state.db, &key, None)
+                .await
+                .map_err(to_error_data)?,
+            None => Vec::new(),
+        };
         let items: Vec<Value> = owned
             .into_iter()
             .map(|row| {
@@ -137,6 +202,7 @@ impl HubServer {
                     "cursor": row.last_seen_event_id,
                     "session_id": row.session_id,
                     "about_self": row.about_self,
+                    "exclude_self": row.exclude_self,
                     "created_at": row.created_at,
                 })
             })
@@ -147,7 +213,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Wait for a relevant update, then return it, instead of polling. Blocks until something is pending for the caller (an answer to one of its questions, a decision on one of its approvals, or a subscribed feed event), or wait_seconds elapses (30 by default, 60 at most). The returned `notifications` member has the same shape as the one on an ordinary tool result and is delivered once; its cursors are advanced by the read. `wait_seconds: 0` polls once. What is delivered is the scope of a session: name one of your own running sessions in session, or omit it for this connection's active session. An idle agent that is not waiting on an answer can call this instead of waking on a timer."
+        description = "Wait for a relevant update, then return it, instead of polling. Blocks until something is pending for the caller (an answer to a question asked in its session, a decision on an approval, a comment that names it, or a subscribed feed event), or wait_seconds elapses (30 by default, 60 at most). The returned `notifications` member has the same shape as the one on an ordinary tool result and is delivered once; its cursors are advanced by the read. `wait_seconds: 0` polls once. What is delivered is the scope of the session you name in session. An idle agent that is not waiting on an answer can call this instead of waking on a timer."
     )]
     async fn notify_wait(
         &self,
@@ -155,10 +221,17 @@ impl HubServer {
         Parameters(params): Parameters<NotifyWaitParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let session = self
-            .notify_scope(&principal, params.session.as_ref())
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                None,
+                Mode::Read,
+            )
             .await
             .map_err(to_error_data)?;
+        let session = resolved.scope_id().map(str::to_string);
         let wait = params
             .wait_seconds
             .unwrap_or(DEFAULT_WAIT_SECONDS)
@@ -168,9 +241,7 @@ impl HubServer {
         // and listening.
         let mut ticker = self.state.ticker.subscribe();
 
-        if let Some(trailer) =
-            super::notifications::trailer(&self.state, &principal, session.as_deref()).await
-        {
+        if let Some(trailer) = self.drain_selecting(&principal, session.as_deref()).await {
             return Ok(delivered(trailer));
         }
         if wait == 0 {
@@ -180,9 +251,7 @@ impl HubServer {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(wait);
 
         loop {
-            if let Some(trailer) =
-                super::notifications::trailer(&self.state, &principal, session.as_deref()).await
-            {
+            if let Some(trailer) = self.drain_selecting(&principal, session.as_deref()).await {
                 return Ok(delivered(trailer));
             }
 
@@ -208,6 +277,40 @@ impl HubServer {
     }
 }
 
+impl HubServer {
+    /// Drain the caller's pending items, selecting again when another call
+    /// delivered the page first: a wait that lost a race still finds what
+    /// came after it.
+    async fn drain_selecting(
+        &self,
+        principal: &crate::principal::Principal,
+        session: Option<&str>,
+    ) -> Option<Value> {
+        use super::notifications::{Drained, drain};
+        for _ in 0..RESELECT_MAX {
+            match drain(&self.state, principal, session).await {
+                Drained::Delivered(trailer) => return Some(trailer),
+                Drained::Nothing => return None,
+                Drained::Raced => {}
+            }
+        }
+        None
+    }
+}
+
+/// How often one wait selects again after losing a delivery race.
+const RESELECT_MAX: usize = 5;
+
+/// The delivery key of a caller that has a cursor. The human reads the app,
+/// not a queue, so the admin token has none.
+fn member_key(principal: &crate::principal::Principal) -> crate::error::Result<ParticipantKey> {
+    principal.participant().ok_or_else(|| {
+        Error::Forbidden(
+            "subscriptions belong to a member's agent; the admin token has none".to_string(),
+        )
+    })
+}
+
 /// The result of a wait that found something.
 fn delivered(trailer: Value) -> CallToolResult {
     CallToolResult::structured(json!({ "notifications": trailer }))
@@ -216,8 +319,8 @@ fn delivered(trailer: Value) -> CallToolResult {
 /// The result of a wait that found nothing.
 ///
 /// It names an empty `notifications` member rather than leaving it out: a result
-/// without one gets the connection's own trailer, which reads the connection's
-/// scope and not the one the wait was asked about.
+/// without one gets the call's own trailer, which reads the call's scope and
+/// not the one the wait was asked about.
 fn nothing_pending() -> CallToolResult {
     delivered(json!({ "pending": [] }))
 }
@@ -226,12 +329,13 @@ fn nothing_pending() -> CallToolResult {
 /// stands once it is delivered.
 pub(crate) struct Read {
     pub entries: Vec<Entry>,
-    /// Each subscription read and the newest event id scanned in it.
-    pub cursors: Vec<(String, String)>,
-    /// Each subscription and the newest event id that is safe to pass without
-    /// delivering anything: the last of the events before its first reportable
-    /// one that it could never report.
-    pub skips: Vec<(String, String)>,
+    /// Each subscription read, the move its cursor makes once the entries are
+    /// delivered, and the entries it found.
+    pub pages: Vec<(Advance, Vec<Entry>)>,
+    /// Each subscription and the move that is safe without delivering anything:
+    /// to the last of the events before its first reportable one that it could
+    /// never report.
+    pub skips: Vec<Advance>,
 }
 
 /// The most pages one subscription walks in a single read.
@@ -259,9 +363,13 @@ pub(crate) async fn read(
     session: Option<&str>,
     floor: Option<&str>,
 ) -> Option<Read> {
-    let owned = subscriptions::list_in_scope(&state.db, &principal.actor, session)
+    let key = principal.participant()?;
+    let owned: Vec<Subscription> = subscriptions::list_for(&state.db, &key, None)
         .await
-        .ok()?;
+        .ok()?
+        .into_iter()
+        .filter(|row| row.session_id.is_none() || row.session_id.as_deref() == session)
+        .collect();
     if owned.is_empty() {
         return None;
     }
@@ -277,18 +385,29 @@ pub(crate) async fn read(
 
     let mut read = Read {
         entries: Vec::new(),
-        cursors: Vec::new(),
+        pages: Vec::new(),
         skips: Vec::new(),
     };
     for subscription in owned {
-        match scan(state, principal, &subscription, &visible, floor).await {
+        match scan(state, principal, &key, &subscription, &visible, floor).await {
             Ok(scanned) => {
-                read.entries.extend(scanned.entries);
-                if let Some(cursor) = scanned.cursor {
-                    read.cursors.push((subscription.id.clone(), cursor));
+                read.entries.extend(scanned.entries.iter().cloned());
+                if let Some(to) = scanned.cursor {
+                    read.pages.push((
+                        Advance {
+                            id: subscription.id.clone(),
+                            from: subscription.last_seen_event_id.clone(),
+                            to,
+                        },
+                        scanned.entries,
+                    ));
                 }
-                if let Some(skip) = scanned.skip {
-                    read.skips.push((subscription.id.clone(), skip));
+                if let Some(to) = scanned.skip {
+                    read.skips.push(Advance {
+                        id: subscription.id.clone(),
+                        from: subscription.last_seen_event_id.clone(),
+                        to,
+                    });
                 }
             }
             // A read rides along with a call the caller made for something
@@ -312,10 +431,16 @@ struct Scanned {
     skip: Option<String>,
 }
 
+/// The author filter a subscription holds.
+fn author_of(subscription: &Subscription) -> AuthorFilter {
+    subscription.author_filter.clone()
+}
+
 /// Scan one subscription from its cursor.
 async fn scan(
     state: &crate::app::AppState,
     principal: &crate::principal::Principal,
+    key: &ParticipantKey,
     subscription: &Subscription,
     visible: &policy::Visibility,
     floor: Option<&str>,
@@ -335,6 +460,7 @@ async fn scan(
     {
         return Ok(nothing);
     }
+    let author = author_of(subscription);
 
     let start = match floor {
         Some(floor) if floor > subscription.last_seen_event_id.as_str() => floor.to_string(),
@@ -362,12 +488,10 @@ async fn scan(
             // What the subscription's own filters drop it can never report. A
             // project the caller may not read is another matter: access can be
             // granted later, so such a row is not one to pass without delivery.
-            let wanted = subscription
-                .actor_filter
-                .as_ref()
-                .is_none_or(|actor| event.actor == *actor)
-                && !(subscription.exclude_self && event.actor == principal.actor)
-                && (!subscription.about_self || names_actor(event, &principal.actor));
+            let wanted = event_by(event, &author)
+                && !(subscription.exclude_self && event_is_by(event, key))
+                && (!subscription.about_self
+                    || names_participant(event, subscription.session_id.as_deref(), key));
             // An unscoped read spans every project in the store, so what the
             // caller may read is applied here.
             let readable =
@@ -375,7 +499,10 @@ async fn scan(
             if wanted && readable {
                 skipping = false;
                 entries.push(Entry {
-                    item: item(event, names_actor(event, &principal.actor)),
+                    item: item(
+                        event,
+                        names_participant(event, subscription.session_id.as_deref(), key),
+                    ),
                     key: event.id.clone(),
                 });
             } else if !wanted && skipping && entries.is_empty() {
@@ -396,14 +523,69 @@ async fn scan(
     })
 }
 
-/// Whether an event's payload lists the actor in its `audience`.
-fn names_actor(event: &events::Event, actor: &str) -> bool {
-    event
+/// Whether an event's author passes a subscription's author filter.
+fn event_by(event: &events::Event, filter: &AuthorFilter) -> bool {
+    filter.is_empty()
+        || serde_json::to_value(event).is_ok_and(|row| super::author_matches(&row, filter))
+}
+
+/// Whether the participant itself wrote the event: its member and its agent.
+/// A row with no author record is the participant's when its actor key is the
+/// member.
+fn event_is_by(event: &events::Event, key: &ParticipantKey) -> bool {
+    let filter = AuthorFilter {
+        member: Some(key.member.clone()),
+        agent: Some(key.agent.clone()),
+        ..AuthorFilter::default()
+    };
+    let Ok(row) = serde_json::to_value(event) else {
+        return false;
+    };
+    if row.get("author").is_some_and(Value::is_object) {
+        super::author_matches(&row, &filter)
+    } else {
+        event.actor == key.member
+    }
+}
+
+/// Whether an event's payload names the participant in its `audience`: its
+/// session is among the audience's sessions, or it is among its participants
+/// (an entry with no agent names every agent of its member). An older audience
+/// of bare labels names the member.
+fn names_participant(event: &events::Event, session: Option<&str>, key: &ParticipantKey) -> bool {
+    let Some(audience) = event
         .payload
         .as_ref()
         .and_then(|payload| payload.get("audience"))
-        .and_then(|audience| audience.as_array())
-        .is_some_and(|audience| audience.iter().any(|named| named == actor))
+    else {
+        return false;
+    };
+    if let Some(labels) = audience.as_array() {
+        return labels
+            .iter()
+            .any(|named| named.as_str() == Some(key.member.as_str()));
+    }
+    let in_session = session.is_some_and(|session| {
+        audience
+            .get("sessions")
+            .and_then(Value::as_array)
+            .is_some_and(|sessions| sessions.iter().any(|id| id.as_str() == Some(session)))
+    });
+    let named = audience
+        .get("participants")
+        .and_then(Value::as_array)
+        .is_some_and(|participants| {
+            participants.iter().any(|entry| {
+                let text = |field: &str| entry.get(field).and_then(Value::as_str);
+                text("member").is_some_and(|member| {
+                    key.matches(&ParticipantKey {
+                        member: member.to_string(),
+                        agent: text("agent").unwrap_or_default().to_string(),
+                    })
+                })
+            })
+        });
+    in_session || named
 }
 
 /// Whether a project is in the caller's visible set.
@@ -443,9 +625,8 @@ async fn newest_matching(
     visible: &policy::Visibility,
     project_id: Option<&str>,
     kinds: &[String],
-    actor_filter: Option<&str>,
-    exclude_self: bool,
-    caller_actor: &str,
+    author: &AuthorFilter,
+    exclude: Option<&ParticipantKey>,
 ) -> crate::error::Result<String> {
     let page = events::read_feed_scoped(
         db,
@@ -462,11 +643,8 @@ async fn newest_matching(
         .iter()
         .rfind(|event| {
             may_read(visible, &event.project_id)
-                && match actor_filter {
-                    Some(actor) => event.actor == *actor,
-                    None => true,
-                }
-                && !(exclude_self && event.actor == caller_actor)
+                && event_by(event, author)
+                && !exclude.is_some_and(|key| event_is_by(event, key))
         })
         .map(|event| event.id.clone())
         .unwrap_or_default())
@@ -514,27 +692,29 @@ struct NotifySubscribeParams {
     /// caller may read.
     #[serde(default)]
     project_id: Option<String>,
-    /// Only report events authored by this actor.
+    /// Only report events by this author: a `member`, an `agent`, or both.
     #[serde(default)]
-    actor: Option<String>,
-    /// Drop the registering agent's own events at drain time.
+    author: Option<AuthorArg>,
+    /// Drop the registering participant's own events (its member and agent) at
+    /// drain time.
     #[serde(default)]
     exclude_self: bool,
-    /// Report only events that name the registering agent in their audience,
-    /// such as a comment on an artifact the agent published.
+    /// Report only events that name the registering participant in their
+    /// audience, such as a comment on an artifact its session worked on.
     #[serde(default)]
     about_self: bool,
-    /// The session to bind the subscription to, which must be the caller's
-    /// own. Omitted, it is this connection's active session, and with none the
-    /// subscription serves every session of the agent.
+    /// The session to bind the subscription to. Omitted, the subscription
+    /// serves every session of the participant.
     #[serde(default)]
-    session: Option<SessionRef>,
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `notify_unsubscribe`.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct NotifyUnsubscribeParams {
     subscription_id: String,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `notify_wait`.
@@ -543,10 +723,9 @@ struct NotifyWaitParams {
     /// How long to wait, in seconds. 30 by default, 60 at most; 0 polls once and returns.
     #[serde(default)]
     wait_seconds: Option<u64>,
-    /// The session whose notifications to read, which must be the caller's
-    /// own. Omitted, it is this connection's active session.
+    /// The session whose notifications to read.
     #[serde(default)]
-    session: Option<SessionRef>,
+    session: Option<SessionArg>,
 }
 
 /// The default and maximum waits, in seconds, for `notify_wait`.
@@ -590,11 +769,10 @@ mod tests {
     }
 
     fn caller(actor: &str, is_admin: bool) -> Principal {
-        Principal {
-            agent_id: (!is_admin).then(|| actor.to_string()),
-            actor: actor.to_string(),
-            is_admin,
-            is_pending: false,
+        if is_admin {
+            Principal::human()
+        } else {
+            Principal::for_member(actor, "", crate::principal::CredentialState::Active)
         }
     }
 
@@ -628,9 +806,8 @@ mod tests {
             &visible,
             Some("p1"),
             &kinds,
+            &AuthorFilter::default(),
             None,
-            false,
-            &principal.actor,
         )
         .await
         .expect("cursor");
@@ -646,10 +823,13 @@ mod tests {
         session: Option<&str>,
     ) -> Option<Vec<Value>> {
         let read = read(state, principal, session, None).await?;
-        for (id, newest) in &read.cursors {
-            subscriptions::set_cursor(&state.db, id, newest)
-                .await
-                .expect("set cursor");
+        for (advance, _) in &read.pages {
+            assert!(
+                subscriptions::advance_from(&state.db, &advance.id, &advance.from, &advance.to)
+                    .await
+                    .expect("advance"),
+                "the cursor moves"
+            );
         }
         let items: Vec<Value> = read.entries.into_iter().map(|entry| entry.item).collect();
         (!items.is_empty()).then_some(items)
@@ -875,9 +1055,11 @@ mod tests {
             &visible,
             Some("p1"),
             &kinds,
-            Some("seeder"),
-            false,
-            &principal.actor,
+            &AuthorFilter {
+                member: Some("seeder".to_string()),
+                ..AuthorFilter::default()
+            },
+            None,
         )
         .await
         .expect("cursor");
@@ -960,9 +1142,8 @@ mod tests {
             &visible,
             Some("p1"),
             &kinds,
-            None,
-            true,
-            &principal.actor,
+            &AuthorFilter::default(),
+            principal.participant().as_ref(),
         )
         .await
         .expect("cursor");

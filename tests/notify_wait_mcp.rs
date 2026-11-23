@@ -73,6 +73,12 @@ impl Connection {
     }
 }
 
+/// The arguments with the call's session named by id.
+fn in_session(session_id: &str, mut arguments: Value) -> Value {
+    arguments["session"] = json!({ "session_id": session_id });
+    arguments
+}
+
 fn connect(port: u16, token: &str) -> Connection {
     let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":PROTOCOL_VERSION,"capabilities":{},"clientInfo":{"name":"x","version":"0"}}}).to_string();
     let response = mcp_post(port, &body, Some(token), None);
@@ -195,7 +201,8 @@ async fn notify_list_returns_registered_subscriptions() {
     drop(child);
 }
 
-/// Two connections of one actor, each in a session of its own.
+/// Two connections of one participant, and the two sessions they started.
+/// A call names the session it acts in; a connection holds none.
 struct Pair {
     first: Connection,
     second: Connection,
@@ -233,10 +240,13 @@ async fn a_signal_reaches_each_session_of_one_actor_once() {
     let child = HubProcess::serve(&dir, ADMIN_TOKEN, &[]);
     let pair = pair(child.port(), &token, &other_token);
 
-    for connection in [&pair.first, &pair.second] {
+    for (connection, id) in [
+        (&pair.first, &pair.first_id),
+        (&pair.second, &pair.second_id),
+    ] {
         connection.call(
             "notify_subscribe",
-            json!({"kinds":"signal","project_id":PROJECT}),
+            in_session(id, json!({"kinds":"signal","project_id":PROJECT})),
         );
     }
     pair.other.call(
@@ -245,17 +255,24 @@ async fn a_signal_reaches_each_session_of_one_actor_once() {
     );
 
     assert_eq!(
-        pair.first.delivered(json!({"wait_seconds": 0})),
+        pair.first
+            .delivered(in_session(&pair.first_id, json!({"wait_seconds": 0}))),
         vec!["for both"]
     );
     assert_eq!(
-        pair.second.delivered(json!({"wait_seconds": 0})),
+        pair.second
+            .delivered(in_session(&pair.second_id, json!({"wait_seconds": 0}))),
         vec!["for both"],
         "the first session's read did not take the second's copy"
     );
-    for connection in [&pair.first, &pair.second] {
+    for (connection, id) in [
+        (&pair.first, &pair.first_id),
+        (&pair.second, &pair.second_id),
+    ] {
         assert!(
-            connection.delivered(json!({"wait_seconds": 0})).is_empty(),
+            connection
+                .delivered(in_session(id, json!({"wait_seconds": 0})))
+                .is_empty(),
             "each session is shown it once"
         );
     }
@@ -277,7 +294,10 @@ async fn an_answer_goes_to_the_session_that_asked() {
 
     let asked = pair.first.call(
         "question_post",
-        json!({"project_id": PROJECT, "subject": "Deploy?", "body": "Ready."}),
+        in_session(
+            &pair.first_id,
+            json!({"project_id": PROJECT, "subject": "Deploy?", "body": "Ready."}),
+        ),
     );
     let answered = rest(
         pair.port,
@@ -292,20 +312,25 @@ async fn an_answer_goes_to_the_session_that_asked() {
     assert_eq!(answered.status, 200, "{}", answered.raw);
 
     assert!(
-        pair.second.delivered(json!({"wait_seconds": 0})).is_empty(),
+        pair.second
+            .delivered(in_session(&pair.second_id, json!({"wait_seconds": 0})))
+            .is_empty(),
         "the second session is not shown the first's answer"
     );
-    let plain = pair.second.call("version", json!({}));
+    let plain = pair
+        .second
+        .call("version", in_session(&pair.second_id, json!({})));
     assert!(plain.get("notifications").is_none(), "{plain}");
     assert_eq!(
-        pair.first.delivered(json!({"wait_seconds": 0})),
+        pair.first
+            .delivered(in_session(&pair.first_id, json!({"wait_seconds": 0}))),
         vec!["answered: Deploy?"]
     );
     drop(child);
 }
 
 #[tokio::test]
-async fn a_connection_with_no_lease_reads_a_session_it_names() {
+async fn a_caller_reads_the_session_it_names() {
     let dir = TempDir::new("notify-named-session");
     let db = common::store::open(&dir).await;
     agent_hub::store::projects::create(&db, PROJECT, "Project")
@@ -319,14 +344,18 @@ async fn a_connection_with_no_lease_reads_a_session_it_names() {
 
     pair.first.call(
         "notify_subscribe",
-        json!({"kinds":"signal","project_id":PROJECT}),
+        in_session(
+            &pair.first_id,
+            json!({"kinds":"signal","project_id":PROJECT}),
+        ),
     );
     pair.other.call(
         "signal_append",
         json!({"project_id":PROJECT,"kind":"signal","summary":"hello"}),
     );
 
-    // A watcher holds no lease: it names the session it works under.
+    // A watcher is another connection of the same participant: it names the
+    // session it works under.
     let watcher = connect(pair.port, &token);
     assert!(
         watcher
@@ -343,7 +372,9 @@ async fn a_connection_with_no_lease_reads_a_session_it_names() {
         vec!["hello"]
     );
     assert!(
-        pair.first.delivered(json!({"wait_seconds": 0})).is_empty(),
+        pair.first
+            .delivered(in_session(&pair.first_id, json!({"wait_seconds": 0})))
+            .is_empty(),
         "the read was a delivery: the first session is not shown it again"
     );
 
@@ -365,7 +396,7 @@ async fn a_connection_with_no_lease_reads_a_session_it_names() {
 }
 
 #[tokio::test]
-async fn a_wait_that_finds_nothing_in_the_named_scope_leaves_the_connections_own_items() {
+async fn a_wait_that_finds_nothing_in_the_named_scope_leaves_the_other_scopes_items() {
     let dir = TempDir::new("notify-wait-empty-named");
     let db = common::store::open(&dir).await;
     agent_hub::store::projects::create(&db, PROJECT, "Project")
@@ -379,7 +410,10 @@ async fn a_wait_that_finds_nothing_in_the_named_scope_leaves_the_connections_own
 
     let asked = pair.first.call(
         "question_post",
-        json!({"project_id": PROJECT, "subject": "Deploy?", "body": "Ready."}),
+        in_session(
+            &pair.first_id,
+            json!({"project_id": PROJECT, "subject": "Deploy?", "body": "Ready."}),
+        ),
     );
     let answered = rest(
         pair.port,
@@ -393,8 +427,8 @@ async fn a_wait_that_finds_nothing_in_the_named_scope_leaves_the_connections_own
     );
     assert_eq!(answered.status, 200, "{}", answered.raw);
 
-    // The first connection is leased to the first session and asks about the
-    // second: nothing is there, and the answer to its own question stays put.
+    // Asking about the second session finds nothing there, and the answer
+    // waiting in the first stays put.
     let elsewhere = pair.first.call(
         "notify_wait",
         json!({"wait_seconds": 0, "session": {"session_id": pair.second_id}}),
@@ -405,15 +439,16 @@ async fn a_wait_that_finds_nothing_in_the_named_scope_leaves_the_connections_own
         "an empty wait says so itself: {elsewhere}"
     );
     assert_eq!(
-        pair.first.delivered(json!({"wait_seconds": 0})),
+        pair.first
+            .delivered(in_session(&pair.first_id, json!({"wait_seconds": 0}))),
         vec!["answered: Deploy?"],
-        "the connection's own scope was not drained on top of it"
+        "the first scope was not drained by the empty wait"
     );
     drop(child);
 }
 
 #[tokio::test]
-async fn only_the_callers_own_running_session_may_be_named() {
+async fn any_member_may_name_a_running_session_and_an_ended_one_is_not_subscribable() {
     let dir = TempDir::new("notify-foreign-session");
     let db = common::store::open(&dir).await;
     agent_hub::store::projects::create(&db, PROJECT, "Project")
@@ -425,30 +460,42 @@ async fn only_the_callers_own_running_session_may_be_named() {
     let child = HubProcess::serve(&dir, ADMIN_TOKEN, &[]);
     let pair = pair(child.port(), &token, &other_token);
 
-    for tool in ["notify_wait", "notify_subscribe"] {
-        let arguments = if tool == "notify_wait" {
-            json!({"wait_seconds": 0, "session": {"session_id": pair.first_id}})
-        } else {
-            json!({"kinds": "signal", "session": {"session_id": pair.first_id}})
-        };
-        let refused = pair.other.attempt(tool, arguments);
-        assert_eq!(
-            refused.pointer("/error/data/error/code"),
-            Some(&json!("forbidden")),
-            "{tool} on another agent's session: {refused}"
-        );
-    }
-
-    pair.first
-        .call("session_end", json!({"session_id": pair.first_id}));
-    let ended = pair.first.attempt(
+    let waited = pair.other.attempt(
         "notify_wait",
         json!({"wait_seconds": 0, "session": {"session_id": pair.first_id}}),
+    );
+    assert!(
+        waited.get("error").is_none(),
+        "sessions are shared, so another member joins by naming it: {waited}"
+    );
+    let subscribed = pair.other.attempt(
+        "notify_subscribe",
+        json!({"kinds": "signal", "session": {"session_id": pair.first_id}}),
+    );
+    assert!(subscribed.get("error").is_none(), "{subscribed}");
+    assert_eq!(
+        subscribed.pointer("/result/structuredContent/session_id"),
+        Some(&json!(pair.first_id)),
+        "the subscription is bound to the session it named: {subscribed}"
+    );
+
+    pair.first.call(
+        "session_end",
+        json!({"session": {"session_id": pair.first_id}}),
+    );
+    let ended = pair.first.attempt(
+        "notify_subscribe",
+        json!({"kinds": "signal", "session": {"session_id": pair.first_id}}),
     );
     assert_eq!(
         ended.pointer("/error/data/error/code"),
         Some(&json!("conflict")),
-        "an ended session is not one to read: {ended}"
+        "a session that is not running takes no subscription: {ended}"
+    );
+    assert_eq!(
+        ended.pointer("/error/data/error/details/reason"),
+        Some(&json!("session_ended")),
+        "{ended}"
     );
     drop(child);
 }

@@ -35,6 +35,10 @@ fn initialize_list_and_call_over_stdio() {
         instructions.contains("session_start") && instructions.contains("skill://agent-hub"),
         "the handshake tells the client how to start: {instructions:?}"
     );
+    assert!(
+        !instructions.contains("subagent"),
+        "the handshake does not forbid a subagent from starting a session: {instructions:?}"
+    );
 
     server.notify("notifications/initialized");
 

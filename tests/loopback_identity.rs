@@ -82,10 +82,15 @@ fn loopback_resolves_declared_agent_without_a_token() {
         Some(&body),
     );
     assert_eq!(response.status, 200, "whoami: {}", response.raw);
-    assert!(
-        response.raw.contains("\"actor\":\"declared\""),
-        "the declared agent is the actor: {}",
-        response.raw
+    let who = response.message()["result"]["structuredContent"].clone();
+    assert_eq!(who["member"], "loopback", "{who}");
+    assert_eq!(
+        who["agent"], "declared",
+        "the header names the agent: {who}"
+    );
+    assert_eq!(
+        who["actor"], "loopback",
+        "the header names no member: {who}"
     );
 }
 
@@ -114,10 +119,12 @@ fn loopback_defaults_identity_and_opens_the_control_surface() {
         Some(&body),
     );
     assert_eq!(response.status, 200, "whoami: {}", response.raw);
-    assert!(
-        response.raw.contains("\"actor\":\"loopback\""),
-        "the default identity is loopback: {}",
-        response.raw
+    let who = response.message()["result"]["structuredContent"].clone();
+    assert_eq!(who["member"], "loopback", "{who}");
+    assert_eq!(who["actor"], "loopback", "{who}");
+    assert_eq!(
+        who["agent"], "loopback-test",
+        "with no header the agent is the client's handshake name: {who}"
     );
 
     let home = send(port, "GET", "/api/v1/home", &[], None);
@@ -129,8 +136,8 @@ fn loopback_defaults_identity_and_opens_the_control_surface() {
 }
 
 /// A token presented on a loopback hub is verified like on any bind, and the
-/// header beside it names a sub-identity of the token's agent. It is not the
-/// tokenless path: it creates no agent.
+/// header beside it names the agent of the token's member. It is not the
+/// tokenless path: it creates no member.
 #[tokio::test]
 async fn loopback_with_a_token_reads_the_header_as_attribution_only() {
     let data_dir = TempDir::new("loopback-token-and-header");
@@ -192,18 +199,20 @@ async fn loopback_with_a_token_reads_the_header_as_attribution_only() {
         &[("Authorization", &bearer), ("X-Agent-Id", "claude")],
         &session,
     );
-    assert!(
-        named.raw.contains("\"actor\":\"host-a/claude\""),
-        "the declared name is a sub-identity of the token's agent: {}",
-        named.raw
+    let who = named.message()["result"]["structuredContent"].clone();
+    assert_eq!(who["member"], "host-a", "{who}");
+    assert_eq!(who["actor"], "host-a", "the header names no member: {who}");
+    assert_eq!(
+        who["agent"], "claude-code",
+        "the declared name is folded to its client slug: {who}"
     );
 
-    // The tokenless path would have created an agent named by the header.
-    let agents = send(port, "GET", "/api/v1/agents", &[], None);
+    // The tokenless path would have created a member named by the header.
+    let agents = send(port, "GET", "/api/v1/members", &[], None);
     assert_eq!(agents.status, 200, "{}", agents.raw);
     assert!(
         !agents.raw.contains("\"claude\"") && !agents.raw.contains("host-a/claude"),
-        "a name beside a token registers no agent: {}",
+        "a name beside a token registers no member: {}",
         agents.raw
     );
 

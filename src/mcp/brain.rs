@@ -1,11 +1,17 @@
 //! Session lifecycle and brain tools.
 //!
 //! The brain tools reach two stores through one family of tools. The session
-//! store is the active session's own AgentFS file, the working state that is
-//! pruned with the session. The project store is one AgentFS file per project,
-//! the durable knowledge base every agent with project write shares. Every
-//! value lives under `/kv/` or `/fs/`, except in the knowledge base which
-//! holds pages only, and every write is mirrored into the search corpus.
+//! store is a session's own AgentFS file, the working state every participant
+//! of the session shares and that is pruned with it. The project store is one
+//! AgentFS file per project, the durable knowledge base every agent with
+//! project write shares. Every value lives under `/kv/` or `/fs/`, except in
+//! the knowledge base which holds pages only, and every write is mirrored into
+//! the search corpus.
+//!
+//! A call names its session in `session`; nothing is held on the connection.
+//! A write to a session brain resolves the session (creating it when it does
+//! not exist yet), holds the session's gate shared and hands the write to the
+//! store, which orders the file, the index and the session's status.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
@@ -14,30 +20,30 @@ use rmcp::service::RequestContext;
 use rmcp::{RoleServer, tool, tool_router};
 use serde::Deserialize;
 use serde_json::json;
-use turso::Value;
 
-use crate::brain::{self, Brain, RECOVERY_PATH, Stamp, knowledge};
-use crate::error::{Error, Result};
+use crate::brain::shared::{BrainOp, SessionWrite};
+use crate::brain::{self, Brain, RECOVERY_PATH, knowledge};
+use crate::error::{Error, Result, SessionReason};
 use crate::limits::{HANDOFF_SUMMARY_CHARS, SESSION_LIST_LIMIT_MAX};
 use crate::policy::{self, Access};
 use crate::principal::Principal;
 use crate::store::anchors;
-use crate::store::search::{SearchDoc, index_doc};
-use crate::store::{projects, sessions};
+use crate::store::projects;
+use crate::store::sessions::{self, StartOutcome, StartRequest};
 
-use super::{ActiveSessionLease, HubServer, to_error_data};
+use super::session_arg::{Mode, Resolved, SessionArg, SessionRef};
+use super::{HubServer, SessionOnlyParams, to_error_data};
 
 #[tool_router(router = brain_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Start or resume a session and make it the active brain. A session belongs to the agent that starts it, so a name under another agent is another session. Pass from to pick up another agent's work, by session_id or by agent and name: the hub adopts it when that session has ended and forks it when it is still running."
+        description = "Start or resume a session by project and name, and join it. A session is shared: any agent that starts the same name joins the same session and sees the same brain, and every call that names it afterwards joins it too. A name the project has not seen is created; one that ended is reopened; a child is named <parent>/<task> and needs a live parent. Pass exclusive to refuse a name that already exists (a conflict that names the session). Pass from to fork another session's brain into the new name. Pass session on later calls as {\"project_id\", \"name\"} or {\"session_id\"}."
     )]
     async fn session_start(
         &self,
         context: RequestContext<RoleServer>,
         Parameters(params): Parameters<SessionStartParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
-        // The agent is the authenticated identity, never client input.
         let principal = self.principal(&context);
         policy::authorize(
             &self.state.db,
@@ -48,56 +54,71 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
 
-        let (session, resumed, pickup) = match params.from.as_ref() {
-            Some(reference) => self
-                .pick_up(
-                    &principal,
-                    &params.project_id,
-                    &params.session_name,
-                    reference,
-                )
-                .await
-                .map_err(to_error_data)?,
-            None => {
-                let (session, resumed) = sessions::start_resumed(
-                    &self.state.db,
-                    &params.project_id,
-                    &params.session_name,
-                    &principal.actor,
-                )
-                .await
-                .map_err(to_error_data)?;
-                (session, resumed, None)
-            }
+        let source = match params.from.as_ref() {
+            Some(from) => Some(
+                self.fork_source(&context, &principal, &params.project_id, from)
+                    .await
+                    .map_err(to_error_data)?,
+            ),
+            None => None,
         };
-
-        let mut active = self.active.lock().await;
-        let next_epoch = active.as_ref().map_or(1, |l| l.epoch + 1);
-        *active = Some(ActiveSessionLease {
-            project_id: session.project_id.clone(),
-            session_id: session.id.clone(),
-            agent: session.agent.clone(),
-            epoch: next_epoch,
-        });
+        let writer = principal.writer(None);
+        let started = sessions::start_session(
+            &self.state.db,
+            &StartRequest {
+                project_id: &params.project_id,
+                session_name: &params.session_name,
+                writer: &writer,
+                exclusive: params.exclusive,
+                fork_from: source.as_ref().map(|source| source.id.as_str()),
+            },
+        )
+        .await
+        .map_err(to_error_data)?;
+        let session = started.session;
+        if let Some(scope) = context.extensions.get::<super::ScopeSlot>() {
+            scope.set(Some(&session.id));
+        }
+        let pickup = match (&source, started.outcome) {
+            (Some(source), StartOutcome::Created) => {
+                self.copy_brain(source, &session)
+                    .await
+                    .map_err(to_error_data)?;
+                Some(json!({
+                    "mode": "fork",
+                    "from_session_id": source.id,
+                    "from_session_name": source.session_name,
+                    "handoff": source.handoff,
+                    "source_active": source.status == "active",
+                }))
+            }
+            _ => None,
+        };
 
         self.state.notify();
         // The brain is reached only through the namespaced tool paths, so the
         // server's file layout is not the agent's business.
         //
-        // The row's own handoff note is left by the previous owner at
-        // `session_end`, and the latest anchor is written by `session_anchor`,
-        // so a resumed agent reads what its predecessor left without a second
-        // call.
+        // The row's own handoff note is left by whoever ended the session and
+        // the latest anchor is written by `session_anchor`, so a participant
+        // that joins or resumes reads what came before without a second call.
         let anchor = anchors::latest_anchor_view(&self.state.db, &session.id)
             .await
             .map_err(to_error_data)?;
         Ok(CallToolResult::structured(json!({
             "session_id": session.id,
             "project_id": session.project_id,
-            "agent": session.agent,
             "session_name": session.session_name,
+            "agent": principal.agent(),
+            "member": principal.member(),
             "status": session.status,
-            "resumed": resumed,
+            "resumed": started.outcome != StartOutcome::Created,
+            "outcome": match started.outcome {
+                StartOutcome::Created => "created",
+                StartOutcome::Resumed => "resumed",
+                StartOutcome::Reopened => "reopened",
+            },
+            "joined": started.joined.first,
             "pickup": pickup,
             "namespaces": { "kv": "/kv", "fs": "/fs" },
             "recovery_path": RECOVERY_PATH,
@@ -108,7 +129,31 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Write a phase anchor: the compact checkpoint a successor resumes from. It is stored as an `anchor` event on the session and rendered to the session's recovery document. phase, summary and next_steps are required, and source_ids cite project events the summary rests on, each of which must exist in the same project. The session must be the caller's own; omitted, it is this connection's active session. A retry with the same idempotency_key returns the first anchor instead of appending another."
+        description = "Leave a session without ending it. The session stays live for anyone still in it, and your next call that names it joins you again. Use it when a subagent or a harness session finishes; use session_end only when the work is done for everyone."
+    )]
+    async fn session_leave(
+        &self,
+        context: RequestContext<RoleServer>,
+        Parameters(params): Parameters<SessionOnlyParams>,
+    ) -> std::result::Result<CallToolResult, ErrorData> {
+        let principal = self.principal(&context);
+        let resolved = self
+            .named_session(&context, &principal, params.session.as_ref(), None)
+            .await
+            .map_err(to_error_data)?;
+        if let Some(key) = principal.participant() {
+            sessions::leave(&self.state.db, &resolved.id, &key)
+                .await
+                .map_err(to_error_data)?;
+        }
+        self.state.notify();
+        Ok(CallToolResult::structured(
+            json!({ "ok": true, "session_id": resolved.id }),
+        ))
+    }
+
+    #[tool(
+        description = "Write a phase anchor: the compact checkpoint a successor resumes from. It is stored as an `anchor` event on the session and rendered to the session's recovery document. phase, summary and next_steps are required, and source_ids cite project events the summary rests on, each of which must exist in the same project. Name the session in `session`. A retry with the same idempotency_key returns the first anchor instead of appending another."
     )]
     async fn session_anchor(
         &self,
@@ -116,22 +161,31 @@ impl HubServer {
         Parameters(params): Parameters<SessionAnchorParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        // A named session is anchored as itself; omitted, it is the active one.
-        // The write target enforces the owner rule and that the session is live.
-        let target = self
-            .target_for_write(&principal, None, params.session.as_ref())
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                None,
+                Mode::SessionStoreWrite,
+            )
             .await
             .map_err(to_error_data)?;
-        let session_id = target
-            .session_id
-            .clone()
-            .ok_or_else(|| to_error_data(Error::Engine("an anchor needs a session".to_string())))?;
-        let session = sessions::get(&self.state.db, &session_id)
-            .await
-            .map_err(to_error_data)?
-            .ok_or_else(|| {
-                to_error_data(Error::NotFound(format!("session {session_id} not found")))
-            })?;
+        let session = resolved.session.clone().ok_or_else(|| {
+            to_error_data(Error::Session(
+                SessionReason::Required,
+                "an anchor belongs to a session: name it in session".to_string(),
+                None,
+            ))
+        })?;
+        policy::authorize(
+            &self.state.db,
+            &principal,
+            &session.project_id,
+            Access::Write,
+        )
+        .await
+        .map_err(to_error_data)?;
         let anchor = anchors::append_anchor(
             &self.state.db,
             self.state.config.events_per_project.per_project,
@@ -150,14 +204,13 @@ impl HubServer {
 
         // The event is the anchor of record; the file is a view of it, so a
         // failed mirror does not fail the tool.
-        let recovery_written = match target
-            .brain
-            .put(RECOVERY_PATH, anchors::render_recovery(&anchor).as_bytes())
+        let recovery_written = match self
+            .write_recovery(&principal, &session, &anchors::render_recovery(&anchor))
             .await
         {
             Ok(()) => true,
             Err(err) => {
-                tracing::warn!(error = %err, session_id, "could not write the recovery document");
+                tracing::warn!(error = %err, session_id = %session.id, "could not write the recovery document");
                 false
             }
         };
@@ -171,19 +224,18 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Read a session's resume view: its latest anchor, the scores that cite it, the session events after the anchor oldest first, the recovery path and a cursor to page on. Names any session the caller may read, by session_id or by agent and name; omitted, it is this connection's active session. A session with no anchor returns the empty view, and its handoff note and full log still reach the caller through session_start and feed_read."
+        description = "Read a session's resume view: its latest anchor, the scores that cite it, the session events after the anchor oldest first, the recovery path and a cursor to page on. Name the session in `session`. A session with no anchor returns the empty view, and its handoff note and full log still reach the caller through session_start and feed_read."
     )]
     async fn session_resume(
         &self,
         context: RequestContext<RoleServer>,
-        Parameters(params): Parameters<SessionResumeParams>,
+        Parameters(params): Parameters<SessionOnlyParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let session = match params.session.as_ref() {
-            Some(reference) => self.referenced_session(&principal, reference).await,
-            None => self.session_for(&principal, Access::Read).await,
-        }
-        .map_err(to_error_data)?;
+        let session = self
+            .named_session(&context, &principal, params.session.as_ref(), None)
+            .await
+            .map_err(to_error_data)?;
         let resumed = anchors::resume(&self.state.db, &session, crate::limits::FEED_LIMIT_DEFAULT)
             .await
             .map_err(to_error_data)?;
@@ -191,7 +243,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Mark a session ended, optionally leaving a handoff note for whoever picks it up. Only the session's owner may end it. Its brain is retained until pruned."
+        description = "Mark a session ended for everyone in it, optionally leaving a handoff note for whoever resumes it. Its live children end with it. Any participant may end it. Its brain is retained until pruned. Name the session in `session`; leave it without ending it with session_leave."
     )]
     async fn session_end(
         &self,
@@ -199,15 +251,17 @@ impl HubServer {
         Parameters(params): Parameters<SessionEndParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        let session = sessions::get(&self.state.db, &params.session_id)
+        let legacy = params.session_id.as_deref().map(|session_id| {
+            SessionArg::Ref(SessionRef {
+                session_id: Some(session_id.to_string()),
+                ..SessionRef::default()
+            })
+        });
+        let arg = params.session.as_ref().or(legacy.as_ref());
+        let session = self
+            .named_session(&context, &principal, arg, None)
             .await
-            .map_err(to_error_data)?
-            .ok_or_else(|| {
-                to_error_data(policy::conceal(
-                    &principal,
-                    Error::NotFound(format!("session {} not found", params.session_id)),
-                ))
-            })?;
+            .map_err(to_error_data)?;
         policy::authorize(
             &self.state.db,
             &principal,
@@ -216,54 +270,42 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
-        // A session brain has one writer, so only its owner closes it and
-        // leaves the note. The local stdio caller is the human admin and
-        // passes here, which is what keeps an operator's own use working.
-        if !principal.is_admin && session.agent != principal.actor {
-            return Err(to_error_data(Error::Forbidden(format!(
-                "session {} belongs to another agent owner={}",
-                session.id, session.agent
-            ))));
-        }
-        let expected_owner = if principal.is_admin {
-            None
-        } else {
-            Some(principal.actor.as_str())
-        };
-        sessions::end(
+        let family = sessions::family(&self.state.db, &session.id)
+            .await
+            .map_err(to_error_data)?;
+        let gates = self.state.session_gates.exclusive_all(&family).await;
+        let writer = principal.writer(Some(&session.id));
+        let ended = sessions::end_session(
             &self.state.db,
-            &params.session_id,
-            &principal.actor,
-            expected_owner,
+            &gates,
+            &session.id,
+            &writer,
             params.handoff.as_deref(),
         )
         .await
         .map_err(to_error_data)?;
+        drop(gates);
 
-        // Fold the log into the file the session leaves behind.
-        if let Ok(Some(brain)) = self
-            .state
-            .brain
-            .open_existing(&session.project_id, &params.session_id)
-            .await
-        {
-            let _ = brain.checkpoint().await;
-        }
-
-        let mut active = self.active.lock().await;
-        if active
-            .as_ref()
-            .is_some_and(|lease| lease.session_id == params.session_id)
-        {
-            *active = None;
+        // Fold each log into the file the session leaves behind.
+        for id in &ended {
+            if let Ok(Some(brain)) = self
+                .state
+                .brain
+                .open_existing(&session.project_id, id)
+                .await
+            {
+                let _ = brain.checkpoint().await;
+            }
         }
 
         self.state.notify();
-        Ok(CallToolResult::structured(json!({ "ok": true })))
+        Ok(CallToolResult::structured(
+            json!({ "ok": true, "ended": ended }),
+        ))
     }
 
     #[tool(
-        description = "List sessions and who owns them, most recently active first. Narrow with project_id, status (\"active\" or \"ended\") and agent. Each entry carries its owner, the handoff note its last owner left, and where it was picked up from."
+        description = "List sessions with their participants, most recently active first. Narrow with project_id, status (\"active\" or \"ended\"), agent, member, kind and live. Each entry carries who started it, who is in it, the handoff note, and where it was forked from."
     )]
     async fn session_list(
         &self,
@@ -287,39 +329,64 @@ impl HubServer {
                 .as_filter()
                 .map(<[String]>::to_vec),
         };
+        let kind = params
+            .kind
+            .as_deref()
+            .map(|kind| {
+                crate::author::AuthorKind::parse(kind).ok_or_else(|| {
+                    Error::InvalidArgument(format!(
+                        "kind '{kind}' must be participant, human, local or legacy"
+                    ))
+                })
+            })
+            .transpose()
+            .map_err(to_error_data)?;
+        let agent = params.agent.as_deref().map(crate::agent_name::canonical);
         let limit = params
             .limit
             .unwrap_or(crate::limits::SESSION_LIST_LIMIT_DEFAULT);
-        let sessions = sessions::query(
+        let since = params.live.then(|| active_since(&self.state));
+        let listed = sessions::list_filtered(
             &self.state.db,
-            &sessions::SessionQuery {
+            &sessions::SessionFilter {
                 project_id: params.project_id.as_deref(),
                 status: params.status.as_deref(),
-                agent: params.agent.as_deref(),
-                visible: visible.as_deref(),
-                limit,
+                member: params.member.as_deref(),
+                agent: agent.as_deref(),
+                live: params.live,
+                parent: None,
+                since: since.as_deref(),
+                limit: Some(limit),
             },
         )
         .await
         .map_err(to_error_data)?;
 
-        let truncated = sessions.len() as i64 == limit.clamp(1, SESSION_LIST_LIMIT_MAX);
-        let entries: Vec<_> = sessions
+        let truncated = listed.len() as i64 == limit.clamp(1, SESSION_LIST_LIMIT_MAX);
+        let entries: Vec<_> = listed
             .iter()
-            .map(|session| {
+            .filter(|row| {
+                visible
+                    .as_ref()
+                    .is_none_or(|ids| ids.contains(&row.session.project_id))
+            })
+            .filter(|row| kind.is_none_or(|kind| row.started_by.kind == kind))
+            .map(|row| {
+                let session = &row.session;
                 let (handoff, handoff_truncated) = summarise(session.handoff.as_deref());
                 json!({
                     "session_id": session.id,
                     "project_id": session.project_id,
                     "session_name": session.session_name,
-                    "agent": session.agent,
                     "status": session.status,
                     "created_at": session.created_at,
                     "last_activity": session.last_activity,
                     "handoff": handoff,
                     "handoff_truncated": handoff_truncated,
                     "forked_from": session.forked_from,
-                    "adopted_from": session.adopted_from,
+                    "started_by": row.started_by,
+                    "participants": row.participants,
+                    "children_count": row.children_count,
                     "brain_bytes": self.brain_bytes(session),
                 })
             })
@@ -332,7 +399,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Read one value. store is \"session\" (the default), a session's working state, or \"project\", the durable knowledge base shared by every agent on the project. session names a session to read, by session_id or by agent and name; omitted, it is this session. version reads an earlier version of a project page, one that brain_history lists, deleted pages included. Returns the content and its version token."
+        description = "Read one value. store is \"session\" (the default), a session's working state, or \"project\", the durable knowledge base shared by every agent on the project. Name the session in `session` for the session store. version reads an earlier version of a page, one that brain_history lists, deleted pages included. Returns the content and its version token."
     )]
     async fn brain_get(
         &self,
@@ -342,14 +409,50 @@ impl HubServer {
         let principal = self.principal(&context);
         let store = Store::for_read(params.store.as_deref()).map_err(to_error_data)?;
         let path = store.read_path(&params.path).map_err(to_error_data)?;
+        let absent = || {
+            to_error_data(Error::NotFound(format!(
+                "no brain value at '{}'",
+                params.path
+            )))
+        };
         if let Some(version) = params.version.as_deref() {
-            if store != Store::Project || params.session.is_some() {
-                return Err(to_error_data(Error::InvalidArgument(
-                    "a session brain keeps no earlier versions; version reads a page of the project store".to_string(),
-                )));
+            if store == Store::Session {
+                let target = self
+                    .target_for_read(&context, &principal, store, &params)
+                    .await
+                    .map_err(to_error_data)?
+                    .ok_or_else(absent)?;
+                let read = session_version(&target.brain, &path, version)
+                    .await
+                    .map_err(to_error_data)?;
+                return Ok(CallToolResult::structured(json!({
+                    "path": read.path,
+                    "store": store.as_str(),
+                    "size_bytes": read.content.len(),
+                    "content": read.content,
+                    "version": read.version,
+                    "current": read.current,
+                    "at": read.at,
+                    "actor": read.actor,
+                })));
             }
+            let resolved = self
+                .resolve_session(
+                    &context,
+                    &principal,
+                    params.session.as_ref(),
+                    params.project_id.as_deref(),
+                    Mode::Read,
+                )
+                .await
+                .map_err(to_error_data)?;
             let project_id = self
-                .knowledge_project(&principal, params.project_id.as_deref(), Access::Read)
+                .knowledge_project(
+                    &principal,
+                    params.project_id.as_deref(),
+                    resolved.session.as_ref(),
+                    Access::Read,
+                )
                 .await
                 .map_err(to_error_data)?;
             let read = knowledge::read_version(&self.state, &project_id, &path, version)
@@ -366,19 +469,8 @@ impl HubServer {
                 "actor": read.actor,
             })));
         }
-        let absent = || {
-            to_error_data(Error::NotFound(format!(
-                "no brain value at '{}'",
-                params.path
-            )))
-        };
         let target = self
-            .target_for_read(
-                &principal,
-                store,
-                params.project_id.as_deref(),
-                params.session.as_ref(),
-            )
+            .target_for_read(&context, &principal, store, &params)
             .await
             .map_err(to_error_data)?
             .ok_or_else(absent)?;
@@ -407,7 +499,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Write one value and index it for search. store is required: \"session\" keeps working state that is pruned with the session, \"project\" writes a page of the durable project knowledge base every agent on the project reads and writes. session names your own session to write, by session_id or by agent and name, and a call that names it needs no active session; omitted, it is this connection's active session. Pass if_version with the version you read to write only while nothing changed, or \"absent\" to create a page that does not exist yet."
+        description = "Write one value and index it for search. store is required: \"session\" keeps working state that is pruned with the session and is shared by everyone in it, \"project\" writes a page of the durable project knowledge base every agent on the project reads and writes. A session write names its session in `session`, which is created when it does not exist yet. Pass if_version with the version you read to write only while nothing changed, or \"absent\" to create a value that does not exist yet. A value another participant wrote last is a conflict (stale_base) unless you pass the version you read."
     )]
     async fn brain_put(
         &self,
@@ -417,10 +509,24 @@ impl HubServer {
         let principal = self.principal(&context);
         let store = Store::for_write(params.store.as_deref()).map_err(to_error_data)?;
         if store == Store::Project {
-            check_write_session(store, params.session.as_ref()).map_err(to_error_data)?;
             store.check_namespace(&params.path).map_err(to_error_data)?;
+            let resolved = self
+                .resolve_session(
+                    &context,
+                    &principal,
+                    params.session.as_ref(),
+                    params.project_id.as_deref(),
+                    Mode::Write,
+                )
+                .await
+                .map_err(to_error_data)?;
             let project_id = self
-                .knowledge_project(&principal, params.project_id.as_deref(), Access::Write)
+                .knowledge_project(
+                    &principal,
+                    params.project_id.as_deref(),
+                    resolved.session.as_ref(),
+                    Access::Write,
+                )
                 .await
                 .map_err(to_error_data)?;
             let written = knowledge::put(
@@ -433,106 +539,72 @@ impl HubServer {
             )
             .await
             .map_err(to_error_data)?;
-            return Ok(CallToolResult::structured(json!({
-                "ok": true,
-                "path": written.path,
-                "store": store.as_str(),
-                "version": written.version,
-                "size_bytes": written.size_bytes,
-                "lint": written.lint,
-                "warnings": written.warnings,
-            })));
+            return Ok(CallToolResult::structured(with_session(
+                json!({
+                    "ok": true,
+                    "path": written.path,
+                    "store": store.as_str(),
+                    "version": written.version,
+                    "size_bytes": written.size_bytes,
+                    "lint": written.lint,
+                    "warnings": written.warnings,
+                }),
+                &resolved,
+            )));
         }
 
         // The store and the corpus have to agree on the entry, so both take the
         // canonical path and an alias never becomes a second search row.
         let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
-        let target = self
-            .target_for_write(
+        crate::limits::check_brain_value(params.content.len()).map_err(to_error_data)?;
+        let (session, writer) = self
+            .session_write_target(
+                &context,
                 &principal,
-                params.project_id.as_deref(),
                 params.session.as_ref(),
+                params.project_id.as_deref(),
             )
             .await
             .map_err(to_error_data)?;
-        crate::limits::check_brain_file(target.brain.file_bytes()).map_err(to_error_data)?;
-        let stamp = Stamp {
-            op: "brain.put",
-            actor: &principal.actor,
-            verifies: None,
-        };
-        let project_id_for_index = target.project_id.clone();
-        let session_id_for_index = target.session_id.clone();
-        let path_for_index = path.clone();
-        let content_for_index = params.content.clone();
-        let db_alive = self.state.db.clone();
-        let sid_alive = target.session_id.clone();
-        let actor_alive = principal.actor.clone();
-        let is_admin = principal.is_admin;
-        let alive = async move || {
-            if let Some(session_id) = sid_alive.as_deref() {
-                match sessions::get(&db_alive, session_id).await? {
-                    Some(s) if s.deleted_at.is_some() => Err(Error::Conflict(format!(
-                        "session {session_id} has been pruned"
-                    ))),
-                    Some(s) if s.status != "active" => {
-                        Err(Error::Conflict(format!("session {session_id} has ended")))
-                    }
-                    Some(s) if !is_admin && s.agent != actor_alive => Err(Error::Conflict(
-                        format!("session {session_id} now belongs to {}", s.agent),
-                    )),
-                    Some(_) => Ok(()),
-                    None => Err(Error::Conflict(format!(
-                        "session {session_id} no longer exists"
-                    ))),
-                }
-            } else {
-                Ok(())
-            }
-        };
-        let version = target
-            .brain
-            .put_if_recorded(
-                &path,
-                params.content.as_bytes(),
-                params.if_version.as_deref(),
-                stamp,
-                alive,
-                async move || {
-                    if let Err(err) = self
-                        .index_write(
-                            &project_id_for_index,
-                            session_id_for_index.as_deref(),
-                            &path_for_index,
-                            &content_for_index,
-                        )
-                        .await
-                    {
-                        tracing::warn!(error = %err, path = %path_for_index, "could not index brain write");
-                    }
+        let gate = self.state.session_gates.shared(&session.id).await;
+        let wrote = brain::shared::write(
+            &self.state,
+            &gate,
+            SessionWrite {
+                session_id: &session.id,
+                writer: &writer,
+                op_name: "brain.put",
+                op: BrainOp::Put {
+                    path: &path,
+                    bytes: params.content.as_bytes(),
                 },
-            )
-            .await
-            .map_err(to_error_data)?;
+                if_version: params.if_version.as_deref(),
+                event: None,
+            },
+        )
+        .await
+        .map_err(to_error_data)?;
+        drop(gate);
 
         let mut warnings = Vec::new();
-        if target.brain.file_bytes() > crate::limits::BRAIN_FILE_BYTES_SOFT {
+        if self.brain_bytes(&session) > crate::limits::BRAIN_FILE_BYTES_SOFT {
             warnings.push("brain file is over the soft limit".to_string());
         }
 
         Ok(CallToolResult::structured(json!({
             "ok": true,
-            "path": path,
+            "path": wrote.path,
             "store": store.as_str(),
-            "version": version,
+            "version": wrote.version,
             "size_bytes": params.content.len(),
             "lint": [],
             "warnings": warnings,
+            "session": session.id,
         })))
     }
 
     #[tool(
-        description = "List entries under a path, or every entry when the path is omitted. store is \"session\" (the default) or \"project\" for the project knowledge base. Each entry carries its path, its type, and its size."
+        description = "List entries under a path, or every entry when the path is omitted. store is \"session\" (the default; name the session in `session`) or \"project\" for the project knowledge base. Each entry carries its path, its type, and its size."
     )]
     async fn brain_list(
         &self,
@@ -547,13 +619,15 @@ impl HubServer {
             .map(|path| store.read_path(path))
             .transpose()
             .map_err(to_error_data)?;
+        let read = BrainGetParams {
+            path: String::new(),
+            store: params.store.clone(),
+            project_id: params.project_id.clone(),
+            session: params.session.clone(),
+            version: None,
+        };
         let entries = match self
-            .target_for_read(
-                &principal,
-                store,
-                params.project_id.as_deref(),
-                params.session.as_ref(),
-            )
+            .target_for_read(&context, &principal, store, &read)
             .await
             .map_err(to_error_data)?
         {
@@ -580,7 +654,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Delete one value and its index row. store is required: \"session\" for a session's working state, \"project\" for a page of the shared project knowledge base, which removes it for every agent while its bytes stay in the page's history, where brain_revert restores it, until the operator forgets that history. session names your own session to delete from, by session_id or by agent and name; omitted, it is this connection's active session."
+        description = "Delete one value and its index row. store is required: \"session\" for a session's working state (name the session in `session`), \"project\" for a page of the shared project knowledge base, which removes it for every agent while its bytes stay in the page's history, where brain_revert restores it, until the operator forgets that history. A value another participant wrote last is a conflict (stale_base) unless you pass the version you read in if_version."
     )]
     async fn brain_delete(
         &self,
@@ -590,99 +664,83 @@ impl HubServer {
         let principal = self.principal(&context);
         let store = Store::for_write(params.store.as_deref()).map_err(to_error_data)?;
         if store == Store::Project {
-            check_write_session(store, params.session.as_ref()).map_err(to_error_data)?;
             store.check_namespace(&params.path).map_err(to_error_data)?;
-            let project_id = self
-                .knowledge_project(&principal, params.project_id.as_deref(), Access::Write)
+            let resolved = self
+                .resolve_session(
+                    &context,
+                    &principal,
+                    params.session.as_ref(),
+                    params.project_id.as_deref(),
+                    Mode::Write,
+                )
                 .await
                 .map_err(to_error_data)?;
-            let session_id = self.session_in(&principal, &project_id).await;
+            let project_id = self
+                .knowledge_project(
+                    &principal,
+                    params.project_id.as_deref(),
+                    resolved.session.as_ref(),
+                    Access::Write,
+                )
+                .await
+                .map_err(to_error_data)?;
             let path = knowledge::delete(
                 &self.state,
                 &project_id,
                 &principal.actor,
-                session_id.as_deref(),
+                resolved.session_id(),
                 &params.path,
                 params.if_version.as_deref(),
             )
             .await
             .map_err(to_error_data)?;
-            return Ok(CallToolResult::structured(json!({
-                "ok": true,
-                "path": path,
-                "store": store.as_str(),
-            })));
+            return Ok(CallToolResult::structured(with_session(
+                json!({
+                    "ok": true,
+                    "path": path,
+                    "store": store.as_str(),
+                }),
+                &resolved,
+            )));
         }
 
         let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
-        let target = self
-            .target_for_write(
+        let (session, writer) = self
+            .session_write_target(
+                &context,
                 &principal,
-                params.project_id.as_deref(),
                 params.session.as_ref(),
+                params.project_id.as_deref(),
             )
             .await
             .map_err(to_error_data)?;
-        let stamp = Stamp {
-            op: "brain.delete",
-            actor: &principal.actor,
-            verifies: None,
-        };
-        let session_id_for_delete = target.session_id.clone();
-        let path_for_delete = path.clone();
-        let db_alive = self.state.db.clone();
-        let sid_alive = target.session_id.clone();
-        let actor_alive = principal.actor.clone();
-        let is_admin = principal.is_admin;
-        let alive = async move || {
-            if let Some(session_id) = sid_alive.as_deref() {
-                match sessions::get(&db_alive, session_id).await? {
-                    Some(s) if s.deleted_at.is_some() => Err(Error::Conflict(format!(
-                        "session {session_id} has been pruned"
-                    ))),
-                    Some(s) if s.status != "active" => {
-                        Err(Error::Conflict(format!("session {session_id} has ended")))
-                    }
-                    Some(s) if !is_admin && s.agent != actor_alive => Err(Error::Conflict(
-                        format!("session {session_id} now belongs to {}", s.agent),
-                    )),
-                    Some(_) => Ok(()),
-                    None => Err(Error::Conflict(format!(
-                        "session {session_id} no longer exists"
-                    ))),
-                }
-            } else {
-                Ok(())
-            }
-        };
-        target
-            .brain
-            .delete_if_recorded(
-                &path,
-                params.if_version.as_deref(),
-                stamp,
-                alive,
-                async move || {
-                    if let Err(err) = self
-                        .delete_doc(session_id_for_delete.as_deref(), &path_for_delete)
-                        .await
-                    {
-                        tracing::warn!(error = %err, path = %path_for_delete, "could not delete brain search doc");
-                    }
-                },
-            )
-            .await
-            .map_err(to_error_data)?;
+        let gate = self.state.session_gates.shared(&session.id).await;
+        brain::shared::write(
+            &self.state,
+            &gate,
+            SessionWrite {
+                session_id: &session.id,
+                writer: &writer,
+                op_name: "brain.delete",
+                op: BrainOp::Delete { path: &path },
+                if_version: params.if_version.as_deref(),
+                event: None,
+            },
+        )
+        .await
+        .map_err(to_error_data)?;
+        drop(gate);
 
         Ok(CallToolResult::structured(json!({
             "ok": true,
             "path": path,
             "store": store.as_str(),
+            "session": session.id,
         })))
     }
 
     #[tool(
-        description = "List the history of one page of the project knowledge base, newest first: each write's version, actor, time, size and a short summary, whether its bytes were kept, and which row is the page as it is now. A deleted page keeps its history. Read a version with brain_get and store \"project\", and put one back with brain_revert. Page with before, the next_before of the previous call."
+        description = "List the history of one page, newest first: each write's version, actor, time, size and a short summary, whether its bytes were kept, and which row is the page as it is now. store is \"project\" (the default) for the knowledge base or \"session\" for a session brain (name it in `session`). A deleted page keeps its history. Read a version with brain_get and its version argument, and put one back with brain_revert. Page with before, the next_before of the previous call."
     )]
     async fn brain_history(
         &self,
@@ -690,12 +748,68 @@ impl HubServer {
         Parameters(params): Parameters<BrainHistoryParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        let store = match params.store.as_deref() {
+            Some(store) => Store::parse(store).map_err(to_error_data)?,
+            None => Store::Project,
+        };
+        let limit = crate::limits::kb_history_rows(params.limit).map_err(to_error_data)?;
+        if store == Store::Session {
+            let read = BrainGetParams {
+                path: params.path.clone(),
+                store: Some("session".to_string()),
+                project_id: params.project_id.clone(),
+                session: params.session.clone(),
+                version: None,
+            };
+            let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
+            let Some(target) = self
+                .target_for_read(&context, &principal, store, &read)
+                .await
+                .map_err(to_error_data)?
+            else {
+                return Ok(CallToolResult::structured(json!({
+                    "path": path,
+                    "store": store.as_str(),
+                    "current_version": null,
+                    "versions": [],
+                    "total": 0,
+                    "next_before": null,
+                    "truncated": false,
+                })));
+            };
+            let history = session_history(&target.brain, &path, params.before, limit)
+                .await
+                .map_err(to_error_data)?;
+            return Ok(CallToolResult::structured(json!({
+                "path": path,
+                "store": store.as_str(),
+                "current_version": history.current_version,
+                "versions": history.rows,
+                "total": history.total,
+                "next_before": history.next_before,
+                "truncated": history.truncated,
+            })));
+        }
         Store::Project
             .check_namespace(&params.path)
             .map_err(to_error_data)?;
-        let limit = crate::limits::kb_history_rows(params.limit).map_err(to_error_data)?;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                params.project_id.as_deref(),
+                Mode::Read,
+            )
+            .await
+            .map_err(to_error_data)?;
         let project_id = self
-            .knowledge_project(&principal, params.project_id.as_deref(), Access::Read)
+            .knowledge_project(
+                &principal,
+                params.project_id.as_deref(),
+                resolved.session.as_ref(),
+                Access::Read,
+            )
             .await
             .map_err(to_error_data)?;
         let history =
@@ -714,7 +828,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Put a page of the project knowledge base back to an earlier version that brain_history lists, restoring a deleted page the same way. The revert is a new write in your name, so the history keeps every version and a revert is undone by another. Reverting to the version the page already holds writes nothing and returns changed: false. Pass if_version with the version you read to revert only while nothing changed, or \"absent\" to restore a deleted page only while it is still gone."
+        description = "Put a page back to an earlier version that brain_history lists, restoring a deleted page the same way. store is \"project\" (the default) or \"session\" (name it in `session`). The revert is a new write in your name, so the history keeps every version and a revert is undone by another. Reverting to the version the page already holds writes nothing and returns changed: false. Pass if_version with the version you read to revert only while nothing changed, or \"absent\" to restore a deleted page only while it is still gone."
     )]
     async fn brain_revert(
         &self,
@@ -722,39 +836,99 @@ impl HubServer {
         Parameters(params): Parameters<BrainRevertParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        let store = match params.store.as_deref() {
+            Some(store) => Store::parse(store).map_err(to_error_data)?,
+            None => Store::Project,
+        };
+        if store == Store::Session {
+            let path = brain::canonical_path(&params.path).map_err(to_error_data)?;
+            let (session, writer) = self
+                .session_write_target(
+                    &context,
+                    &principal,
+                    params.session.as_ref(),
+                    params.project_id.as_deref(),
+                )
+                .await
+                .map_err(to_error_data)?;
+            let gate = self.state.session_gates.shared(&session.id).await;
+            let wrote = brain::shared::write(
+                &self.state,
+                &gate,
+                SessionWrite {
+                    session_id: &session.id,
+                    writer: &writer,
+                    op_name: "brain.revert",
+                    op: BrainOp::Revert {
+                        path: &path,
+                        version: &params.version,
+                    },
+                    if_version: params.if_version.as_deref(),
+                    event: None,
+                },
+            )
+            .await
+            .map_err(to_error_data)?;
+            drop(gate);
+            return Ok(CallToolResult::structured(json!({
+                "ok": true,
+                "path": wrote.path,
+                "store": store.as_str(),
+                "version": wrote.version,
+                "changed": true,
+                "session": session.id,
+            })));
+        }
         Store::Project
             .check_namespace(&params.path)
             .map_err(to_error_data)?;
-        let project_id = self
-            .knowledge_project(&principal, params.project_id.as_deref(), Access::Write)
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                params.project_id.as_deref(),
+                Mode::Write,
+            )
             .await
             .map_err(to_error_data)?;
-        let session_id = self.session_in(&principal, &project_id).await;
+        let project_id = self
+            .knowledge_project(
+                &principal,
+                params.project_id.as_deref(),
+                resolved.session.as_ref(),
+                Access::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
         let written = knowledge::revert(
             &self.state,
             &project_id,
             &principal.actor,
-            session_id.as_deref(),
+            resolved.session_id(),
             &params.path,
             &params.version,
             params.if_version.as_deref(),
         )
         .await
         .map_err(to_error_data)?;
-        Ok(CallToolResult::structured(json!({
-            "ok": true,
-            "path": written.path,
-            "store": Store::Project.as_str(),
-            "version": written.version,
-            "size_bytes": written.size_bytes,
-            "lint": written.lint,
-            "warnings": written.warnings,
-            "changed": written.changed,
-        })))
+        Ok(CallToolResult::structured(with_session(
+            json!({
+                "ok": true,
+                "path": written.path,
+                "store": Store::Project.as_str(),
+                "version": written.version,
+                "size_bytes": written.size_bytes,
+                "lint": written.lint,
+                "warnings": written.warnings,
+                "changed": written.changed,
+            }),
+            &resolved,
+        )))
     }
 
     #[tool(
-        description = "Promote an entry from the active session brain into the project knowledge base, adding a sources citation and frontmatter. Leaves the session brain entry untouched. Pass if_version to write only while nothing changed, or \"absent\" to create a page that does not exist yet."
+        description = "Promote an entry from a session brain into the project knowledge base, adding a sources citation and frontmatter. Name the source session in `session`. Leaves the session brain entry untouched. Pass if_version to write only while nothing changed, or \"absent\" to create a page that does not exist yet."
     )]
     async fn brain_promote(
         &self,
@@ -762,16 +936,17 @@ impl HubServer {
         Parameters(params): Parameters<BrainPromoteParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
-        // The source is read from the caller's own active session, under the
-        // ordinary read rule, and the target is a project it may write.
+        // The source is read from the session the call names, under the
+        // ordinary read rule, and the target is a project the caller may write.
         let session = self
-            .session_for(&principal, Access::Read)
+            .named_session(&context, &principal, params.session.as_ref(), None)
             .await
             .map_err(to_error_data)?;
         let project_id = self
             .knowledge_project(
                 &principal,
                 Some(params.project_id.as_deref().unwrap_or(&session.project_id)),
+                None,
                 Access::Write,
             )
             .await
@@ -812,7 +987,7 @@ impl HubServer {
 /// Which store a brain tool acts on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Store {
-    /// The active session's brain.
+    /// A session's brain.
     Session,
     /// The target project's knowledge base.
     Project,
@@ -898,54 +1073,6 @@ impl Store {
     }
 }
 
-/// How `session` names one session, quoted in every refusal that a caller got
-/// the shape wrong.
-const SESSION_REF: &str = "session names one session, either by session_id or \
-                           by agent and name";
-
-/// Why a write reaches only the session's own agent.
-///
-/// One session file has one writer. Two agents writing one working state clobber
-/// each other, and what they meant to share belongs in the project knowledge
-/// base, which is built for it.
-const SESSION_OWNER_ONLY: &str = "a session brain is written only by the agent that owns it";
-
-/// `session` names a session brain, so it says nothing about the project store.
-const SESSION_WITH_PROJECT: &str =
-    "session names a session brain; the project knowledge base is reached with project_id";
-
-/// The session store acts on a session, so a project id there would name a
-/// target the tool cannot honour; saying so is better than ignoring the
-/// argument and reading or writing somewhere else.
-fn check_session_project_id(project_id: Option<&str>) -> Result<()> {
-    if project_id.is_some() {
-        return Err(Error::InvalidArgument(
-            "project_id selects a project knowledge base; the session store acts on a session, and a named one carries its own project_id".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-/// Refuse a `session` the project store cannot honour.
-///
-/// The session store checks its own argument against the active session once it
-/// has resolved it, which the project store has nothing to compare against.
-fn check_write_session(store: Store, session: Option<&SessionRef>) -> Result<()> {
-    match (store, session) {
-        (Store::Project, Some(_)) => Err(Error::InvalidArgument(SESSION_WITH_PROJECT.to_string())),
-        _ => Ok(()),
-    }
-}
-
-/// An opened store, with what the search corpus needs to name its documents.
-struct Target {
-    /// The project the store belongs to.
-    project_id: String,
-    /// The session, at the session store only.
-    session_id: Option<String>,
-    brain: Brain,
-}
-
 /// Remove a file that should not outlive a failed fork.
 ///
 /// A copy that was not finished, or whose session row was not written, is not
@@ -975,156 +1102,205 @@ fn summarise(handoff: Option<&str>) -> (Option<String>, bool) {
     }
 }
 
+/// Merge the `session` and `session_note` members into a write's result.
+pub(super) fn with_session(
+    mut result: serde_json::Value,
+    resolved: &Resolved,
+) -> serde_json::Value {
+    if let (Some(result), Some(members)) = (
+        result.as_object_mut(),
+        resolved.result_members().as_object().cloned(),
+    ) {
+        result.extend(members);
+    }
+    result
+}
+
+/// The `session` an `other_project` note left out is not a target.
+fn names_no_session() -> Error {
+    Error::Session(
+        SessionReason::Invalid,
+        "the session is in another project than project_id; name a session of that project"
+            .to_string(),
+        None,
+    )
+}
+
 impl HubServer {
-    /// Take over or branch from another agent's session.
-    ///
-    /// The hub reads the source's state and decides: an ended session is
-    /// adopted, ownership and all, and a live one is forked into a copy. The
-    /// agent cannot tell which is right, and a wrong guess either forks a dead
-    /// session or adopts a live one.
-    async fn pick_up(
+    /// The session a call must name, resolved as a read: reading never creates
+    /// it, and a live one joins the caller. A call that names none is refused.
+    async fn named_session(
         &self,
+        context: &RequestContext<RoleServer>,
         principal: &Principal,
-        project_id: &str,
-        session_name: &str,
-        reference: &SessionRef,
-    ) -> Result<(sessions::Session, bool, Option<serde_json::Value>)> {
-        let source = self
-            .resolve_session(principal, reference, Some(project_id))
-            .await?;
-        match sessions::start_from(
-            &self.state.db,
-            project_id,
-            session_name,
-            &principal.actor,
-            &source.id,
-        )
-        .await?
-        {
-            sessions::Pickup::Resumed(session) => Ok((session, true, None)),
-            sessions::Pickup::Adopted {
-                session,
-                from_agent,
-            } => {
-                let pickup = json!({
-                    "mode": "adopt",
-                    "source_active": false,
-                    "from_session_id": session.id,
-                    "from_agent": from_agent,
-                    "handoff": session.handoff,
-                });
-                Ok((session, false, Some(pickup)))
-            }
-            sessions::Pickup::Fork(source) => {
-                let handoff = source.handoff.clone();
-                let from_agent = source.agent.clone();
-                let from_session_id = source.id.clone();
-                let session = self.fork(&source, session_name, &principal.actor).await?;
-                // A fork reads like an adoption unless it says otherwise. A
-                // caller that asked for finished work and lost the pickup to
-                // another agent lands here, holding the same handoff note, so
-                // the result says the original is still being worked and by
-                // whom.
-                let note = format!(
-                    "this is a copy: {from_agent} holds the original and is still working it, \
-                     so coordinate through the feed or pick other work"
-                );
-                let pickup = json!({
-                    "mode": "fork",
-                    "from_session_id": from_session_id,
-                    "from_agent": from_agent,
-                    "handoff": handoff,
-                    "source_active": true,
-                    "note": note,
-                });
-                Ok((session, false, Some(pickup)))
-            }
+        arg: Option<&SessionArg>,
+        project_id: Option<&str>,
+    ) -> Result<sessions::Session> {
+        if arg.is_none() {
+            return Err(Error::Session(
+                SessionReason::Required,
+                "this call acts on one session: name it in session".to_string(),
+                None,
+            ));
         }
+        self.resolve_session(context, principal, arg, project_id, Mode::Read)
+            .await?
+            .session
+            .ok_or_else(|| {
+                Error::Session(
+                    SessionReason::Unknown,
+                    "no session by that name".to_string(),
+                    None,
+                )
+            })
     }
 
-    /// Copy a live session's brain into a new session owned by the caller.
-    ///
-    /// The copy runs before the row exists, so a failure leaves neither: the
-    /// partial file goes, and so does the copy if the row cannot be written.
-    async fn fork(
+    /// The session a write to a session brain lands in, with the writer that
+    /// names it. The session is created when it does not exist yet.
+    async fn session_write_target(
         &self,
-        source: &sessions::Session,
-        session_name: &str,
-        caller: &str,
+        context: &RequestContext<RoleServer>,
+        principal: &Principal,
+        arg: Option<&SessionArg>,
+        project_id: Option<&str>,
+    ) -> Result<(sessions::Session, crate::author::Writer)> {
+        let resolved = self
+            .resolve_session(context, principal, arg, project_id, Mode::SessionStoreWrite)
+            .await?;
+        let session = resolved.session.ok_or_else(names_no_session)?;
+        policy::authorize(
+            &self.state.db,
+            principal,
+            &session.project_id,
+            Access::Write,
+        )
+        .await?;
+        let writer = principal.writer(Some(&session.id));
+        Ok((session, writer))
+    }
+
+    /// The session a fork copies, which the caller may read.
+    async fn fork_source(
+        &self,
+        context: &RequestContext<RoleServer>,
+        principal: &Principal,
+        project_id: &str,
+        from: &SessionRef,
     ) -> Result<sessions::Session> {
-        let new_id = crate::store::next_id();
-        let destination = self.state.brain.brain_path(&source.project_id, &new_id)?;
+        let arg = SessionArg::Ref(from.clone());
+        let source = self
+            .named_session(context, principal, Some(&arg), Some(project_id))
+            .await
+            .map_err(|err| match err {
+                Error::Session(SessionReason::Unknown, ..) => {
+                    Error::NotFound("the session to fork from was not found".to_string())
+                }
+                other => other,
+            })?;
+        // A brain belongs to its project: a fork copies one only within it.
+        if source.project_id != project_id {
+            return Err(Error::InvalidArgument(format!(
+                "session {} is in project {}; a fork stays in the project it starts in",
+                source.id, source.project_id
+            )));
+        }
+        Ok(source)
+    }
+
+    /// Copy a session's brain into the fork's own file, when the source has
+    /// one. A source that never wrote has no file to copy, and the fork starts
+    /// with an empty brain rather than an invented one.
+    ///
+    /// The copy runs under the source's write lock, which a prune also takes
+    /// to remove the file, so a prune that lands between the branch and the
+    /// copy cannot be copied out from under.
+    async fn copy_brain(&self, source: &sessions::Session, fork: &sessions::Session) -> Result<()> {
+        let destination = self.state.brain.brain_path(&fork.project_id, &fork.id)?;
         let mut temporary = destination.clone().into_os_string();
         temporary.push(".tmp");
         let temporary = std::path::PathBuf::from(temporary);
-
-        // A source that never wrote has no file to copy, and the fork starts
-        // with an empty brain rather than an invented one.
         let db = self.state.db.clone();
         let source_id = source.id.clone();
-        if let Some(brain) = self
+        let Some(brain) =
+            self.state
+                .brain
+                .open_existing_live(&source.project_id, &source.id, async move || {
+                    match sessions::get(&db, &source_id).await? {
+                        Some(current) if current.deleted_at.is_none() => Ok(()),
+                        _ => Err(Error::NotFound(format!(
+                            "source session {source_id} not found"
+                        ))),
+                    }
+                })
+                .await?
+        else {
+            return Ok(());
+        };
+        std::fs::create_dir_all(
+            destination
+                .parent()
+                .ok_or_else(|| Error::Config("a brain path has no directory".to_string()))?,
+        )?;
+        let renamed = temporary.clone();
+        let target = destination.clone();
+        let copied = brain
+            .vacuum_and_then(
+                &temporary,
+                async || Ok(()),
+                async move || {
+                    std::fs::rename(&renamed, &target)?;
+                    Ok(())
+                },
+            )
+            .await;
+        discard(&temporary);
+        if copied.is_err() {
+            discard(&destination);
+        }
+        copied
+    }
+
+    /// Mirror an anchor into the session's recovery document.
+    ///
+    /// The write is based on the version the file holds, so another
+    /// participant's earlier anchor is replaced rather than refused.
+    async fn write_recovery(
+        &self,
+        principal: &Principal,
+        session: &sessions::Session,
+        text: &str,
+    ) -> Result<()> {
+        let current = match self
             .state
             .brain
-            .open_existing_live(&source.project_id, &source.id, async move || {
-                let current = sessions::get(&db, &source_id).await?;
-                if current.is_none_or(|s| s.deleted_at.is_some() || s.status == "quarantined") {
-                    return Err(Error::NotFound(format!(
-                        "source session {source_id} not found"
-                    )));
-                }
-                Ok(())
-            })
+            .open_existing(&session.project_id, &session.id)
             .await?
         {
-            let db_alive = self.state.db.clone();
-            let db_copied = self.state.db.clone();
-            let source_id = source.id.clone();
-            let temporary_clone = temporary.clone();
-            let destination_clone = destination.clone();
-            let source_clone = source.clone();
-            let session_name_string = session_name.to_string();
-            let caller_string = caller.to_string();
-            let new_id_string = new_id.clone();
-
-            let copied = brain
-                .vacuum_and_then(
-                    &temporary,
-                    async move || {
-                        // Under the source's write lock, which a prune also takes
-                        // to remove the file: a prune that lands between the branch
-                        // and the copy must not be copied out from under.
-                        match sessions::get(&db_alive, &source_id).await? {
-                            Some(session) if session.deleted_at.is_none() => Ok(()),
-                            _ => Err(Error::Conflict(format!(
-                                "session {source_id} was pruned while forking it session_id={source_id}"
-                            ))),
-                        }
-                    },
-                    async move || {
-                        std::fs::rename(&temporary_clone, &destination_clone)?;
-                        sessions::insert_fork(
-                            &db_copied,
-                            &source_clone,
-                            &session_name_string,
-                            &caller_string,
-                            &new_id_string,
-                        )
-                        .await
-                    },
-                )
-                .await;
-
-            discard(&temporary);
-            match copied {
-                Ok(session) => Ok(session),
-                Err(err) => {
-                    discard(&destination);
-                    Err(err)
-                }
-            }
-        } else {
-            sessions::insert_fork(&self.state.db, source, session_name, caller, &new_id).await
-        }
+            Some(brain) => brain
+                .get(RECOVERY_PATH)
+                .await?
+                .map(|bytes| brain::version(&bytes)),
+            None => None,
+        };
+        let writer = principal.writer(Some(&session.id));
+        let gate = self.state.session_gates.shared(&session.id).await;
+        brain::shared::write(
+            &self.state,
+            &gate,
+            SessionWrite {
+                session_id: &session.id,
+                writer: &writer,
+                op_name: "brain.put",
+                op: BrainOp::Put {
+                    path: RECOVERY_PATH,
+                    bytes: text.as_bytes(),
+                },
+                if_version: Some(current.as_deref().unwrap_or("absent")),
+                event: None,
+            },
+        )
+        .await?;
+        Ok(())
     }
 
     /// Bytes a session's brain occupies on disk, its write-ahead log included.
@@ -1139,392 +1315,39 @@ impl HubServer {
         crate::brain::file_bytes(&path)
     }
 
-    /// The active session's id when it belongs to this project.
-    ///
-    /// An event written while a session is open belongs to that session, so a
-    /// session detail screen can count what the session produced. A write into
-    /// another project is not this session's work, so it carries no session.
-    pub(super) async fn session_in(
-        &self,
-        principal: &Principal,
-        project_id: &str,
-    ) -> Option<String> {
-        let lease = self.active.lock().await.clone()?;
-        if lease.project_id != project_id {
-            return None;
-        }
-        if !principal.is_admin && lease.agent != principal.actor {
-            let mut active = self.active.lock().await;
-            if active
-                .as_ref()
-                .is_some_and(|l| l.session_id == lease.session_id && l.epoch == lease.epoch)
-            {
-                *active = None;
-            }
-            return None;
-        }
-        let Ok(Some(current)) = sessions::get(&self.state.db, &lease.session_id).await else {
-            let mut active = self.active.lock().await;
-            if active
-                .as_ref()
-                .is_some_and(|l| l.session_id == lease.session_id && l.epoch == lease.epoch)
-            {
-                *active = None;
-            }
-            return None;
-        };
-        if current.deleted_at.is_some()
-            || current.status != "active"
-            || (!principal.is_admin && current.agent != principal.actor)
-        {
-            let mut active = self.active.lock().await;
-            if active
-                .as_ref()
-                .is_some_and(|l| l.session_id == lease.session_id && l.epoch == lease.epoch)
-            {
-                *active = None;
-            }
-            return None;
-        }
-        self.touch_activity(&lease.session_id).await;
-        Some(lease.session_id)
-    }
-
-    /// Record that the session is still at work.
-    ///
-    /// Best effort by design. The timestamp feeds a count on a screen, so a
-    /// store that is busy must not fail the call the agent actually made, nor
-    /// make a brain read wait out the busy timeout for a write it never needed.
-    async fn touch_activity(&self, session_id: &str) {
-        if let Err(err) = self.state.activity.touch(&self.state.db, session_id).await {
-            tracing::debug!(session_id, error = %err, "could not record session activity");
-        }
-    }
-
-    /// The session this connection holds a lease on, when it is the caller's.
-    ///
-    /// A lease the human has since reassigned names a session the caller no
-    /// longer owns, and scopes nothing.
-    async fn held_session(&self, principal: &Principal) -> Option<String> {
-        let active = self.active.lock().await;
-        active
-            .as_ref()
-            .filter(|lease| lease.agent == principal.actor)
-            .map(|lease| lease.session_id.clone())
-    }
-
-    /// The session a call delivers into: the held one while it is running.
-    ///
-    /// A lease on a session that has since ended or been pruned scopes as no
-    /// session, so the call reads the items asked outside any session and keeps
-    /// no cursor for a session that no longer exists.
-    pub(super) async fn lease_session(&self, principal: &Principal) -> Option<String> {
-        let held = self.held_session(principal).await?;
-        // An unreadable store keeps the lease: the settle guards the write.
-        let running = match crate::store::connect(&self.state.db) {
-            Ok(conn) => crate::store::notifications::session_is_active(&conn, &held)
-                .await
-                .unwrap_or(true),
-            Err(_) => true,
-        };
-        running.then_some(held)
-    }
-
-    /// The session a notification call is scoped to: the one it names, which
-    /// must be the caller's own and still running, else the connection's lease,
-    /// else none.
-    ///
-    /// Naming it is how a caller that holds no lease, a hook or a watcher on a
-    /// connection of its own, reads the scope of a session it works under.
-    pub(super) async fn notify_scope(
-        &self,
-        principal: &Principal,
-        reference: Option<&SessionRef>,
-    ) -> Result<Option<String>> {
-        let Some(reference) = reference else {
-            return Ok(self.lease_session(principal).await);
-        };
-        self.named_scope(principal, reference).await
-    }
-
-    /// The session a subscription is bound to: the one named, else the one this
-    /// connection holds even if it has ended, which is then refused rather than
-    /// quietly bound to none.
-    pub(super) async fn subscribe_scope(
-        &self,
-        principal: &Principal,
-        reference: Option<&SessionRef>,
-    ) -> Result<Option<String>> {
-        match reference {
-            Some(reference) => self.named_scope(principal, reference).await,
-            None => Ok(self.held_session(principal).await),
-        }
-    }
-
-    async fn named_scope(
-        &self,
-        principal: &Principal,
-        reference: &SessionRef,
-    ) -> Result<Option<String>> {
-        let session = self.referenced_session(principal, reference).await?;
-        if session.agent != principal.actor {
-            return Err(Error::Forbidden(format!(
-                "{SESSION_OWNER_ONLY} owner={}",
-                session.agent
-            )));
-        }
-        if session.status == "ended" {
-            return Err(Error::Conflict(format!(
-                "session {} has ended; call session_start to begin or resume a session of your own",
-                session.id
-            )));
-        }
-        Ok(Some(session.id))
-    }
-
-    /// The recorded active session, or a conflict when none was started.
-    async fn active_session(&self) -> Result<ActiveSessionLease> {
-        let active = self.active.lock().await;
-        active.clone().ok_or(Error::NoActiveSession)
-    }
-
-    /// The active session while it is still live.
-    ///
-    /// The session row must still exist: a prune removes it, and opening the
-    /// brain afterwards would recreate the file and an orphaned search row. A
-    /// pruned session is a conflict, so the tool fails rather than resurrecting
-    /// it.
-    async fn live_session(&self, session_id: &str) -> Result<sessions::Session> {
-        sessions::get(&self.state.db, session_id)
-            .await?
-            .filter(|session| session.deleted_at.is_none())
-            .ok_or_else(|| {
-                Error::Conflict(format!(
-                    "session {session_id} is no longer available; start a session"
-                ))
-            })
-    }
-
-    /// Authorize the active session for one access.
-    async fn session_for(
-        &self,
-        principal: &Principal,
-        access: Access,
-    ) -> Result<sessions::Session> {
-        let lease = self.active_session().await?;
-        let session = self.live_session(&lease.session_id).await?;
-        policy::authorize(&self.state.db, principal, &session.project_id, access).await?;
-        // Resolving a session is what a session doing work looks like: brain
-        // traffic emits no events, so without this an agent writing for an hour
-        // would fall out of the active count while it worked.
-        self.touch_activity(&session.id).await;
-        // The slot remembers a session this connection started, but the session
-        // may have moved since: the human ended it and another agent picked it
-        // up, or the human reassigned it. One brain has one writer, so a
-        // connection that lost its session stops writing to it, the admin
-        // included, and is told who holds it and how to carry on.
-        if matches!(access, Access::Write) && session.agent != principal.actor {
-            *self.active.lock().await = None;
-            return Err(Error::Conflict(format!(
-                "session {} now belongs to {}; call session_start to begin or resume a session of your own",
-                session.id, session.agent
-            )));
-        }
-        if matches!(access, Access::Write) && session.status == "ended" {
-            *self.active.lock().await = None;
-            return Err(Error::Conflict(format!(
-                "session {} has ended; call session_start to begin or resume a session of your own",
-                session.id
-            )));
-        }
-        Ok(session)
-    }
-
-    /// The session a call names, once the caller may read its project.
-    ///
-    /// Reading another session never touches the caller's own, so a caller
-    /// that never started a session still reaches one. Both reference forms
-    /// resolve here, so re-keying sessions by their owner is a change to one
-    /// function.
-    async fn referenced_session(
-        &self,
-        principal: &Principal,
-        reference: &SessionRef,
-    ) -> Result<sessions::Session> {
-        let session = self.resolve_session(principal, reference, None).await?;
-        // A pruned session is gone from a reader's point of view, undo window
-        // or not: whether the bytes survive another moment is the human's
-        // business, and the file is never opened to find out. A pickup says
-        // more, because the human can still undo what it names.
-        if session.deleted_at.is_some() {
-            return Err(Error::NotFound(format!(
-                "session {} has been pruned",
-                session.id
-            )));
-        }
-        Ok(session)
-    }
-
-    /// Resolve a session reference, pruned rows included.
-    ///
-    /// `default_project` is the project of the enclosing call, which a pickup
-    /// has and a plain read takes from the active session instead.
-    async fn resolve_session(
-        &self,
-        principal: &Principal,
-        reference: &SessionRef,
-        default_project: Option<&str>,
-    ) -> Result<sessions::Session> {
-        let session = match (
-            reference.session_id.as_deref(),
-            reference.agent.as_deref(),
-            reference.name.as_deref(),
-        ) {
-            (Some(session_id), None, None) => {
-                if reference.project_id.is_some() {
-                    return Err(Error::InvalidArgument(
-                        "a session_id names a session on its own; project_id belongs to the agent and name form".to_string(),
-                    ));
-                }
-                // The row is read before the caller is authorized for it, so an
-                // id that resolves to nothing is concealed: which ids exist is
-                // not something a refusal may leak.
-                let session = sessions::get(&self.state.db, session_id)
-                    .await?
-                    .ok_or_else(|| {
-                        policy::conceal(
-                            principal,
-                            Error::NotFound(format!("session {session_id} not found")),
-                        )
-                    })?;
-                policy::authorize(&self.state.db, principal, &session.project_id, Access::Read)
-                    .await?;
-                session
-            }
-            (None, Some(agent), Some(name)) => {
-                let project_id = match reference.project_id.as_deref().or(default_project) {
-                    Some(project_id) => project_id.to_string(),
-                    None => self.active_session().await.map_err(|_| {
-                        Error::InvalidArgument(
-                            "a session named by agent and name needs a project_id, or an active session to take one from"
-                                .to_string(),
-                        )
-                    })?.project_id,
-                };
-                policy::authorize(&self.state.db, principal, &project_id, Access::Read).await?;
-                sessions::find_owned(&self.state.db, &project_id, agent, name)
-                    .await?
-                    .ok_or_else(|| {
-                        Error::NotFound(format!(
-                            "no session '{name}' for agent '{agent}' in project {project_id}"
-                        ))
-                    })?
-            }
-            _ => return Err(Error::InvalidArgument(SESSION_REF.to_string())),
-        };
-        Ok(session)
-    }
-
-    /// The caller's own session a write names.
-    ///
-    /// The active-session lease says which session a held MCP connection is
-    /// working, and a one-shot call has no connection to hold it. Naming the
-    /// session is the other way to reach the same file: one working state has
-    /// one writer, and that is the agent that owns the session, lease or no
-    /// lease. Everything else a write needs is the same as the active path, so
-    /// it is checked the same way: write access to the project's store, an
-    /// owner, and a session still running.
-    async fn own_session(
-        &self,
-        principal: &Principal,
-        reference: &SessionRef,
-    ) -> Result<sessions::Session> {
-        // A pruned session is gone from a caller's point of view, undo window
-        // or not, the same as it is for a read that names it.
-        let session = self.referenced_session(principal, reference).await?;
-        policy::authorize(
-            &self.state.db,
-            principal,
-            &session.project_id,
-            Access::Write,
-        )
-        .await?;
-        // The owner rule holds whoever asks, the administrator included: an
-        // admin has its own sessions to work in, and a session belongs to the
-        // agent doing the work rather than to the hub.
-        if session.agent != principal.actor {
-            return Err(Error::Forbidden(format!(
-                "{SESSION_OWNER_ONLY} owner={}",
-                session.agent
-            )));
-        }
-        if session.status == "ended" {
-            return Err(Error::Conflict(format!(
-                "session {} has ended; call session_start to begin or resume a session of your own",
-                session.id
-            )));
-        }
-        self.touch_activity(&session.id).await;
-        Ok(session)
-    }
-
-    /// Authorize and open the session brain a write acts on.
-    ///
-    /// A write to the project store does not come through here: the knowledge
-    /// base has one write path of its own, shared with the human surface.
-    async fn target_for_write(
-        &self,
-        principal: &Principal,
-        project_id: Option<&str>,
-        session_ref: Option<&SessionRef>,
-    ) -> Result<Target> {
-        check_session_project_id(project_id)?;
-        // A named session is written as itself, so one client passes the same
-        // argument to a read and a write. With none named the write is the
-        // connection's active session, and says so when there is not one.
-        let session = match session_ref {
-            Some(reference) => self.own_session(principal, reference).await?,
-            None => self.session_for(principal, Access::Write).await?,
-        };
-        let session_id = session.id.clone();
-        // A sweep takes the same lock to remove the file, so the liveness
-        // check above is only ordered against it when it is made again here.
-        let brain = self
-            .state
-            .brain
-            .open_live(&session.project_id, &session.id, async || {
-                self.live_session(&session_id).await.map(|_| ())
-            })
-            .await?;
-        Ok(Target {
-            project_id: session.project_id,
-            session_id: Some(session.id),
-            brain,
-        })
-    }
-
     /// Authorize and open the store a read acts on.
     ///
     /// A read never creates the file, so a store nothing was written to has no
-    /// brain and `None` stands for an empty one.
+    /// brain and `None` stands for an empty one. A session store read names its
+    /// session; the project store takes the call's `session` only to join it.
     async fn target_for_read(
         &self,
+        context: &RequestContext<RoleServer>,
         principal: &Principal,
         store: Store,
-        project_id: Option<&str>,
-        session: Option<&SessionRef>,
+        params: &BrainGetParams,
     ) -> Result<Option<Target>> {
         match store {
             Store::Session => {
-                let session = match session {
-                    Some(reference) => {
-                        check_session_project_id(project_id)?;
-                        self.referenced_session(principal, reference).await?
-                    }
-                    None => {
-                        self.session_target(principal, project_id, Access::Read)
-                            .await?
-                    }
+                if params.session.is_none() {
+                    return Err(Error::Session(
+                        SessionReason::Required,
+                        "a session brain is read through its session: name it in session"
+                            .to_string(),
+                        None,
+                    ));
+                }
+                let resolved = self
+                    .resolve_session(
+                        context,
+                        principal,
+                        params.session.as_ref(),
+                        params.project_id.as_deref(),
+                        Mode::Read,
+                    )
+                    .await?;
+                let Some(session) = resolved.session else {
+                    return Ok(None);
                 };
                 let db = self.state.db.clone();
                 let sid = session.id.clone();
@@ -1541,42 +1364,34 @@ impl HubServer {
                         Ok(())
                     })
                     .await?
-                    .map(|brain| Target {
-                        project_id: session.project_id,
-                        session_id: Some(session.id),
-                        brain,
-                    }))
+                    .map(|brain| Target { brain }))
             }
             Store::Project => {
-                if session.is_some() {
-                    return Err(Error::InvalidArgument(SESSION_WITH_PROJECT.to_string()));
-                }
+                let resolved = self
+                    .resolve_session(
+                        context,
+                        principal,
+                        params.session.as_ref(),
+                        params.project_id.as_deref(),
+                        Mode::Read,
+                    )
+                    .await?;
                 let project_id = self
-                    .knowledge_project(principal, project_id, Access::Read)
+                    .knowledge_project(
+                        principal,
+                        params.project_id.as_deref(),
+                        resolved.session.as_ref(),
+                        Access::Read,
+                    )
                     .await?;
                 Ok(self
                     .state
                     .knowledge
                     .open_existing(&project_id, brain::KNOWLEDGE_FILE)
                     .await?
-                    .map(|brain| Target {
-                        project_id,
-                        session_id: None,
-                        brain,
-                    }))
+                    .map(|brain| Target { brain }))
             }
         }
-    }
-
-    /// The active session a session-store call acts on.
-    async fn session_target(
-        &self,
-        principal: &Principal,
-        project_id: Option<&str>,
-        access: Access,
-    ) -> Result<sessions::Session> {
-        check_session_project_id(project_id)?;
-        self.session_for(principal, access).await
     }
 
     /// The project whose knowledge base a call acts on, once the caller is
@@ -1585,23 +1400,20 @@ impl HubServer {
         &self,
         principal: &Principal,
         project_id: Option<&str>,
+        session: Option<&sessions::Session>,
         access: Access,
     ) -> Result<String> {
-        let project_id = match project_id {
-            Some(project_id) => project_id.to_string(),
-            // The active session's project is the default, so an agent at work
-            // in one project reaches that project's knowledge base without
+        let project_id = match (project_id, session) {
+            (Some(project_id), _) => project_id.to_string(),
+            // The session's project is the default, so an agent at work in
+            // one project reaches that project's knowledge base without
             // repeating itself.
-            None => {
-                self.active_session()
-                    .await
-                    .map_err(|_| {
-                        Error::InvalidArgument(
-                    "the project store needs a project_id, or an active session to take one from"
+            (None, Some(session)) => session.project_id.clone(),
+            (None, None) => {
+                return Err(Error::InvalidArgument(
+                    "the project store needs a project_id, or a session to take one from"
                         .to_string(),
-                )
-                    })?
-                    .project_id
+                ));
             }
         };
         // The policy layer lets the admin through without looking the project
@@ -1617,51 +1429,180 @@ impl HubServer {
         policy::authorize(&self.state.db, principal, &project_id, access).await?;
         Ok(project_id)
     }
+}
 
-    /// Index a value written to a session brain: path as title, content as
-    /// body.
-    async fn index_write(
-        &self,
-        project_id: &str,
-        session_id: Option<&str>,
-        path: &str,
-        body: &str,
-    ) -> Result<()> {
-        let _turn = crate::store::write_turn().await?;
-        let conn = crate::store::connect(&self.state.db)?;
-        let updated_at = crate::store::now_rfc3339();
-        let s_id = session_id.unwrap_or_default();
-        let doc_id = format!("brain:{s_id}:{path}");
-        index_doc(
-            &conn,
-            SearchDoc {
-                doc_id: &doc_id,
-                project_id,
-                kind: "brain",
-                ref_id: path,
-                session_id,
-                title: Some(path),
-                body,
-                updated_at: &updated_at,
+/// The start of the window a session must have been seen in to be live.
+fn active_since(state: &crate::app::AppState) -> String {
+    let window =
+        time::Duration::try_from(state.config.active_window).unwrap_or(time::Duration::minutes(15));
+    (time::OffsetDateTime::now_utc() - window)
+        .format(&time::format_description::well_known::Rfc3339)
+        .unwrap_or_default()
+}
+
+/// An opened store.
+struct Target {
+    brain: Brain,
+}
+
+/// One version of a session brain value, as its write log holds it.
+struct SessionVersion {
+    path: String,
+    content: String,
+    version: String,
+    current: bool,
+    at: Option<String>,
+    actor: Option<String>,
+}
+
+fn rfc3339(epoch_secs: i64) -> String {
+    time::OffsetDateTime::from_unix_timestamp(epoch_secs)
+        .ok()
+        .and_then(|at| {
+            at.format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        })
+        .unwrap_or_else(|| epoch_secs.to_string())
+}
+
+/// The bytes of one version of a session brain value: what it holds now, or a
+/// version its write log names and whose bytes were kept.
+async fn session_version(brain: &Brain, path: &str, version: &str) -> Result<SessionVersion> {
+    let state = brain.page_version(path, version).await?;
+    let current = state
+        .now
+        .as_ref()
+        .is_some_and(|bytes| brain::version(bytes) == version);
+    let newest = state
+        .writes
+        .iter()
+        .rev()
+        .find(|record| record.version.as_deref() == Some(version));
+    let bytes = if current {
+        state.now.clone()
+    } else {
+        let Some(newest) = newest else {
+            return Err(Error::NotFound(format!(
+                "no version {version} in the history of '{path}'"
+            )));
+        };
+        if state
+            .mark
+            .as_ref()
+            .is_some_and(|mark| !mark.readable(newest.id, Some(version)))
+        {
+            return Err(Error::NotFound(format!(
+                "the bytes of version {version} of '{path}' were forgotten"
+            )));
+        }
+        state.kept.clone()
+    };
+    let bytes = bytes.ok_or_else(|| {
+        Error::NotFound(format!(
+            "the bytes of version {version} of '{path}' were not kept"
+        ))
+    })?;
+    let content = String::from_utf8(bytes).map_err(|_| {
+        Error::InvalidArgument(format!("version {version} of '{path}' is not UTF-8 text"))
+    })?;
+    Ok(SessionVersion {
+        path: path.to_string(),
+        content,
+        version: version.to_string(),
+        current,
+        at: newest.map(|record| rfc3339(record.at)),
+        actor: newest.map(|record| record.actor.clone()),
+    })
+}
+
+/// One page of a session brain value's history.
+struct SessionHistory {
+    rows: Vec<serde_json::Value>,
+    total: usize,
+    next_before: Option<i64>,
+    truncated: bool,
+    current_version: Option<String>,
+}
+
+/// A value's write log, newest first, `limit` rows before the `before` cursor.
+async fn session_history(
+    brain: &Brain,
+    path: &str,
+    before: Option<i64>,
+    limit: usize,
+) -> Result<SessionHistory> {
+    let current_version = brain.get(path).await?.map(|bytes| brain::version(&bytes));
+    let mut writes = brain
+        .write_log(
+            &crate::brain::WriteFilter {
+                path: Some(path),
+                ..crate::brain::WriteFilter::default()
             },
+            None,
+            usize::MAX,
         )
-        .await
+        .await?
+        .rows;
+    writes.reverse();
+    let total = writes.len();
+    let newest_of_current = writes
+        .iter()
+        .rev()
+        .find(|record| record.version.is_some() && record.version == current_version)
+        .map(|record| record.id);
+    let mut rows = Vec::new();
+    let mut more = false;
+    for record in writes.iter().rev() {
+        if before.is_some_and(|before| record.id >= before) {
+            continue;
+        }
+        if rows.len() == limit {
+            more = true;
+            break;
+        }
+        let summary = match record.op.as_str() {
+            "brain.delete" => "deleted",
+            "brain.revert" => "restored an earlier version",
+            _ => "wrote",
+        };
+        rows.push((record.id, summary, record));
     }
-
-    /// Remove a session brain value's search row.
-    async fn delete_doc(&self, session_id: Option<&str>, path: &str) -> Result<()> {
-        let _turn = crate::store::write_turn().await?;
-        let conn = crate::store::connect(&self.state.db)?;
-        let s_id = session_id.unwrap_or_default();
-        let doc_id = format!("brain:{s_id}:{path}");
-        conn.execute(
-            "DELETE FROM search_docs WHERE doc_id = ?1",
-            vec![Value::Text(doc_id)],
-        )
-        .await
-        .map_err(crate::store::engine)?;
-        Ok(())
-    }
+    let versions: Vec<&str> = rows
+        .iter()
+        .filter_map(|(_, _, record)| record.version.as_deref())
+        .collect();
+    let kept = brain.kept_versions(&versions).await?;
+    let rows: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|(id, summary, record)| {
+            let version = record.version.as_deref();
+            json!({
+                "id": id,
+                "op": record.op,
+                "actor": record.actor,
+                "at": rfc3339(record.at),
+                "version": version,
+                "size_bytes": record.bytes,
+                "summary": summary,
+                "kept": version.is_some_and(|version| {
+                    Some(version) == current_version.as_deref() || kept.contains(version)
+                }),
+                "current": Some(*id) == newest_of_current,
+            })
+        })
+        .collect();
+    let next_before = if more {
+        rows.last().and_then(|row| row["id"].as_i64())
+    } else {
+        None
+    };
+    Ok(SessionHistory {
+        rows,
+        total,
+        next_before,
+        truncated: more,
+        current_version,
+    })
 }
 
 /// Arguments for `session_start`.
@@ -1669,10 +1610,15 @@ impl HubServer {
 struct SessionStartParams {
     project_id: String,
     session_name: String,
-    /// The session to pick up, by session_id or by agent and name. The hub
-    /// adopts an ended session and forks a running one.
+    /// A session to fork: its brain is copied into the new name. By
+    /// `session_id`, or by `name` and `project_id`. Refused when the new name
+    /// already exists.
     #[serde(default)]
     from: Option<SessionRef>,
+    /// Refuse a name the project already holds, live or ended, with a
+    /// conflict that names it.
+    #[serde(default)]
+    exclusive: bool,
 }
 
 /// Arguments for `session_anchor`.
@@ -1688,29 +1634,25 @@ struct SessionAnchorParams {
     /// the same project.
     #[serde(default)]
     source_ids: Option<Vec<String>>,
-    /// The session to anchor, which must be the caller's own. Omitted, it is
-    /// this connection's active session.
+    /// The session to anchor.
     #[serde(default)]
-    session: Option<SessionRef>,
+    session: Option<SessionArg>,
     /// Scoped per project and per operation: a retry with the same value
     /// returns the first anchor instead of appending a duplicate.
     #[serde(default)]
     idempotency_key: Option<String>,
 }
 
-/// Arguments for `session_resume`.
-#[derive(Debug, Deserialize, JsonSchema)]
-struct SessionResumeParams {
-    /// The session to read, by session_id or by agent and name. Omitted, it is
-    /// this connection's active session.
-    #[serde(default)]
-    session: Option<SessionRef>,
-}
-
 /// Arguments for `session_end`.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct SessionEndParams {
-    session_id: String,
+    /// The session to end.
+    #[serde(default)]
+    session: Option<SessionArg>,
+    /// The session id on its own, as an older client sends it; `session`
+    /// beats it.
+    #[serde(default)]
+    session_id: Option<String>,
     /// What the next agent needs to know, kept on the session and shown to the
     /// human. It never enters the brain.
     #[serde(default)]
@@ -1725,49 +1667,36 @@ struct SessionListParams {
     /// `active` or `ended`.
     #[serde(default)]
     status: Option<String>,
-    /// The owning agent.
+    /// Only sessions that have this agent as a participant.
     #[serde(default)]
     agent: Option<String>,
+    /// Only sessions that have this member as a participant.
+    #[serde(default)]
+    member: Option<String>,
+    /// Only sessions started by this kind of author: `participant`, `human`,
+    /// `local` or `legacy`.
+    #[serde(default)]
+    kind: Option<String>,
+    /// Only live sessions: active, with a participant seen recently.
+    #[serde(default)]
+    live: bool,
     #[serde(default)]
     limit: Option<i64>,
 }
 
-/// How a call names the session it reads or writes.
-///
-/// Either a hub session id, or the agent that owns the session and the name it
-/// runs under, inside a project. Exactly one form, so a call that names a
-/// session names one session. A read may name anyone's; a write may only name
-/// the caller's own, and naming it is how a caller with no active session of
-/// its own reaches it.
-#[derive(Debug, Deserialize, JsonSchema)]
-pub(super) struct SessionRef {
-    /// The hub session id, on its own.
-    #[serde(default)]
-    session_id: Option<String>,
-    /// The agent that owns the session, with `name`.
-    #[serde(default)]
-    agent: Option<String>,
-    /// The session name, with `agent`.
-    #[serde(default)]
-    name: Option<String>,
-    /// The project the named session runs in. Defaults to the active session's
-    /// project.
-    #[serde(default)]
-    project_id: Option<String>,
-}
-
 /// Arguments for `brain_get`.
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 struct BrainGetParams {
     path: String,
     #[serde(default)]
     store: Option<String>,
     #[serde(default)]
     project_id: Option<String>,
-    /// The session to read. Omitted, it is the active session.
+    /// The session. A session store names it; the project store takes it only
+    /// to join the session.
     #[serde(default)]
-    session: Option<SessionRef>,
-    /// An earlier version of a project page, from `brain_history`.
+    session: Option<SessionArg>,
+    /// An earlier version of a page, from `brain_history`.
     #[serde(default)]
     version: Option<String>,
 }
@@ -1776,8 +1705,13 @@ struct BrainGetParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct BrainHistoryParams {
     path: String,
+    /// `project` (the default) or `session`.
+    #[serde(default)]
+    store: Option<String>,
     #[serde(default)]
     project_id: Option<String>,
+    #[serde(default)]
+    session: Option<SessionArg>,
     /// The `next_before` of the previous page.
     #[serde(default)]
     before: Option<i64>,
@@ -1791,10 +1725,15 @@ struct BrainRevertParams {
     path: String,
     /// The version to put back, from `brain_history`.
     version: String,
+    /// `project` (the default) or `session`.
+    #[serde(default)]
+    store: Option<String>,
     #[serde(default)]
     project_id: Option<String>,
     #[serde(default)]
     if_version: Option<String>,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `brain_put`.
@@ -1808,10 +1747,9 @@ struct BrainPutParams {
     project_id: Option<String>,
     #[serde(default)]
     if_version: Option<String>,
-    /// The session written, which must be the caller's own session. Naming it
-    /// is how a one-shot call writes: it holds no active session.
+    /// The session written; created when it does not exist yet.
     #[serde(default)]
-    session: Option<SessionRef>,
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `brain_list`.
@@ -1823,9 +1761,8 @@ struct BrainListParams {
     store: Option<String>,
     #[serde(default)]
     project_id: Option<String>,
-    /// The session to list. Omitted, it is the active session.
     #[serde(default)]
-    session: Option<SessionRef>,
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `brain_delete`.
@@ -1838,10 +1775,8 @@ struct BrainDeleteParams {
     project_id: Option<String>,
     #[serde(default)]
     if_version: Option<String>,
-    /// The session the entry is removed from, which must be the caller's own
-    /// session. Naming it is how a one-shot call deletes.
     #[serde(default)]
-    session: Option<SessionRef>,
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `brain_promote`.
@@ -1861,80 +1796,7 @@ struct BrainPromoteParams {
     tags: Option<Vec<String>>,
     #[serde(default)]
     if_version: Option<String>,
-}
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::AppState;
-    use crate::config::Config;
-
-    async fn state(tag: &str) -> AppState {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock before epoch")
-            .as_nanos();
-        AppState::open(Config {
-            // Under the build tree rather than the system temp directory,
-            // which is often memory. Unit tests get no CARGO_TARGET_TMPDIR, so
-            // the path is built from the manifest directory.
-            data_dir: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("target/tmp")
-                .join(format!("agent-hub-{tag}-{}-{nanos}", std::process::id())),
-            bind: "127.0.0.1:0".parse().expect("socket address"),
-            public_url: None,
-            admin_token: Some("token".to_string()),
-            inbox_caps: crate::limits::InboxCaps::disabled(),
-            events_per_project: crate::limits::EventCeiling::disabled(),
-            active_window: std::time::Duration::from_secs(900),
-            node_name: None,
-            enrol_enabled: true,
-            enrol_pending_max: 20,
-            enrol_pending_ttl: std::time::Duration::from_secs(24 * 60 * 60),
-            trusted_proxies: Vec::new(),
-            notify: None,
-            backup_dir: None,
-        })
-        .await
-        .expect("open state")
-    }
-
-    /// A touch is bookkeeping for a number on a screen. A store that refuses it
-    /// must not take the call the agent actually made down with it,
-    /// so the tool path swallows what the store returns.
-    #[tokio::test]
-    async fn a_touch_the_store_refuses_does_not_reach_the_caller() {
-        let state = state("brain-touch").await;
-        crate::store::projects::create(&state.db, "proj", "Project")
-            .await
-            .expect("create project");
-        let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
-            .await
-            .expect("start");
-        let server = HubServer::new(state.clone());
-
-        // The store refuses the write outright, so this is the failing path,
-        // reached the way a tool call reaches it. Holding the write lock instead
-        // would hold the process-wide write queue for the whole lock wait.
-        let conn = state.db.connect().expect("connect");
-        conn.execute(
-            "CREATE TRIGGER refuse_touch BEFORE UPDATE OF last_activity ON sessions
-             BEGIN SELECT RAISE(ABORT, 'touch refused'); END",
-            (),
-        )
-        .await
-        .expect("refuse the touch");
-
-        server.touch_activity(&session.id).await;
-
-        assert_eq!(
-            sessions::get(&state.db, &session.id)
-                .await
-                .expect("get")
-                .expect("row")
-                .last_activity,
-            session.last_activity,
-            "the touch really was refused, and the caller was never told"
-        );
-        let _ = std::fs::remove_dir_all(&state.data_dir);
-    }
+    /// The session whose brain holds `from_path`.
+    #[serde(default)]
+    session: Option<SessionArg>,
 }

@@ -209,7 +209,7 @@ async fn feed_and_artifacts_return_empty_for_unknown_or_pruned_session() {
 fn mcp_artifact_session_lineage_and_parities() {
     let data_dir = TempDir::new("mcp-lineage");
     common::seed::seed_project(data_dir.path(), "proj");
-    let mut server = McpServer::mcp(data_dir.path(), &[("HUB_AGENT_ID", "agent-one")]);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     // Publish outside session
@@ -226,6 +226,10 @@ fn mcp_artifact_session_lineage_and_parities() {
         .as_str()
         .expect("outside id")
         .to_string();
+    assert!(
+        structured(&outside)["session"].is_null(),
+        "a publish that names no session records none: {outside}"
+    );
 
     // Start session
     let started = server.call_tool(
@@ -256,13 +260,18 @@ fn mcp_artifact_session_lineage_and_parities() {
         .as_str()
         .expect("inside id")
         .to_string();
+    assert_eq!(
+        structured(&inside)["session"],
+        session_id.as_str(),
+        "the followed session is recorded, not the forged id"
+    );
 
     // List artifacts for session via MCP
     let listed = server.call_tool(
         "artifact_list",
         json!({
             "project_id": "proj",
-            "session": session_id,
+            "session_id": session_id,
         }),
     );
     let artifacts = structured(&listed)["artifacts"]
@@ -284,7 +293,7 @@ fn mcp_artifact_session_lineage_and_parities() {
         "artifact_list",
         json!({
             "project_id": "proj",
-            "session": "nonexistent",
+            "session_id": "nonexistent",
         }),
     );
     assert_eq!(
@@ -300,7 +309,7 @@ fn mcp_artifact_session_lineage_and_parities() {
         "feed_read",
         json!({
             "project_id": "proj",
-            "session": session_id,
+            "session_id": session_id,
         }),
     );
     let events = structured(&feed)["events"].as_array().expect("events");

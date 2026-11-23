@@ -14,14 +14,13 @@ mod common;
 use common::stdio::{StdioClient as McpServer, structured};
 use common::temp::TempDir;
 
-/// The stdio server as the agent these tests act as.
+/// The embedded stdio server, which acts as the local administrator.
 fn spawn(data_dir: &Path, envs: &[(&str, &str)]) -> McpServer {
-    let mut all = vec![("HUB_AGENT_ID", AGENT_ID)];
-    all.extend_from_slice(envs);
-    McpServer::mcp(data_dir, &all)
+    McpServer::mcp(data_dir, envs)
 }
 
-const AGENT_ID: &str = "mcp-inbox";
+/// The actor an embedded stdio caller writes as.
+const LOCAL_ACTOR: &str = "local";
 
 fn error_code(response: &Value) -> &str {
     response
@@ -75,7 +74,7 @@ fn inbox_and_question_tools_round_trip_over_stdio() {
         "an item says where it is from by name"
     );
     assert_eq!(
-        finished_item["actor"], AGENT_ID,
+        finished_item["actor"], LOCAL_ACTOR,
         "the actor is the resolved principal"
     );
 
@@ -158,7 +157,7 @@ fn inbox_and_question_tools_round_trip_over_stdio() {
     let resolved_item = item_with_id(resolved_items, &question_id);
     assert_eq!(resolved_item["status"], "resolved");
     assert_eq!(resolved_item["answer"]["body"], "Yes, ship it");
-    assert_eq!(resolved_item["answer"]["actor"], "mcp-inbox");
+    assert_eq!(resolved_item["answer"]["actor"], LOCAL_ACTOR);
     assert_eq!(resolved_item["answer"]["event_id"], answer_id);
 
     let action = server.call_tool("inbox_read", json!({"status": "action"}));
@@ -328,7 +327,7 @@ fn seed_read_report(data_dir: &Path, summary: &str) -> String {
         let event_id = agent_hub::store::events::append(
             &db,
             0,
-            AGENT_ID,
+            LOCAL_ACTOR,
             None,
             agent_hub::store::events::NewEvent {
                 project_id: "proj".to_string(),

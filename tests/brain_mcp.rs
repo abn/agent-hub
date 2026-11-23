@@ -33,6 +33,13 @@ fn error_code(response: &Value) -> &str {
         .unwrap_or_else(|| panic!("tool error carries the hub code: {response}"))
 }
 
+fn error_reason(response: &Value) -> &str {
+    response
+        .pointer("/error/data/error/details/reason")
+        .and_then(Value::as_str)
+        .unwrap_or_else(|| panic!("tool error carries a reason: {response}"))
+}
+
 #[test]
 fn session_and_brain_tools_round_trip_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
@@ -417,7 +424,7 @@ fn an_oversized_brain_put_is_refused() {
 }
 
 #[test]
-fn brain_tools_require_an_active_session() {
+fn session_brain_tools_require_a_session() {
     let data_dir = TempDir::new("no-session");
     let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
@@ -425,9 +432,17 @@ fn brain_tools_require_an_active_session() {
     let response = server.call_tool("brain_get", json!({"path": "/kv/note"}));
     assert_eq!(
         error_code(&response),
-        "conflict",
-        "brain_get without a started session is a conflict"
+        "invalid_argument",
+        "brain_get that names no session is refused, got {response}"
     );
+    assert_eq!(error_reason(&response), "session_required");
+
+    let write = server.call_tool(
+        "brain_put",
+        json!({"path": "/kv/note", "content": "x", "store": "session"}),
+    );
+    assert_eq!(error_code(&write), "invalid_argument", "got {write}");
+    assert_eq!(error_reason(&write), "session_required");
 }
 
 #[test]
@@ -1016,12 +1031,22 @@ fn another_session_in_the_project_is_readable() {
 
     let by_name = server.call_tool(
         "brain_get",
-        json!({"path": "/kv/plan", "session": {"agent": "local", "name": "writer"}}),
+        json!({"path": "/kv/plan", "session": {"name": "writer", "project_id": "proj"}}),
     );
     assert_eq!(
         structured(&by_name)["content"],
         "the plan",
-        "an agent and a name read the other session, got {by_name}"
+        "a name and a project read the other session, got {by_name}"
+    );
+
+    let bare = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/plan", "session": "writer"}),
+    );
+    assert_eq!(
+        structured(&bare)["content"],
+        "the plan",
+        "a bare name resolves among the sessions the caller is in, got {bare}"
     );
 
     let listed = server.call_tool("brain_list", json!({"session": {"session_id": writer_id}}));
@@ -1035,7 +1060,7 @@ fn another_session_in_the_project_is_readable() {
 }
 
 #[test]
-fn reading_another_session_needs_no_active_session() {
+fn reading_another_session_needs_no_session_of_its_own() {
     let data_dir = TempDir::new("no-active-read");
     common::seed::seed_project(data_dir.path(), "proj");
 
@@ -1180,7 +1205,7 @@ fn a_pruned_session_is_not_readable() {
         "brain_get",
         json!({
             "path": "/kv/plan",
-            "session": {"agent": "local", "name": "writer", "project_id": "proj"},
+            "session": {"name": "writer", "project_id": "proj"},
         }),
     );
     assert_eq!(
@@ -1226,17 +1251,13 @@ fn a_pruned_session_is_not_readable() {
     );
 }
 
-/// A write that names the caller's own session lands with no active session
-/// anywhere.
+/// A write that names a session lands on a connection that never started one.
 ///
-/// The named argument is what a one-shot call has and an active session is not:
-/// every call is its own connection, so a write that cannot name a session can
-/// never reach one, which left a hook unable to write its own brain. A session
-/// still has one writer, so the caller may name only its own; the refusal a
-/// second agent gets is held where there are two of them, in
-/// `session_ownership_atomicity.rs`.
+/// The named argument is what a one-shot call has: every call is its own
+/// connection, so a write that cannot name a session can never reach one. The
+/// session is shared, so any caller that names it writes to it.
 #[test]
-fn a_write_names_the_callers_own_session_with_no_active_session() {
+fn a_write_names_a_session_with_none_started_on_the_connection() {
     let data_dir = TempDir::new("named-write");
     common::seed::seed_project(data_dir.path(), "proj");
 
@@ -1259,8 +1280,8 @@ fn a_write_names_the_callers_own_session_with_no_active_session() {
         id
     };
 
-    // This connection has never started a session, so nothing is active on it
-    // and there is nothing to write to but what it names.
+    // This connection has never started a session, so it follows none and
+    // writes only to what it names.
     let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
     let wrote = server.call_tool(
@@ -1275,8 +1296,9 @@ fn a_write_names_the_callers_own_session_with_no_active_session() {
     assert_eq!(
         structured(&wrote)["ok"],
         true,
-        "a write naming the caller's own session lands, got {wrote}"
+        "a write naming the session lands, got {wrote}"
     );
+    assert_eq!(structured(&wrote)["session"], writer_id.as_str());
     assert!(
         structured(&wrote)["version"]
             .as_str()
@@ -1295,21 +1317,21 @@ fn a_write_names_the_callers_own_session_with_no_active_session() {
         "the named write is what the named read returns, got {read}"
     );
 
-    // And by the other form, which is the one a hook knows without carrying an
-    // id between processes.
+    // And by name and project, which a hook knows without carrying an id
+    // between processes.
     let by_name = server.call_tool(
         "brain_put",
         json!({
             "path": "/kv/other",
             "content": "second entry",
             "store": "session",
-            "session": {"agent": "local", "name": "writer", "project_id": "proj"},
+            "session": {"name": "writer", "project_id": "proj"},
         }),
     );
     assert_eq!(
         structured(&by_name)["ok"],
         true,
-        "an agent and a name name the same session for a write, got {by_name}"
+        "a name and a project name the same session for a write, got {by_name}"
     );
 
     // A delete names it the same way, because a session write is one whichever
@@ -1319,7 +1341,7 @@ fn a_write_names_the_callers_own_session_with_no_active_session() {
         json!({
             "path": "/kv/other",
             "store": "session",
-            "session": {"agent": "local", "name": "writer", "project_id": "proj"},
+            "session": {"name": "writer", "project_id": "proj"},
         }),
     );
     assert_eq!(
@@ -1336,29 +1358,31 @@ fn a_write_names_the_callers_own_session_with_no_active_session() {
         "not_found",
         "the named delete removed the entry, got {gone}"
     );
-
-    // The other entry is untouched, so the delete named its own path.
+    let kept = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": writer_id}}),
+    );
     assert_eq!(
-        structured(&read)["content"],
+        structured(&kept)["content"],
         "the revised plan",
         "the rest of the session is as it was"
     );
 
-    // A write naming no session is still the connection's active session, and
-    // there is none to name.
+    // A session write that names no session has nowhere to land.
     let unnamed = server.call_tool(
         "brain_put",
         json!({"path": "/kv/plan", "content": "nowhere", "store": "session"}),
     );
     assert_eq!(
         error_code(&unnamed),
-        "conflict",
-        "a write that names no session is still about the active one, got {unnamed}"
+        "invalid_argument",
+        "a session write that names no session is refused, got {unnamed}"
     );
+    assert_eq!(error_reason(&unnamed), "session_required");
 }
 
 #[test]
-fn a_session_argument_has_no_meaning_for_the_project_store() {
+fn a_session_argument_on_the_project_store_only_joins_and_records() {
     let data_dir = TempDir::new("cross-store");
     common::seed::seed_project(data_dir.path(), "proj");
     let mut server = McpServer::mcp(data_dir.path(), &[]);
@@ -1373,20 +1397,6 @@ fn a_session_argument_has_no_meaning_for_the_project_store() {
         .expect("session id")
         .to_string();
 
-    let read = server.call_tool(
-        "brain_get",
-        json!({
-            "path": "/fs/page.md",
-            "store": "project",
-            "session": {"session_id": writer_id},
-        }),
-    );
-    assert_eq!(
-        error_code(&read),
-        "invalid_argument",
-        "the project store takes no session, got {read}"
-    );
-
     let write = server.call_tool(
         "brain_put",
         json!({
@@ -1397,9 +1407,34 @@ fn a_session_argument_has_no_meaning_for_the_project_store() {
         }),
     );
     assert_eq!(
-        error_code(&write),
-        "invalid_argument",
-        "a project write takes no session either, got {write}"
+        structured(&write)["ok"],
+        true,
+        "a project write takes a session, got {write}"
+    );
+    assert_eq!(structured(&write)["session"], writer_id.as_str());
+
+    let read = server.call_tool(
+        "brain_get",
+        json!({
+            "path": "/fs/page.md",
+            "store": "project",
+            "session": {"session_id": writer_id},
+        }),
+    );
+    assert_eq!(
+        structured(&read)["content"],
+        "a page",
+        "a project read takes a session and reads the page, got {read}"
+    );
+
+    let session_read = server.call_tool(
+        "brain_get",
+        json!({"path": "/fs/page.md", "session": {"session_id": writer_id}}),
+    );
+    assert_eq!(
+        error_code(&session_read),
+        "not_found",
+        "the page is in the project store, not the session brain, got {session_read}"
     );
 }
 
@@ -1410,23 +1445,35 @@ fn a_session_is_named_one_way_or_the_other() {
     let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
-    server.call_tool(
+    let started = server.call_tool(
         "session_start",
         json!({"project_id": "proj", "session_name": "writer"}),
     );
+    let writer_id = structured(&started)["session_id"]
+        .as_str()
+        .expect("session id")
+        .to_string();
 
-    let both = server.call_tool(
+    let disagree = server.call_tool(
         "brain_get",
         json!({
             "path": "/kv/plan",
-            "session": {"session_id": "01J", "agent": "local", "name": "writer"},
+            "session": {"session_id": writer_id, "name": "other"},
         }),
     );
     assert_eq!(
-        error_code(&both),
+        error_code(&disagree),
         "invalid_argument",
-        "naming a session twice is refused, got {both}"
+        "an id and a name that disagree are refused, got {disagree}"
     );
+    assert_eq!(error_reason(&disagree), "session_mismatch");
+
+    let unknown = server.call_tool(
+        "brain_get",
+        json!({"path": "/kv/plan", "session": {"session_id": "01J"}}),
+    );
+    assert_eq!(error_code(&unknown), "not_found", "got {unknown}");
+    assert_eq!(error_reason(&unknown), "session_unknown");
 
     let neither = server.call_tool("brain_get", json!({"path": "/kv/plan", "session": {}}));
     assert_eq!(
@@ -1434,16 +1481,18 @@ fn a_session_is_named_one_way_or_the_other() {
         "invalid_argument",
         "naming no session at all is refused, got {neither}"
     );
+    assert_eq!(error_reason(&neither), "session_invalid");
 
-    let half = server.call_tool(
+    let project_only = server.call_tool(
         "brain_get",
-        json!({"path": "/kv/plan", "session": {"agent": "local"}}),
+        json!({"path": "/kv/plan", "session": {"project_id": "proj"}}),
     );
     assert_eq!(
-        error_code(&half),
+        error_code(&project_only),
         "invalid_argument",
-        "an agent without a name is refused, got {half}"
+        "a project without a name is refused, got {project_only}"
     );
+    assert_eq!(error_reason(&project_only), "session_invalid");
 }
 
 #[test]

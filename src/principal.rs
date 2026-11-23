@@ -5,31 +5,30 @@
 //! bearer token.
 //!
 //! Two audiences resolve differently and must not share a resolver. The MCP
-//! transport accepts the admin token or a per-agent token; the REST control
+//! transport accepts the admin token or a member token; the REST control
 //! surface is the human's, so it accepts only the admin token. Widening one to
-//! serve the other would hand agents the control surface.
+//! serve the other would hand members the control surface.
 
 use axum::http::HeaderMap;
 
 use crate::config::Config;
-use crate::error::{Error, Result};
+use crate::error::{CredentialReason, Error, Result};
 use crate::store::identity;
 
-/// The header an agent declares a name in.
+/// The header a caller names its agent in.
 ///
-/// Without a token on a loopback hub it names the agent itself (ADR 0031).
-/// Beside a valid agent token it names a sub-identity of that agent, for
-/// attribution only ([`Auth::resolve_agent_as`]).
+/// The value is canonicalised to one slug per client ([`crate::agent_name`])
+/// and is the agent of the caller's writes, beside the member its token names.
+/// It names no member, grants nothing and is ignored for the admin token.
 pub const AGENT_ID_HEADER: &str = "x-agent-id";
 
-/// The longest name a caller may declare beside a token.
+/// The longest name a caller may declare in the header.
 const DECLARED_NAME_MAX: usize = 64;
 
-/// Whether `name` is acceptable as a declared sub-identity.
+/// Whether `name` is acceptable as a declared agent name.
 ///
 /// ASCII letters and digits with `.`, `_` and `-` after the first character,
-/// at most 64 of them. There is no `/`, which is what joins the token's agent
-/// to the name, and nothing a header or a log line would have to escape.
+/// at most 64 of them: nothing a header or a log line would have to escape.
 pub fn is_declared_name(name: &str) -> bool {
     let mut chars = name.chars();
     chars
@@ -64,14 +63,27 @@ pub fn declared_name(headers: &HeaderMap) -> Result<Option<&str>> {
 /// A resolved caller.
 #[derive(Debug, Clone)]
 pub struct Principal {
-    /// The identity recorded as the actor on events.
+    /// The opaque key written in the `actor` column: the member, `human`, or
+    /// `local`. Kept beside the typed fields for code that still reads it.
     pub actor: String,
-    /// The agent id, when the caller is an agent rather than the human admin.
+    /// The member id, when the caller is a member rather than the human admin.
     pub agent_id: Option<String>,
     /// Whether the caller is the human admin.
     pub is_admin: bool,
     /// Whether the caller is in pending enrolment.
     pub is_pending: bool,
+    /// The member the caller acts as: the token's member, `local` for embedded
+    /// stdio, `loopback` on the open loopback hub, none for the human.
+    pub member: Option<String>,
+    /// The canonical agent slug, `cli` when the caller named none.
+    pub agent: String,
+    /// The author kind every write by this caller records.
+    pub kind: crate::author::AuthorKind,
+    /// Where the credential stands.
+    pub credential: CredentialState,
+    /// The hash of the bearer presented, for closing its streams on
+    /// revocation.
+    pub token_hash: Option<String>,
 }
 
 /// Where a caller's credential stands.
@@ -90,39 +102,106 @@ pub enum CredentialState {
 /// `src/mcp` reads it. Code there uses only these methods, never the fields,
 /// so the fields can change without moving the store or the REST handlers.
 impl Principal {
+    /// A member with a token the hub knows.
+    pub fn for_member(member: &str, token_hash: &str, credential: CredentialState) -> Self {
+        Self {
+            actor: member.to_string(),
+            agent_id: Some(member.to_string()),
+            is_admin: false,
+            is_pending: credential == CredentialState::Pending,
+            member: Some(member.to_string()),
+            agent: crate::agent_name::CLI.to_string(),
+            kind: crate::author::AuthorKind::Participant,
+            credential,
+            token_hash: Some(token_hash.to_string()),
+        }
+    }
+
+    /// A member on the open loopback hub, which has no token.
+    pub fn for_loopback(member: &str) -> Self {
+        Self {
+            token_hash: None,
+            ..Self::for_member(member, "", CredentialState::Active)
+        }
+    }
+
+    /// The human admin: the admin token, or the REST surface on an open
+    /// loopback hub.
+    pub fn human() -> Self {
+        Self {
+            actor: crate::author::HUMAN_KEY.to_string(),
+            agent_id: None,
+            is_admin: true,
+            is_pending: false,
+            member: None,
+            agent: crate::agent_name::CLI.to_string(),
+            kind: crate::author::AuthorKind::Human,
+            credential: CredentialState::Active,
+            token_hash: None,
+        }
+    }
+
+    /// Embedded stdio: the local administrator.
+    pub fn local() -> Self {
+        Self {
+            actor: crate::author::LOCAL_MEMBER.to_string(),
+            agent_id: None,
+            is_admin: true,
+            is_pending: false,
+            member: Some(crate::author::LOCAL_MEMBER.to_string()),
+            agent: crate::agent_name::CLI.to_string(),
+            kind: crate::author::AuthorKind::Local,
+            credential: CredentialState::Active,
+            token_hash: None,
+        }
+    }
+
+    /// A caller with no bearer on a networked hub: it may only enrol.
+    pub fn anonymous() -> Self {
+        Self {
+            actor: "anonymous".to_string(),
+            agent_id: None,
+            is_admin: false,
+            is_pending: false,
+            member: None,
+            agent: crate::agent_name::CLI.to_string(),
+            kind: crate::author::AuthorKind::Human,
+            credential: CredentialState::Anonymous,
+            token_hash: None,
+        }
+    }
+
+    /// The same caller, named by its agent. The slug is already canonical.
+    pub fn with_agent(mut self, agent: &str) -> Self {
+        self.agent = agent.to_string();
+        self
+    }
+
     /// The member the caller acts as: the token's member, `local` for embedded
     /// stdio, `loopback` on the open loopback hub, none for the human.
     pub fn member(&self) -> Option<&str> {
-        self.agent_id.as_deref()
+        self.member.as_deref()
     }
 
     /// The canonical agent slug the caller writes under.
     pub fn agent(&self) -> &str {
-        crate::agent_name::CLI
+        &self.agent
     }
 
     /// The author kind every write by this caller records.
     pub fn kind(&self) -> crate::author::AuthorKind {
-        if self.agent_id.is_some() {
-            crate::author::AuthorKind::Participant
-        } else {
-            crate::author::AuthorKind::Human
-        }
+        self.kind
     }
 
     /// Where the caller's credential stands.
     pub fn credential(&self) -> CredentialState {
-        if self.is_pending {
-            CredentialState::Pending
-        } else {
-            CredentialState::Active
-        }
+        self.credential
     }
 
     /// The hash of the bearer the caller presented, for closing its streams on
     /// revocation. None for the admin, stdio and the open loopback hub.
     pub fn token_hash(&self) -> Option<&str> {
-        None
+        self.token_hash.as_deref()
     }
 
     /// Whether the caller is the operator.
@@ -130,28 +209,64 @@ impl Principal {
         self.is_admin
     }
 
+    /// Refuse a caller whose credential is not active: a pending member and a
+    /// caller with no bearer reach nothing but the enrol surface.
+    pub fn require_active(&self) -> Result<()> {
+        match self.credential {
+            CredentialState::Active => Ok(()),
+            CredentialState::Pending => Err(Error::Credential(
+                CredentialReason::TokenPending,
+                "this member is waiting for approval".to_string(),
+            )),
+            CredentialState::Anonymous => Err(Error::Credential(
+                CredentialReason::TokenMissing,
+                "a bearer token is required".to_string(),
+            )),
+        }
+    }
+
     /// The writer for one write, in the session the call resolved (or none).
     ///
     /// The store records `writer.actor()` in the `actor` column and the author
     /// record beside it.
     pub fn writer(&self, session_id: Option<&str>) -> crate::author::Writer {
-        let _ = session_id;
-        crate::author::Writer::from(self.actor.as_str())
+        use crate::author::{Author, Writer};
+        let session = session_id.map(str::to_string);
+        match (self.kind, self.member.as_deref()) {
+            (crate::author::AuthorKind::Participant, Some(member)) => {
+                Writer::call(Author::Participant {
+                    member: member.to_string(),
+                    agent: self.agent.clone(),
+                    session,
+                })
+            }
+            (crate::author::AuthorKind::Local, _) => Writer::call(Author::Local {
+                agent: self.agent.clone(),
+                session,
+            }),
+            _ => Writer::human(),
+        }
     }
 
     /// The delivery key of the caller: cursors and subscriptions use it. None
     /// for the human, who reads the PWA rather than cursors.
     pub fn participant(&self) -> Option<crate::author::ParticipantKey> {
-        self.agent_id
-            .as_deref()
-            .map(crate::author::ParticipantKey::from_label)
+        match self.kind {
+            crate::author::AuthorKind::Participant | crate::author::AuthorKind::Local => self
+                .member
+                .as_ref()
+                .map(|member| crate::author::ParticipantKey {
+                    member: member.clone(),
+                    agent: self.agent.clone(),
+                }),
+            _ => None,
+        }
     }
 }
 
 /// Resolves a bearer token to a principal.
 pub struct Auth {
     admin_token: Option<String>,
-    local_actor: String,
     /// Whether the bind is loopback, which is the only place the hub resolves
     /// a principal without a token.
     loopback: bool,
@@ -160,13 +275,8 @@ pub struct Auth {
 impl Auth {
     /// Build the resolver from configuration.
     pub fn from_config(config: &Config) -> Self {
-        let local_actor = std::env::var("HUB_AGENT_ID")
-            .ok()
-            .filter(|id| !id.is_empty())
-            .unwrap_or_else(|| "local".to_string());
         Self {
             admin_token: config.admin_token.clone(),
-            local_actor,
             loopback: config.bind.ip().is_loopback(),
         }
     }
@@ -174,36 +284,29 @@ impl Auth {
     /// The principal for the local stdio transport, which needs no token.
     ///
     /// stdio is a process the operator launched on the node, so it is the
-    /// human admin: it reaches everything and is attributed to the configured
-    /// local actor. Only stdio is treated this way; a token transport is
-    /// resolved through [`Auth::resolve_agent`] or [`Auth::require_admin`].
+    /// local administrator: it reaches everything and writes as `local`. Only
+    /// stdio is treated this way; a token transport is resolved through
+    /// [`Auth::resolve_agent`] or [`Auth::require_admin`].
     pub fn local(&self) -> Principal {
-        Principal {
-            actor: self.local_actor.clone(),
-            agent_id: None,
-            is_admin: true,
-            is_pending: false,
-        }
+        Principal::local()
     }
 
     /// The human admin for a matching admin token, if one is presented.
     fn admin(&self, token: Option<&str>) -> Option<Principal> {
         match (&self.admin_token, token) {
             (Some(expected), Some(presented)) if constant_time_eq(expected, presented) => {
-                Some(Principal {
-                    actor: "human".to_string(),
-                    agent_id: None,
-                    is_admin: true,
-                    is_pending: false,
-                })
+                Some(Principal::human())
             }
             _ => None,
         }
     }
 
-    /// Resolve a token for the MCP transport: the admin token, or a per-agent
-    /// token looked up in the identity store. A pending enrolment token is refused
-    /// identically to an unrecognised token.
+    /// Resolve a token for the MCP transport: the admin token, or a member
+    /// token looked up in the identity store.
+    ///
+    /// A pending member's token is a principal in the pending state: it may
+    /// enrol and ask who it is, nothing else. A revoked or replaced token and
+    /// an unknown one are refused with their own reason.
     pub async fn resolve_agent(
         &self,
         db: &turso::Database,
@@ -212,74 +315,55 @@ impl Auth {
         if let Some(principal) = self.admin(token) {
             return Ok(principal);
         }
-        let presented = token
-            .ok_or_else(|| Error::Unauthenticated("a bearer token is required".to_string()))?;
+        let Some(presented) = token else {
+            return Ok(Principal::anonymous());
+        };
         let hash = identity::hash_token(presented);
-        match identity::resolve_token(db, &hash).await? {
-            Some((agent_id, state)) if state == "active" => Ok(Principal {
-                actor: agent_id.clone(),
-                agent_id: Some(agent_id),
-                is_admin: false,
-                is_pending: false,
-            }),
-            _ => Err(Error::Unauthenticated(
+        match identity::resolve_member_token(db, &hash).await? {
+            Some(resolved) => match resolved.state {
+                identity::TokenState::Active => Ok(Principal::for_member(
+                    &resolved.member,
+                    &resolved.token_hash,
+                    CredentialState::Active,
+                )),
+                identity::TokenState::Pending => Ok(Principal::for_member(
+                    &resolved.member,
+                    &resolved.token_hash,
+                    CredentialState::Pending,
+                )),
+                identity::TokenState::Revoked => Err(Error::Credential(
+                    CredentialReason::TokenRevoked,
+                    "this member's token was revoked or replaced".to_string(),
+                )),
+            },
+            None => Err(Error::Credential(
+                CredentialReason::TokenUnknown,
                 "the bearer token is not recognised".to_string(),
             )),
         }
     }
 
-    /// [`Auth::resolve_agent`], then record a declared name as attribution.
+    /// [`Auth::resolve_agent`] for a surface that needs a member or the admin,
+    /// with the agent the request names in [`AGENT_ID_HEADER`], else `cli`.
     ///
-    /// A caller that presents an agent token and declares a name acts as the
-    /// sub-identity `<agent>/<name>`: that label is the actor on its events,
-    /// sessions and artifacts, and its own owner, cursor and subscription key.
-    /// It changes nothing else. Authorization reads `agent_id`, which stays the
-    /// token's agent, so the name grants no project, switches no agent and
-    /// reaches no session the token's agent could not.
-    ///
-    /// The name is free-form within [`is_declared_name`] and needs no
-    /// registration. The token is resolved first, so a bad token is refused
-    /// whatever the header says. The header is not read at all for the admin
-    /// token, which acts as the human, and a name equal to the token's own
-    /// agent id is that agent. A name that fails the check is refused, and so
-    /// is one whose label would be too long to record or would spell an
-    /// existing agent's id.
-    pub async fn resolve_agent_as(
+    /// The header is not read for the admin token, which acts as the human. A
+    /// request with no token, or with a pending member's, is refused here.
+    pub async fn resolve_member_as(
         &self,
         db: &turso::Database,
         token: Option<&str>,
         headers: &HeaderMap,
     ) -> Result<Principal> {
-        let mut principal = self.resolve_agent(db, token).await?;
-        let Some(agent_id) = principal.agent_id.as_deref() else {
-            return Ok(principal);
-        };
-        let Some(name) = declared_name(headers)? else {
-            return Ok(principal);
-        };
-        if name == agent_id {
+        let principal = self.resolve_agent(db, token).await?;
+        principal.require_active()?;
+        if principal.kind != crate::author::AuthorKind::Participant {
             return Ok(principal);
         }
-        if !is_declared_name(name) {
-            return Err(Error::InvalidArgument(format!(
-                "X-Agent-Id must be 1 to {DECLARED_NAME_MAX} characters: letters and digits, \
-                 then letters, digits, '.', '_' or '-'"
-            )));
-        }
-        let label = format!("{agent_id}/{name}");
-        if label.chars().count() > crate::store::comments::AUTHOR_CHARS_MAX {
-            return Err(Error::InvalidArgument(format!(
-                "the agent '{agent_id}' and the name together exceed {} characters",
-                crate::store::comments::AUTHOR_CHARS_MAX
-            )));
-        }
-        if identity::get_agent(db, &label).await?.is_some() {
-            return Err(Error::Conflict(format!(
-                "X-Agent-Id '{name}' would act as the existing agent '{label}'"
-            )));
-        }
-        principal.actor = label;
-        Ok(principal)
+        let agent = agent_from_header(headers)?;
+        Ok(match agent {
+            Some(agent) => principal.with_agent(&agent),
+            None => principal,
+        })
     }
 
     /// Resolve a token for the enrolment status route: accepts both active and
@@ -289,20 +373,14 @@ impl Auth {
         db: &turso::Database,
         token: Option<&str>,
     ) -> Result<Principal> {
-        let presented = token
-            .ok_or_else(|| Error::Unauthenticated("a bearer token is required".to_string()))?;
-        let hash = identity::hash_token(presented);
-        match identity::resolve_token(db, &hash).await? {
-            Some((agent_id, state)) => Ok(Principal {
-                actor: agent_id.clone(),
-                agent_id: Some(agent_id),
-                is_admin: false,
-                is_pending: state == "pending",
-            }),
-            None => Err(Error::Unauthenticated(
-                "the bearer token is not recognised".to_string(),
-            )),
+        let principal = self.resolve_agent(db, token).await?;
+        if principal.credential == CredentialState::Anonymous {
+            return Err(Error::Credential(
+                CredentialReason::TokenMissing,
+                "a bearer token is required".to_string(),
+            ));
         }
+        Ok(principal)
     }
 
     /// Resolve a token for the REST control surface: the admin token only.
@@ -315,12 +393,7 @@ impl Auth {
             return Ok(principal);
         }
         if self.loopback && self.admin_token.is_none() && token.is_none() {
-            return Ok(Principal {
-                actor: "human".to_string(),
-                agent_id: None,
-                is_admin: true,
-                is_pending: false,
-            });
+            return Ok(Principal::human());
         }
         match (self.admin_token.is_some(), token) {
             (true, _) => Err(Error::Unauthenticated(
@@ -331,6 +404,23 @@ impl Auth {
             )),
         }
     }
+}
+
+/// The agent a request declares in [`AGENT_ID_HEADER`], canonicalised.
+///
+/// None when the header is absent or blank. A name that is not a plain token
+/// is refused, so a caller that meant to name its agent learns it did not.
+pub fn agent_from_header(headers: &HeaderMap) -> Result<Option<String>> {
+    let Some(name) = declared_name(headers)? else {
+        return Ok(None);
+    };
+    if !is_declared_name(name) {
+        return Err(Error::InvalidArgument(format!(
+            "X-Agent-Id must be 1 to {DECLARED_NAME_MAX} characters: letters and digits, \
+             then letters, digits, '.', '_' or '-'"
+        )));
+    }
+    Ok(Some(crate::agent_name::canonical(name)))
 }
 
 /// Compare two tokens without leaking their byte length.
