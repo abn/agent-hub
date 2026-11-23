@@ -134,14 +134,22 @@ web/e2e: build node_tree ## Run the browser behaviour checks
 # call the binary, and its copy of the skill must match skills/agent-hub (an
 # installed plugin does not follow a link out of its folder; make plugins/sync
 # refreshes the copy). The OpenCode package version must track Cargo.toml too.
-plugins/sync: ## Refresh the Claude plugin's copy of the agent-hub skill
+plugins/sync: ## Refresh the Claude plugin's copy of the agent-hub skill and both plugins' launcher
 	rsync -a --delete skills/agent-hub/ plugins/claude/skills/agent-hub/
+	@for d in claude antigravity; do \
+	  mkdir -p plugins/$$d/bin; \
+	  install -m 755 plugins/launcher/agent-hub-launcher plugins/$$d/bin/agent-hub-launcher; \
+	done
 
 plugins/check: node_tree ## Test the harness plugins and parse every plugins/**/*.json
 	npx vitest run --config plugins/vitest.config.mjs
 	node --input-type=module -e "import { readdirSync, readFileSync } from 'node:fs'; const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? (e.name === 'node_modules' ? [] : walk(d + '/' + e.name)) : e.name.endsWith('.json') ? [d + '/' + e.name] : []); const files = walk('plugins'); for (const f of files) JSON.parse(readFileSync(f, 'utf8')); console.log('plugins/check: ' + files.length + ' JSON files parse');"
 	@node --input-type=module -e "import { readFileSync } from 'node:fs'; import { join } from 'node:path'; const read = (f) => JSON.parse(readFileSync(f, 'utf8')); const fail = (m) => { console.error('plugins/check: ' + m); process.exit(1); }; const cargo = /^version = \"(.+)\"/m.exec(readFileSync('Cargo.toml', 'utf8'))[1]; const oc = read('plugins/opencode/package.json').version; if (oc !== cargo) fail('OpenCode package version ' + oc + ' differs from Cargo ' + cargo); const mkt = read('.claude-plugin/marketplace.json'); const reserved = /^(claude-|anthropic-|cc-plugin-)/; if (reserved.test(mkt.name)) fail('reserved marketplace name ' + mkt.name); for (const e of mkt.plugins) { const dir = join('.claude-plugin', '..', e.source); const man = read(join(dir, '.claude-plugin/plugin.json')); if (reserved.test(man.name)) fail('reserved plugin name ' + man.name); if (man.name !== e.name) fail('marketplace entry ' + e.name + ' != manifest ' + man.name); if (man.version !== cargo || e.version !== cargo) fail('plugin versions ' + man.version + ' and ' + e.version + ' differ from Cargo ' + cargo); const hooks = read(join(dir, 'hooks/hooks.json')).hooks; for (const [ev, groups] of Object.entries(hooks)) for (const g of groups) for (const h of g.hooks) if (!/^agent-hub (hook|watch) /.test(h.command)) fail(ev + ' hook is not an agent-hub command'); const stop = hooks.Stop[0].hooks[0]; if (stop.asyncRewake !== true || !(stop.timeout > 3300)) fail('Stop hook must set asyncRewake and a timeout above the watcher limit'); } console.log('plugins/check: Claude plugin manifests and hooks agree');"
 	@diff -r skills/agent-hub plugins/claude/skills/agent-hub >/dev/null || { echo 'plugins/check: plugins/claude/skills/agent-hub drifted from skills/agent-hub, run make plugins/sync'; exit 1; }
+	@for d in claude antigravity; do \
+	  cmp -s plugins/launcher/agent-hub-launcher plugins/$$d/bin/agent-hub-launcher || { echo "plugins/check: plugins/$$d/bin/agent-hub-launcher drifted from plugins/launcher, run make plugins/sync"; exit 1; }; \
+	  test -x plugins/$$d/bin/agent-hub-launcher || { echo "plugins/check: plugins/$$d/bin/agent-hub-launcher is not executable"; exit 1; }; \
+	done
 	@if command -v claude >/dev/null 2>&1; then \
 	  out=$$(claude plugin validate plugins/claude 2>&1 && claude plugin validate . 2>&1) || { printf '%s\n' "$$out"; exit 1; }; \
 	  printf '%s\n' "$$out"; \
@@ -150,7 +158,7 @@ plugins/check: node_tree ## Test the harness plugins and parse every plugins/**/
 	@node --input-type=module -e "import { readFileSync, existsSync } from 'node:fs'; import { join } from 'node:path'; const read = (f) => JSON.parse(readFileSync(f, 'utf8')); const fail = (m) => { console.error('plugins/check: ' + m); process.exit(1); }; const cargo = /^version = \"(.+)\"/m.exec(readFileSync('Cargo.toml', 'utf8'))[1]; const dir = 'plugins/antigravity'; const man = read(dir + '/plugin.json'); for (const k of ['\$$schema', 'name', 'displayName', 'version', 'description', 'author', 'homepage', 'repository']) if (!man[k]) fail('Antigravity plugin.json lacks ' + k); if (!man.author.url) fail('Antigravity plugin.json author lacks url'); if (!/^[a-zA-Z0-9_-]+\$$/.test(man.name)) fail('Antigravity plugin name ' + man.name); if (man.version !== cargo) fail('Antigravity plugin version ' + man.version + ' differs from Cargo ' + cargo); if (!existsSync(join(dir, man.logo || 'none'))) fail('Antigravity logo is missing'); const mcp = read(dir + '/mcp_config.json').mcpServers['agent-hub']; if (mcp.command !== 'agent-hub' || mcp.args.join(' ') !== 'mcp --proxy' || mcp.env.HUB_AGENT_ID !== 'antigravity') fail('Antigravity mcp_config.json must run agent-hub mcp --proxy as antigravity'); for (const [name, events] of Object.entries(read(dir + '/hooks.json'))) for (const [ev, hs] of Object.entries(events)) for (const h of hs) if (!/^agent-hub hook [a-z-]+ --harness antigravity\$$/.test(h.command)) fail(name + '.' + ev + ' is not an agent-hub hook command'); console.log('plugins/check: Antigravity plugin manifest, MCP config and hooks agree');"
 	@if command -v agy >/dev/null 2>&1; then agy plugin validate --strict plugins/antigravity; else echo 'plugins/check: agy not on PATH, skipping plugin validate'; fi
 
-# The Antigravity release archive: the plugin, the skill and the logo, with
+# The Antigravity release archive: the plugin, its launcher, the skill and the logo, with
 # links resolved, validated before it is packed.
 ANTIGRAVITY_VERSION := $(shell sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
 ANTIGRAVITY_STAGE := target/dist/agent-hub-antigravity-$(ANTIGRAVITY_VERSION)
@@ -161,6 +169,7 @@ plugins/antigravity-dist: ## Build target/dist/agent-hub-antigravity-<version>.t
 	mkdir -p "$(ANTIGRAVITY_STAGE)/agent-hub/skills"; \
 	cp -rL plugins/antigravity/. "$(ANTIGRAVITY_STAGE)/agent-hub/"; \
 	cp -rL skills/agent-hub "$(ANTIGRAVITY_STAGE)/agent-hub/skills/agent-hub"; \
+	test -x "$(ANTIGRAVITY_STAGE)/agent-hub/bin/agent-hub-launcher"; \
 	if command -v agy >/dev/null 2>&1; then agy plugin validate --strict "$(ANTIGRAVITY_STAGE)/agent-hub"; else echo 'plugins/antigravity-dist: agy not on PATH, skipping validate'; fi; \
 	tar -czf "$(ANTIGRAVITY_STAGE).tar.gz" -C "$(ANTIGRAVITY_STAGE)" agent-hub; \
 	echo "plugins/antigravity-dist: $(ANTIGRAVITY_STAGE).tar.gz"

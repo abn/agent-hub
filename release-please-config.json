@@ -26,6 +26,18 @@
           "type": "json",
           "path": "plugins/antigravity/plugin.json",
           "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "plugins/launcher/agent-hub-launcher"
+        },
+        {
+          "type": "generic",
+          "path": "plugins/claude/bin/agent-hub-launcher"
+        },
+        {
+          "type": "generic",
+          "path": "plugins/antigravity/bin/agent-hub-launcher"
         }
       ]
     }
