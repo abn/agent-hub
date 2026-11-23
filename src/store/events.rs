@@ -79,6 +79,9 @@ pub struct FeedQuery {
     /// surfaces set it; an agent's read leaves it false, because a dismissal
     /// is the human's view of the feed and not a deletion.
     pub hide_dismissed: bool,
+    /// Restrict to events whose author passes this filter (`member`, `agent`,
+    /// `kind`). Empty matches every author.
+    pub author: crate::author::AuthorFilter,
 }
 
 impl Default for FeedQuery {
@@ -91,6 +94,7 @@ impl Default for FeedQuery {
             session_id: None,
             include_audit: false,
             hide_dismissed: false,
+            author: crate::author::AuthorFilter::default(),
         }
     }
 }
@@ -1549,4 +1553,29 @@ fn optional_text(value: Option<&str>) -> Value {
 
 fn engine(err: turso::Error) -> Error {
     Error::Engine(err.to_string())
+}
+
+// Feed cursors per participant.
+
+/// The newest event a participant has read in a project's feed.
+pub async fn feed_cursor(
+    db: &Database,
+    project_id: &str,
+    key: &crate::author::ParticipantKey,
+) -> Result<Option<String>> {
+    let _ = (db, project_id, key);
+    Err(super::unbuilt("events::feed_cursor"))
+}
+
+/// Move a participant's feed cursor from `from` to `to`. False when another
+/// read moved it first.
+pub async fn advance_feed_cursor(
+    db: &Database,
+    project_id: &str,
+    key: &crate::author::ParticipantKey,
+    from: Option<&str>,
+    to: &str,
+) -> Result<bool> {
+    let _ = (db, project_id, key, from, to);
+    Err(super::unbuilt("events::advance_feed_cursor"))
 }

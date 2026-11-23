@@ -54,6 +54,67 @@ pub struct AppState {
     pub store_identity: StoreIdentity,
     /// Held by the one online backup that may run at a time.
     pub backup_running: Arc<tokio::sync::Mutex<()>>,
+    /// One gate per session: brain and artifact writes hold it shared, end and
+    /// every prune path hold it exclusive.
+    pub session_gates: SessionGates,
+    /// Token hashes revoked or replaced. Every open stream registered under a
+    /// hash closes when it is sent.
+    pub revocations: tokio::sync::broadcast::Sender<String>,
+}
+
+/// Per-session gates, created on first use and dropped when unused.
+///
+/// Lock order: a session gate, then a brain file lock, then the store write
+/// turn. Never take a gate while holding the write turn; a batch takes its
+/// gates in session-id order.
+#[derive(Clone, Default)]
+pub struct SessionGates {
+    gates: Arc<
+        std::sync::Mutex<
+            std::collections::HashMap<String, std::sync::Weak<tokio::sync::RwLock<()>>>,
+        >,
+    >,
+}
+
+impl SessionGates {
+    fn gate(&self, session_id: &str) -> Arc<tokio::sync::RwLock<()>> {
+        let mut gates = self
+            .gates
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(gate) = gates.get(session_id).and_then(std::sync::Weak::upgrade) {
+            return gate;
+        }
+        gates.retain(|_, gate| gate.strong_count() > 0);
+        let gate = Arc::new(tokio::sync::RwLock::new(()));
+        gates.insert(session_id.to_string(), Arc::downgrade(&gate));
+        gate
+    }
+
+    /// Hold the gate shared, for a brain or artifact write in this session.
+    pub async fn shared(&self, session_id: &str) -> tokio::sync::OwnedRwLockReadGuard<()> {
+        self.gate(session_id).read_owned().await
+    }
+
+    /// Hold the gate exclusive, for ending or pruning this session.
+    pub async fn exclusive(&self, session_id: &str) -> tokio::sync::OwnedRwLockWriteGuard<()> {
+        self.gate(session_id).write_owned().await
+    }
+
+    /// Hold several gates exclusive, taken in session-id order.
+    pub async fn exclusive_all(
+        &self,
+        session_ids: &[String],
+    ) -> Vec<tokio::sync::OwnedRwLockWriteGuard<()>> {
+        let mut ids: Vec<&String> = session_ids.iter().collect();
+        ids.sort();
+        ids.dedup();
+        let mut held = Vec::with_capacity(ids.len());
+        for id in ids {
+            held.push(self.exclusive(id).await);
+        }
+        held
+    }
 }
 
 /// A freshness tick for the human stream.
@@ -413,6 +474,7 @@ impl AppState {
         let host = store::storage::host_name(config.node_name.as_deref());
         let integrity_sample = Config::integrity_sample_from_env()?;
         let (ticker, _) = tokio::sync::broadcast::channel(16);
+        let (revocations, _) = tokio::sync::broadcast::channel(64);
         let notifier = match &config.notify {
             Some(target) => {
                 tracing::info!(target = %target.redacted(), interval_secs = target.interval.as_secs(), "notify target configured");
@@ -438,6 +500,8 @@ impl AppState {
             integrity_sample,
             store_identity,
             backup_running: Arc::new(tokio::sync::Mutex::new(())),
+            session_gates: SessionGates::default(),
+            revocations,
         })
     }
 
@@ -1263,4 +1327,26 @@ async fn integrity_quick_check(db: &turso::Database) -> Result<bool> {
         }
     }
     Ok(ok)
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::SessionGates;
+
+    #[tokio::test]
+    async fn an_exclusive_hold_waits_for_shared_writers_of_its_session_only() {
+        let gates = SessionGates::default();
+        let writer = gates.shared("s1").await;
+        let other =
+            tokio::time::timeout(std::time::Duration::from_millis(50), gates.exclusive("s2")).await;
+        assert!(other.is_ok(), "another session's gate is free");
+        let blocked =
+            tokio::time::timeout(std::time::Duration::from_millis(50), gates.exclusive("s1")).await;
+        assert!(blocked.is_err(), "end waits for the write in flight");
+        drop(writer);
+        let held = gates
+            .exclusive_all(&["s1".to_string(), "s1".to_string()])
+            .await;
+        assert_eq!(held.len(), 1);
+    }
 }

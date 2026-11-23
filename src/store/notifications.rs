@@ -102,3 +102,65 @@ pub(crate) async fn forget_session_in_tx(tx: &super::WriteTx, session_id: &str) 
     .map_err(super::engine)?;
     Ok(())
 }
+
+// Participant delivery. Cursors are keyed by (member, agent, session scope);
+// the empty session is the sessionless scope.
+
+/// A page of attention items for one participant in one scope, and what
+/// delivering it moves.
+#[derive(Debug, Clone)]
+pub struct Attention {
+    /// Resolved items asked in the scope by any participant, and (sessionless
+    /// scope) by this member's agent.
+    pub items: Vec<crate::store::inbox::InboxItem>,
+    /// Comment and page events whose audience names the scope's session, or
+    /// (sessionless scope) this participant.
+    pub events: Vec<crate::store::events::Event>,
+    /// Pass to [`settle`] once the page is delivered.
+    pub settle: Settle,
+}
+
+/// The compare-and-set a delivered page makes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Settle {
+    pub key: crate::author::ParticipantKey,
+    pub session_id: String,
+    /// The cursor the page was selected from.
+    pub from: Option<String>,
+    /// The cursor after the page; equal to `from` for an empty page.
+    pub to: Option<String>,
+    /// Migrated backlog rows the page carried, deleted on settle.
+    pub backlog: Vec<String>,
+}
+
+/// The next attention page: backlog rows first, then the cursor range.
+pub async fn attention(
+    db: &Database,
+    key: &crate::author::ParticipantKey,
+    session_id: &str,
+    limit: i64,
+    visible: Option<&[String]>,
+) -> Result<Attention> {
+    let _ = (db, key, session_id, limit, visible);
+    Err(super::unbuilt("notifications::attention"))
+}
+
+/// Settle a delivered page. False when another call settled first, in which
+/// case this page must not be delivered (the trailer shows nothing;
+/// `inbox_wait` and `notify_wait` select again).
+pub async fn settle(db: &Database, settle: &Settle) -> Result<bool> {
+    let _ = (db, settle);
+    Err(super::unbuilt("notifications::settle"))
+}
+
+/// The same page without consuming it, for `GET /api/v1/me/pending`.
+pub async fn peek(
+    db: &Database,
+    key: &crate::author::ParticipantKey,
+    session_id: &str,
+    limit: i64,
+    visible: Option<&[String]>,
+) -> Result<Attention> {
+    let _ = (db, key, session_id, limit, visible);
+    Err(super::unbuilt("notifications::peek"))
+}
