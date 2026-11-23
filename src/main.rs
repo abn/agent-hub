@@ -1,4 +1,5 @@
 mod daemon;
+mod service;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -15,6 +16,8 @@ usage:
   agent-hub restart              stop the hub, then start it
   agent-hub status [--json]      say whether the hub runs, and where
   agent-hub logs [-f] [-n N]     print the hub's log, or follow it
+  agent-hub service install      register the hub as a per-user service
+  agent-hub uninstall [--purge]  remove the service and the binary
   agent-hub version              print the version (also --version)
   agent-hub mcp                  bridge stdio MCP to the hub named by HUB_URL
   agent-hub call <tool> [json]   call one tool and print its JSON result
@@ -297,6 +300,8 @@ fn main() -> ExitCode {
         Some("restart") => daemon::restart_cmd(&args[1..]),
         Some("status") => daemon::status_cmd(&args[1..]),
         Some("logs") => daemon::logs_cmd(&args[1..]),
+        Some("service") => service::install::service_cmd(&args[1..]),
+        Some("uninstall") => service::install::uninstall_cmd(&args[1..]),
         Some("version") => daemon::version_cmd(),
         Some("mcp") => mcp(&args[1..]),
         Some("call") => call(&args[1..]),
@@ -370,6 +375,8 @@ fn usage_of(command: &str) -> Option<&'static str> {
         "restart" => daemon::RESTART_USAGE,
         "status" => daemon::STATUS_USAGE,
         "logs" => daemon::LOGS_USAGE,
+        "service" => service::install::SERVICE_USAGE,
+        "uninstall" => service::install::UNINSTALL_USAGE,
         "version" => daemon::VERSION_USAGE,
         "mcp" => MCP_USAGE,
         "call" => CALL_USAGE,

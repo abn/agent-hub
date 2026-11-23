@@ -1520,6 +1520,7 @@ fn write_client_pair(path: &Path, settings: &[(&str, &str)]) -> std::io::Result<
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    let _lock = lock_config(path)?;
 
     let existing = if path.exists() {
         std::fs::read_to_string(path)?
@@ -1528,35 +1529,75 @@ fn write_client_pair(path: &Path, settings: &[(&str, &str)]) -> std::io::Result<
     };
 
     let updated = update_client_toml_settings(&existing, settings);
+    write_private_file(path, &updated)
+}
 
-    // Write beside the target at 0600 and rename it into place: the token is
-    // then never in a file with broader permissions, and never half-written.
-    // `mode` only applies when a file is created, so an existing temp file is
-    // repaired explicitly, and a permission failure is an error rather than
-    // something to ignore while the token sits readable. H12.
-    let mut temp_name = path.as_os_str().to_owned();
-    temp_name.push(format!(".tmp-{}", std::process::id()));
-    let temp_path = PathBuf::from(temp_name);
+/// Hold the lock that serialises every read, change and replace of the config
+/// file at `path`, so two writers (an install and an enrolment, say) cannot
+/// each read the old file and the second undo the first.
+///
+/// The lock is on `.<file name>.agent-hub.lock`, a file beside the config
+/// that is never unlinked (removing a lock file lets two writers each hold a
+/// lock on a different inode). It is released when the returned handle is
+/// dropped.
+fn lock_config(path: &Path) -> std::io::Result<std::fs::File> {
+    let lock_path = config_lock_path(path);
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(lock_path)?;
+    file.lock()?;
+    Ok(file)
+}
 
-    let write = (|| -> std::io::Result<()> {
+/// The lock file that guards the config at `path`.
+fn config_lock_path(path: &Path) -> PathBuf {
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "config.toml".to_string());
+    path.with_file_name(format!(".{file_name}.agent-hub.lock"))
+}
+
+/// Write `contents` to `path` at mode 0600 through a temporary file beside it.
+///
+/// The temporary file has a name of its own and is created exclusively at
+/// 0600, so a file someone else left at that name is never written into, and
+/// the token is never in a file with broader permissions. It is renamed into
+/// place, so the config is never half-written.
+fn write_private_file(path: &Path, contents: &str) -> std::io::Result<()> {
+    use rand::RngCore;
+    let (temp_path, mut file) = loop {
+        let mut temp_name = path.as_os_str().to_owned();
+        temp_name.push(format!(
+            ".tmp-{}-{:016x}",
+            std::process::id(),
+            rand::rng().next_u64()
+        ));
+        let temp_path = PathBuf::from(temp_name);
         let mut options = std::fs::OpenOptions::new();
-        options.write(true).create(true).truncate(true);
+        options.write(true).create_new(true);
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        let mut file = options.open(&temp_path)?;
-        {
-            use std::io::Write;
-            file.write_all(updated.as_bytes())?;
-            file.sync_all()?;
+        match options.open(&temp_path) {
+            Ok(file) => break (temp_path, file),
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(err) => return Err(err),
         }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&temp_path, std::fs::Permissions::from_mode(0o600))?;
-        }
+    };
+
+    let write = (|| -> std::io::Result<()> {
+        use std::io::Write;
+        file.write_all(contents.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
         std::fs::rename(&temp_path, path)
     })();
 
@@ -1564,6 +1605,215 @@ fn write_client_pair(path: &Path, settings: &[(&str, &str)]) -> std::io::Result<
         let _ = std::fs::remove_file(&temp_path);
     }
     write
+}
+
+/// What [`merge_missing_settings`] did to one key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Merged {
+    /// The key was missing and is now in the file.
+    Added,
+    /// The key was already set, and the file still holds its own value.
+    Kept,
+}
+
+/// Add the named keys to `[table]` of the config file at `path`, only where the
+/// key is missing, and say which were added and which were kept.
+///
+/// This is the writer behind `service install`. It never changes a value the
+/// file already holds (an empty string holds nothing: it counts as missing and
+/// is replaced), and comments, order and layout stay as they were. The
+/// file is created (0600, in an owner-only directory when the directory is new)
+/// if it does not exist, and nothing is written when no key is missing. A file
+/// that is not valid TOML is refused, not rewritten. The whole read, merge and
+/// replace runs under the config file's lock.
+pub fn merge_missing_settings(
+    path: &Path,
+    table: &str,
+    settings: &[(&str, &str)],
+) -> std::io::Result<Vec<(String, Merged)>> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        private_dir(parent)?;
+    }
+    let _lock = lock_config(path)?;
+    let existing = match std::fs::read_to_string(path) {
+        Ok(text) => Some(text),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(err),
+    };
+    let content = existing.clone().unwrap_or_default();
+    let invalid = |message: String| std::io::Error::new(std::io::ErrorKind::InvalidData, message);
+    let parsed: toml::Table = content
+        .parse()
+        .map_err(|err| invalid(format!("{}: {err}", path.display())))?;
+    let present = |key: &str| {
+        parsed
+            .get(table)
+            .and_then(toml::Value::as_table)
+            .and_then(|section| section.get(key))
+            .is_some_and(|value| value.as_str() != Some(""))
+    };
+    let missing: Vec<(&str, &str)> = settings
+        .iter()
+        .copied()
+        .filter(|(key, _)| !present(key))
+        .collect();
+    let outcome = settings
+        .iter()
+        .map(|(key, _)| {
+            let merged = if missing.iter().any(|(wanted, _)| wanted == key) {
+                Merged::Added
+            } else {
+                Merged::Kept
+            };
+            ((*key).to_string(), merged)
+        })
+        .collect();
+    if missing.is_empty() && existing.is_some() {
+        return Ok(outcome);
+    }
+    let updated = insert_missing_keys(&content, table, &missing)
+        .map_err(|message| invalid(format!("{}: {message}", path.display())))?;
+    write_private_file(path, &updated)?;
+    Ok(outcome)
+}
+
+/// Put `keys` at the end of `[table]`, or add the table, keeping every comment
+/// and the rest of the layout.
+///
+/// The result is parsed back and compared with the original: the only change
+/// allowed is the requested keys appearing in the table. Anything else is an
+/// error and nothing is written.
+fn insert_missing_keys(
+    content: &str,
+    table: &str,
+    keys: &[(&str, &str)],
+) -> std::result::Result<String, String> {
+    let original: toml::Table = content.parse().map_err(|err| format!("{err}"))?;
+    let mut document: toml_edit::DocumentMut = content.parse().map_err(|err| format!("{err}"))?;
+    let had_content = !document.as_table().is_empty();
+    if !document.contains_key(table) {
+        let mut new_table = toml_edit::Table::new();
+        if had_content {
+            new_table.decor_mut().set_prefix("\n");
+        }
+        document.insert(table, toml_edit::Item::Table(new_table));
+    }
+    let section = document
+        .get_mut(table)
+        .and_then(toml_edit::Item::as_table_like_mut)
+        .ok_or_else(|| format!("{table} is not a table"))?;
+    for (key, value) in keys {
+        section.insert(key, toml_edit::value(*value));
+    }
+    let text = document.to_string();
+
+    let mut expected = original;
+    let entry = expected
+        .entry(table.to_string())
+        .or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let toml::Value::Table(section) = entry else {
+        return Err(format!("{table} is not a table"));
+    };
+    for (key, value) in keys {
+        section.insert(
+            (*key).to_string(),
+            toml::Value::String((*value).to_string()),
+        );
+    }
+    let written: toml::Table = text
+        .parse()
+        .map_err(|err| format!("adding the keys would leave invalid TOML ({err})"))?;
+    if written != expected {
+        return Err("adding the keys would change another setting; add them by hand".to_string());
+    }
+    Ok(text)
+}
+
+/// What [`remove_hub_table`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HubRemoval {
+    /// The file or its `[hub]` table was not there.
+    Absent,
+    /// The table was cut out and the rest of the file kept.
+    TableRemoved,
+    /// The table was the whole file, so the file went with it.
+    FileDeleted,
+}
+
+/// Remove the `[hub]` table from the config file at `path`, and the file too
+/// when nothing else is left in it.
+///
+/// The `[client]` table is never touched: agents and plugins on the machine use
+/// it. The result is parsed and compared with the original before anything is
+/// written, so a layout the line scan misreads is an error, not a lost setting.
+pub fn remove_hub_table(path: &Path) -> std::io::Result<HubRemoval> {
+    if !path.exists() {
+        return Ok(HubRemoval::Absent);
+    }
+    let _lock = lock_config(path)?;
+    let content = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(HubRemoval::Absent),
+        Err(err) => return Err(err),
+    };
+    let invalid = |message: String| std::io::Error::new(std::io::ErrorKind::InvalidData, message);
+    let original: toml::Table = content
+        .parse()
+        .map_err(|err| invalid(format!("{}: {err}", path.display())))?;
+    if !original.contains_key("hub") {
+        return Ok(HubRemoval::Absent);
+    }
+    let lines: Vec<&str> = content.lines().collect();
+    let is_header = |line: &str| line.trim_start().starts_with('[');
+    let hub_header = |line: &str| {
+        let rest = line.trim_start();
+        rest.strip_prefix("[hub]")
+            .is_some_and(|tail| tail.trim().is_empty() || tail.trim_start().starts_with('#'))
+    };
+    let Some(start) = lines.iter().position(|line| hub_header(line)) else {
+        return Err(invalid(format!(
+            "{}: the [hub] table is not in a form that can be cut out; remove it by hand",
+            path.display()
+        )));
+    };
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, line)| is_header(line))
+        .map_or(lines.len(), |(index, _)| index);
+    let kept: Vec<&str> = lines[..start]
+        .iter()
+        .chain(lines[end..].iter())
+        .copied()
+        .collect();
+    let mut text = kept.join("\n");
+    if !text.is_empty() {
+        text.push('\n');
+    }
+    let remaining: toml::Table = text.parse().map_err(|err| {
+        invalid(format!(
+            "{}: cutting [hub] out leaves invalid TOML ({err}); remove it by hand",
+            path.display()
+        ))
+    })?;
+    let mut expected = original.clone();
+    expected.remove("hub");
+    if remaining != expected {
+        return Err(invalid(format!(
+            "{}: cutting [hub] out would change another setting; remove it by hand",
+            path.display()
+        )));
+    }
+    if remaining.is_empty() {
+        std::fs::remove_file(path)?;
+        return Ok(HubRemoval::FileDeleted);
+    }
+    write_private_file(path, &text)?;
+    Ok(HubRemoval::TableRemoved)
 }
 
 /// Replace the token in the `[client]` table, or add the table and the key.
@@ -1876,11 +2126,15 @@ mod private_mode_tests {
             "the rest of the file is kept: {text}"
         );
 
-        let entries: Vec<_> = std::fs::read_dir(&dir).expect("list").collect();
-        assert_eq!(
-            entries.len(),
-            1,
-            "the temp file is renamed, not left behind"
+        // The writers' lock file stays beside the config; no temp file does.
+        let temps: Vec<_> = std::fs::read_dir(&dir)
+            .expect("list")
+            .map(|entry| entry.expect("entry").file_name())
+            .filter(|name| name.to_string_lossy().contains(".tmp-"))
+            .collect();
+        assert!(
+            temps.is_empty(),
+            "the temp file is renamed, not left behind: {temps:?}"
         );
 
         std::fs::remove_dir_all(&dir).expect("clean up");
@@ -1988,5 +2242,274 @@ mod platform_tests {
         let none = env(&[]);
         assert_eq!(platform_data_dir(&none, Os::Linux), None);
         assert_eq!(platform_log_file(&none, Os::Macos), None);
+    }
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::{
+        HubRemoval, Merged, insert_missing_keys, merge_missing_settings, remove_hub_table,
+    };
+    use std::path::PathBuf;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir =
+            PathBuf::from("target/tmp").join(format!("config-merge-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create scratch");
+        dir
+    }
+
+    #[test]
+    fn a_missing_table_is_added_at_the_end() {
+        let text = insert_missing_keys("[client]\nurl = \"http://hub\"\n", "hub", &[("bind", "x")])
+            .expect("insert");
+        assert_eq!(
+            text,
+            "[client]\nurl = \"http://hub\"\n\n[hub]\nbind = \"x\"\n"
+        );
+    }
+
+    #[test]
+    fn keys_land_inside_an_existing_table_and_leave_the_rest_alone() {
+        let before =
+            "# mine\n[hub]\nnode_name = \"n\"\n\n# about client\n[client]\ntoken = \"t\"\n";
+        let text = insert_missing_keys(before, "hub", &[("bind", "b")]).expect("insert");
+        assert_eq!(
+            text,
+            "# mine\n[hub]\nnode_name = \"n\"\nbind = \"b\"\n\n# about client\n[client]\ntoken = \"t\"\n"
+        );
+    }
+
+    #[test]
+    fn comments_and_inline_comments_survive_a_merge() {
+        let before = "# top\n[hub] # the server\nnode_name = \"n\" # shown in the PWA\n# trailing\n\n[client]\nurl = \"u\"\n";
+        let text = insert_missing_keys(before, "hub", &[("bind", "b")]).expect("insert");
+        for comment in ["# top", "# the server", "# shown in the PWA", "# trailing"] {
+            assert!(text.contains(comment), "{comment} kept: {text}");
+        }
+        let parsed: toml::Table = text.parse().expect("valid");
+        assert_eq!(parsed["hub"]["bind"].as_str(), Some("b"));
+        assert_eq!(parsed["hub"]["node_name"].as_str(), Some("n"));
+        assert_eq!(parsed["client"]["url"].as_str(), Some("u"));
+    }
+
+    #[test]
+    fn a_quoted_table_header_is_the_same_table() {
+        let before = "[\"hub\"]\nnode_name = \"n\"\n";
+        let text = insert_missing_keys(before, "hub", &[("bind", "b")]).expect("insert");
+        let parsed: toml::Table = text.parse().expect("no duplicate table");
+        let hub = parsed["hub"].as_table().expect("hub");
+        assert_eq!(hub.len(), 2, "{text}");
+        assert_eq!(hub["bind"].as_str(), Some("b"));
+    }
+
+    #[test]
+    fn a_multiline_string_that_looks_like_a_header_is_left_whole() {
+        let before = "[hub]\nnode_name = \"\"\"\n[client]\nurl = \"fake\"\n\"\"\"\n\n[client]\nurl = \"u\"\n";
+        let text = insert_missing_keys(before, "hub", &[("bind", "b")]).expect("insert");
+        let parsed: toml::Table = text.parse().expect("valid");
+        assert_eq!(
+            parsed["hub"]["node_name"].as_str(),
+            Some("[client]\nurl = \"fake\"\n")
+        );
+        assert_eq!(parsed["hub"]["bind"].as_str(), Some("b"));
+        assert_eq!(parsed["client"].as_table().unwrap().len(), 1);
+        assert_eq!(parsed["client"]["url"].as_str(), Some("u"));
+    }
+
+    #[test]
+    fn a_key_that_is_not_a_table_is_refused() {
+        assert!(insert_missing_keys("hub = 1\n", "hub", &[("bind", "b")]).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_temporary_file_is_created_exclusively_at_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("exclusive");
+        let file = dir.join("config.toml");
+        // A readable file at the name the old writer would have reused.
+        let planted = dir.join(format!("config.toml.tmp-{}", std::process::id()));
+        std::fs::write(&planted, "planted").unwrap();
+        std::fs::set_permissions(&planted, std::fs::Permissions::from_mode(0o644)).unwrap();
+        merge_missing_settings(&file, "hub", &[("admin_token", "secret")]).expect("create");
+        assert_eq!(std::fs::read_to_string(&planted).unwrap(), "planted");
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".tmp-"))
+            .collect();
+        assert_eq!(names.len(), 1, "no temporary file is left: {names:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn concurrent_merges_each_keep_what_the_others_added() {
+        let dir = scratch("concurrent");
+        let file = dir.join("config.toml");
+        let keys = [
+            "bind",
+            "data_dir",
+            "admin_token",
+            "node_name",
+            "log_file",
+            "backup_dir",
+        ];
+        std::thread::scope(|scope| {
+            for key in keys {
+                let file = &file;
+                scope.spawn(move || {
+                    merge_missing_settings(file, "hub", &[(key, "v")]).expect("merge");
+                });
+            }
+        });
+        let parsed: toml::Table = std::fs::read_to_string(&file).unwrap().parse().unwrap();
+        assert_eq!(
+            parsed["hub"].as_table().unwrap().len(),
+            keys.len(),
+            "{parsed:?}"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_merge_adds_only_what_is_missing_and_keeps_the_rest() {
+        let dir = scratch("keep");
+        let file = dir.join("agent-hub").join("config.toml");
+        let first = merge_missing_settings(
+            &file,
+            "hub",
+            &[("bind", "127.0.0.1:8080"), ("data_dir", "/d")],
+        )
+        .expect("create");
+        assert_eq!(
+            first,
+            vec![
+                ("bind".to_string(), Merged::Added),
+                ("data_dir".to_string(), Merged::Added)
+            ]
+        );
+        std::fs::write(
+            &file,
+            std::fs::read_to_string(&file)
+                .unwrap()
+                .replace("8080", "9999"),
+        )
+        .unwrap();
+        let again = merge_missing_settings(
+            &file,
+            "hub",
+            &[("bind", "127.0.0.1:8080"), ("admin_token", "tok")],
+        )
+        .expect("merge");
+        assert_eq!(
+            again,
+            vec![
+                ("bind".to_string(), Merged::Kept),
+                ("admin_token".to_string(), Merged::Added)
+            ]
+        );
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(text.contains("bind = \"127.0.0.1:9999\""), "{text}");
+        assert!(text.contains("admin_token = \"tok\""), "{text}");
+        let parsed: toml::Table = text.parse().expect("still valid TOML");
+        assert_eq!(parsed["hub"].as_table().unwrap().len(), 3);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_file_is_owner_only_and_a_new_directory_is_too() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = scratch("mode");
+        let file = dir.join("new").join("config.toml");
+        merge_missing_settings(&file, "hub", &[("bind", "b")]).expect("create");
+        let mode =
+            |path: &std::path::Path| std::fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&file), 0o600);
+        assert_eq!(mode(file.parent().unwrap()), 0o700);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_that_is_not_toml_is_refused_and_left_as_it_was() {
+        let dir = scratch("bad");
+        let file = dir.join("config.toml");
+        std::fs::write(&file, "[hub\nbind = ").unwrap();
+        let err = merge_missing_settings(&file, "hub", &[("bind", "b")]).expect_err("refused");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "[hub\nbind = ");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn an_empty_value_counts_as_missing_and_is_replaced_in_place() {
+        let dir = scratch("empty");
+        let file = dir.join("config.toml");
+        std::fs::write(&file, "[hub]\nadmin_token = \"\"\nbind = \"b\"\n").unwrap();
+        let merged =
+            merge_missing_settings(&file, "hub", &[("admin_token", "t"), ("bind", "x")]).unwrap();
+        assert_eq!(
+            merged,
+            vec![
+                ("admin_token".to_string(), Merged::Added),
+                ("bind".to_string(), Merged::Kept)
+            ]
+        );
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(text, "[hub]\nadmin_token = \"t\"\nbind = \"b\"\n");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn removing_the_hub_table_keeps_the_client_table() {
+        let dir = scratch("remove");
+        let file = dir.join("config.toml");
+        std::fs::write(
+            &file,
+            "[hub]\nbind = \"b\"\nadmin_token = \"t\"\n\n[client]\nurl = \"http://hub\"\n",
+        )
+        .unwrap();
+        assert_eq!(remove_hub_table(&file).unwrap(), HubRemoval::TableRemoved);
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(text, "[client]\nurl = \"http://hub\"\n");
+        assert_eq!(remove_hub_table(&file).unwrap(), HubRemoval::Absent);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_file_with_only_the_hub_table_goes_with_it() {
+        let dir = scratch("whole");
+        let file = dir.join("config.toml");
+        std::fs::write(&file, "# agent-hub\n[hub]\nbind = \"b\"\n").unwrap();
+        assert_eq!(remove_hub_table(&file).unwrap(), HubRemoval::FileDeleted);
+        assert!(!file.exists());
+        assert!(
+            dir.join(".config.toml.agent-hub.lock").exists(),
+            "the writer lock file is never unlinked"
+        );
+        assert_eq!(remove_hub_table(&file).unwrap(), HubRemoval::Absent);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_hub_table_the_scan_cannot_cut_cleanly_is_refused() {
+        let dir = scratch("array");
+        let file = dir.join("config.toml");
+        let text = "[hub]\ntrust_proxy = [\n[\"1.1.1.1\"],\n]\n[client]\nurl = \"u\"\n";
+        std::fs::write(&file, text).unwrap();
+        // The array's inner line looks like a table header. Either the file is
+        // cut exactly (only [client] left) or it is refused untouched.
+        match remove_hub_table(&file) {
+            Ok(_) => {
+                let left: toml::Table = std::fs::read_to_string(&file).unwrap().parse().unwrap();
+                assert_eq!(left.keys().collect::<Vec<_>>(), vec!["client"]);
+            }
+            Err(_) => assert_eq!(std::fs::read_to_string(&file).unwrap(), text),
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

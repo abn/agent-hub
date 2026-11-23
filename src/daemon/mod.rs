@@ -1,11 +1,12 @@
 //! Running the hub as a background process: `start`, `stop`, `restart`,
 //! `status`, `logs`, and the bare `agent-hub` that reports status.
 //!
-//! The verbs act on "the hub" through a [`Backend`]. Today the one backend is
-//! [`process::Process`], a plain process that `hub.lock` identifies. A service
-//! backend (systemd, launchd, a scheduled task) plugs in at [`backend`] and
-//! takes over the verbs while a service is installed; `status` and the argument
-//! handling stay here, so every backend reports the same way.
+//! The verbs act on "the hub" through a [`Backend`]. The default is
+//! [`process::Process`], a plain process that `hub.lock` identifies. The service
+//! backend (systemd, launchd; the Windows scheduled task is still to come)
+//! is chosen at [`backend`] and takes over the verbs while a service is
+//! installed; `status` and the argument handling stay here, so every backend
+//! reports the same way.
 
 pub mod lock;
 pub mod logfile;
@@ -123,8 +124,8 @@ pub trait Backend {
 
 /// The backend that runs the verbs. A service backend returns here, ahead of
 /// the plain process, when a service is installed.
-pub fn backend(_settings: &LifecycleSettings) -> Box<dyn Backend> {
-    Box::new(process::Process)
+pub fn backend(settings: &LifecycleSettings) -> Box<dyn Backend> {
+    crate::service::backend_for(settings).unwrap_or_else(|| Box::new(process::Process))
 }
 
 /// The version line: `agent-hub 1.13.0 (abc1234)`.
@@ -143,9 +144,9 @@ pub fn version_cmd() -> ExitCode {
 }
 
 /// The settings every verb reads, or the exit code of the failure to resolve
-/// them.
+/// them. An installed service's own settings win over the caller's.
 fn settings_or_exit(command: &str) -> Result<LifecycleSettings, ExitCode> {
-    LifecycleSettings::from_env().map_err(|err| {
+    crate::service::verb_settings().map_err(|err| {
         eprintln!("agent-hub {command}: {err}");
         ExitCode::from(78)
     })
@@ -278,7 +279,7 @@ pub fn status_cmd(args: &[String]) -> ExitCode {
 /// It never serves. Run in the wrong directory it would otherwise create a
 /// second, empty store beside the real one.
 pub fn bare(usage: &str) -> ExitCode {
-    match LifecycleSettings::from_env() {
+    match crate::service::verb_settings() {
         Ok(settings) => {
             let status = gather(&settings, backend(&settings).as_ref());
             print!("{}", status.render(home().as_deref()));
