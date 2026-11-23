@@ -39,9 +39,82 @@ jobs:
     if: needs.release-please.outputs.release_created == 'true'
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/binaries.yml
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
+
+  # The Windows archive is built, proven and published on its own. Nothing
+  # waits on it: the release smoke below needs the Unix archives only.
+  binaries-windows:
+    name: Windows binary
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/binaries-windows.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+
+  # A pinned copy of each script ships with every release, beside the copy the
+  # site serves, so an install of an old version can use the script it shipped
+  # with.
+  installers:
+    name: Install scripts
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Attach the scripts and their checksums to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          mkdir -p target/installers
+          cp deploy/install.sh deploy/install.ps1 target/installers/
+          cd target/installers
+          sha256sum install.sh > install.sh.sha256
+          sha256sum install.ps1 > install.ps1.sha256
+          gh release upload "$TAG" install.sh install.sh.sha256 install.ps1 install.ps1.sha256 \
+            --clobber --repo "${{ github.repository }}"
+
+  # Nothing is announced as installable until the published script installs the
+  # published binary and the attestation checks out. The Windows archive is
+  # gated, published by its own job, and not part of this.
+  smoke:
+    name: Install the published release
+    needs: [release-please, binaries, installers]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Fetch the published script and check it against its checksum
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          base="https://github.com/${{ github.repository }}/releases/download/$TAG"
+          curl -fsSL -o install.sh "$base/install.sh"
+          curl -fsSL -o install.sh.sha256 "$base/install.sh.sha256"
+          sha256sum --check install.sh.sha256
+
+      - name: Install without a service, with provenance required
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          smoke=$PWD/target/tmp/smoke
+          mkdir -p "$smoke/bin" "$smoke/cache" "$smoke/state"
+          XDG_CACHE_HOME=$smoke/cache XDG_STATE_HOME=$smoke/state \
+            sh install.sh --version "v$VERSION" --no-service --require-provenance --bin-dir "$smoke/bin"
+          "$smoke/bin/agent-hub" --version | grep -F "agent-hub $VERSION"
 
   image:
     name: Build, push and verify

@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test plugins/sync plugins/antigravity-dist test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e plugins/check install/test net/check serve/check gate gate/quick e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test plugins/sync plugins/antigravity-dist test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e plugins/check install/test install/e2e net/check serve/check gate gate/quick e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -168,6 +168,11 @@ plugins/antigravity-dist: ## Build target/dist/agent-hub-antigravity-<version>.t
 install/test: ## Test deploy/install.sh against a local release server
 	sh tests/install/run.sh
 
+# Not part of `check`: it builds the release binary and needs rootless podman.
+# The macOS and Windows variants run in CI only (tests/install/e2e/).
+install/e2e: ## Install and run the service end to end in a systemd container (podman)
+	sh tests/install/e2e/linux.sh $(INSTALL_E2E_BIN)
+
 net/check: ## Test the tailnet configuration path in a build without the feature
 	cargo test --no-default-features --test ops_lifecycle a_tailnet_key
 	cargo test --no-default-features --test tailnet_config
@@ -177,7 +182,7 @@ net/check: ## Test the tailnet configuration path in a build without the feature
 serve/check: ## Compile the serve-only build the container image uses
 	cargo check --no-default-features
 
-gate: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles web/types plugins/check net/check serve/check test ## Everything the gate runs but the browser checks
+gate: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles web/types plugins/check install/test net/check serve/check test ## Everything the gate runs but the browser checks
 gate/quick: fmt/check lint/engine clippy web/units plugins/check ## Fast inner loop: format, lint and client units
 e2e: web/e2e ## The browser behaviour checks
 e2e/shard: build node_tree ## Run one shard of the browser checks (CI): make e2e/shard SHARD=1/2

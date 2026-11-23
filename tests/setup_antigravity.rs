@@ -179,6 +179,7 @@ fn a_workspace_install_backs_the_global_config_up_under_the_home_config() {
     assert!(!workspace.join(".agents/agent-hub-backup").exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn a_planted_symlink_at_the_old_temp_name_is_never_followed() {
     let home = TempDir::new("setup-agy-tmp");
@@ -212,6 +213,7 @@ fn a_config_that_is_not_json_is_left_alone() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_symlinked_plugin_directory_is_not_written_through() {
     let home = TempDir::new("setup-agy-link");
@@ -225,6 +227,7 @@ fn a_symlinked_plugin_directory_is_not_written_through() {
     assert_eq!(fs::read_dir(&*source).unwrap().count(), 0);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_symlinked_agents_directory_in_the_workspace_is_refused() {
     let home = TempDir::new("setup-agy-agents-home");
@@ -240,6 +243,7 @@ fn a_symlinked_agents_directory_in_the_workspace_is_refused() {
     assert_eq!(fs::read_dir(&*outside).unwrap().count(), 0);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_target_that_links_to_a_file_outside_is_refused_and_left_unchanged() {
     let home = TempDir::new("setup-agy-file-link");

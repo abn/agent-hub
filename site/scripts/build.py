@@ -4,7 +4,7 @@
     build.py assemble --site-url URL --fonts DIR --render DIR <site> <dist>
         Write the landing and not-found pages with the site origin filled
         in, copy the assets and the app's fonts, add the rendered docs under
-        docs/, publish llms.txt, the bootstrap guide and the skill, and write _headers with the hashes of the docs' inline scripts.
+        docs/, publish llms.txt, the install scripts, the bootstrap guide and the skill, and write _headers with the hashes of the docs' inline scripts.
 """
 
 import argparse
@@ -17,6 +17,7 @@ import sys
 
 PAGES = ("index.html", "404.html")
 STATIC = ("favicon.svg", "favicon-32.png", "apple-touch-icon.png", "robots.txt", "llms.txt")
+INSTALLERS = ("install.sh", "install.ps1")
 SKILL = pathlib.Path("skills") / "agent-hub"
 BASE_URL = "{{base_url}}"
 INLINE_SCRIPT = re.compile(r"<script(?![^>]*(?:^|\s)src=)([^>]*)>(.*?)</script>", re.S)
@@ -80,7 +81,14 @@ def assemble(args: argparse.Namespace) -> None:
     for name in STATIC:
         shutil.copy2(site / name, dist / name)
 
-    provision_skill(site.resolve().parent, dist)
+    root = site.resolve().parent
+    for name in INSTALLERS:
+        source = root / "deploy" / name
+        if not source.is_file():
+            sys.exit(f"build.py: {source} is missing")
+        shutil.copy2(source, dist / name)
+
+    provision_skill(root, dist)
 
     rendered = pathlib.Path(args.render) / "docs"
     if not (rendered / "index.html").is_file():

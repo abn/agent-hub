@@ -544,6 +544,7 @@ async fn hub_enrol_off_disables_enrolment() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn cli_enrol_shared_approval_writes_token_to_config_at_0600() {
     use std::os::unix::fs::PermissionsExt;

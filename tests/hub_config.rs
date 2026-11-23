@@ -6,7 +6,9 @@
 //! as an argument.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 
 use agent_hub::config::{ClientConfig, Config};
