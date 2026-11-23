@@ -180,6 +180,13 @@ run_launcher() {
 }
 
 # hook_as SESSION ARGS...: the launcher with a hook's JSON on stdin.
+hook_json() {
+  json=$1
+  shift
+  printf '%s' "$json" | env HOME="$c/home" XDG_CACHE_HOME="$c/home/.cache" \
+    PATH="$c/stubs:$PATH" sh "$launcher_cur" "$@"
+}
+
 hook_as() {
   sess=$1
   shift
@@ -505,6 +512,12 @@ out=$(hook_as s1 hook prompt --harness claude)
 check "and says it once per session" eq "$out" "{}"
 out=$(hook_as s2 hook prompt --harness claude)
 check "again for another session" contains "$out" "Hooks are off"
+out=$(hook_json '{"conversationId":"c1","hook":"pre"}' hook prompt --harness antigravity)
+check "an Antigravity conversation hears it" contains "$out" "Hooks are off"
+out=$(hook_json '{"conversationId":"c1","hook":"pre"}' hook prompt --harness antigravity)
+check "and once per conversation" eq "$out" "{}"
+out=$(hook_json '{"conversationId":"c2"}' hook prompt --harness antigravity)
+check "again for a new conversation" contains "$out" "Hooks are off"
 check "no retry inside the hour" eq "$(archive_gets)" "$gets"
 printf '%s\n' "$good_sum" >"$rel/$stem.sha256"
 touch -t 202001010000 "$dir/launcher-error"

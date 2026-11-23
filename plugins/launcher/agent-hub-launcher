@@ -549,7 +549,12 @@ case "$1" in
     [ "$1" != watch ] || event=watch
     session=
     if [ ! -t 0 ]; then
-      session=$(cat 2>/dev/null | tr -d '\n' | sed -n 's/.*"session_id" *: *"\([^"]*\)".*/\1/p')
+      payload=$(cat 2>/dev/null | tr -d '\n')
+      # Claude's key, else Antigravity's, else OpenCode's.
+      for field in session_id conversationId sessionID; do
+        session=$(printf '%s' "$payload" | sed -n 's/.*"'"$field"'" *: *"\([^"]*\)".*/\1/p')
+        [ -z "$session" ] || break
+      done
     fi
     if ! chain_ready create; then
       # Nowhere safe to record it, so it is said every time.
