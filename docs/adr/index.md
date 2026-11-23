@@ -60,3 +60,5 @@ consequences, and is not edited after the fact except to mark it superseded.
   token is attribution only
 * [0037](0037-harness-plugins-and-session-scoped-delivery.md) - Harness plugins
   and session-scoped delivery
+* [0038](0038-native-per-user-service.md) - A native per-user service with a
+  binary-owned lifecycle

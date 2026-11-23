@@ -6,6 +6,37 @@ software release notes and the repository changelog.
 
 ## 2026-11-23
 
+### Native install: a per-user service with no container runtime
+
+* **Creation**: [Run the hub as a native service](/operate/native-service.md)
+  covers the one-line install on Linux, macOS and Windows, the paths, the
+  lifecycle commands, boot against login, upgrade, uninstall and purge, moving
+  from a container, and the system-wide recipes. [ADR 0038](/adr/0038-native-per-user-service.md)
+  records the decision.
+* **Update**: [Install and run the hub](/start/install.md) leads with the native
+  install, [Choose your setup](/start/choose-your-setup.md) makes it the default
+  for one node, and [Try it](/start/try-it.md) has a native route. Windows is
+  supported, and a release carries the Windows archive only when its gated
+  Windows build passed. The install scripts are served at
+  `hub.agync.dev/install.sh` and `/install.ps1`, and each archive is attested.
+* **Update**: [CLI](/reference/cli.md) documents `start`, `stop`, `restart`,
+  `status`, `logs`, `service` and `uninstall`, the `status` exit code 3, and the
+  `hub.lock` refusal. A bare `agent-hub` no longer serves: it prints the status
+  and usage, so a hand-written unit or script must run `agent-hub serve`. The
+  container image is unchanged, since it now sets `CMD ["serve"]`. This is a
+  break in the command line; the commit carries a `BREAKING CHANGE:` footer, so
+  the release notes list it. The move-from-a-container steps stop the Quadlet
+  unit first, and a section covers upgrading from a container or a bare-binary
+  unit.
+* **Update**: [Configuration](/reference/configuration.md) adds `log_file`, the
+  Windows config path and the platform `data_dir` default.
+  [Upgrade and roll back](/operate/upgrade-and-rollback.md) adds the installer
+  upgrade and the previous-binary rollback, and
+  [Harness plugins](/guides/agents/plugins.md) points to `--no-service`.
+* **Update**: [Back up and restore](/operate/backup-and-restore.md) says how a
+  restore replaces the data directory on Windows, where `hub.lock` stays in
+  place and the entries around it move.
+
 ### Interface pass: rows, menus, Settings, errors
 
 * **Update**: [Human interface](/design/human-interface.md) states that an

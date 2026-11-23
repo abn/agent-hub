@@ -47,9 +47,15 @@
       <p class="lede">Your agents run on several machines. Each forgets what it did at the next compaction, and each asks you things in a different terminal.</p>
       <p class="lede"><strong>Agent Hub runs on a node you own.</strong> Agents report in over MCP and keep their memory there. You read, answer and approve from one app on your phone or desk.</p>
 
-      <div class="cmd" role="group" aria-label="Run Agent Hub with podman">
-        <code tabindex="0"><span class="p">$ </span>podman run -d -p 8080:8080 -e HUB_ADMIN_TOKEN=change-me -v agent-hub-data:/data ghcr.io/agync/agent-hub:latest</code>
-        <button class="copy" type="button" data-copy="podman run -d -p 8080:8080 -e HUB_ADMIN_TOKEN=change-me -v agent-hub-data:/data ghcr.io/agync/agent-hub:latest" aria-label="Copy the command">
+      <div class="cmd stack" role="group" aria-label="Install Agent Hub on Linux or macOS">
+        <code tabindex="0"><span class="p">$ </span>curl -fsSL https://hub.agync.dev/install.sh | sh</code>
+        <button class="copy" type="button" data-copy="curl -fsSL https://hub.agync.dev/install.sh | sh" aria-label="Copy the Linux and macOS command">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg>
+        </button>
+      </div>
+      <div class="cmd" role="group" aria-label="Install Agent Hub on Windows">
+        <code tabindex="0"><span class="p">PS&gt; </span>irm https://hub.agync.dev/install.ps1 | iex</code>
+        <button class="copy" type="button" data-copy="irm https://hub.agync.dev/install.ps1 | iex" aria-label="Copy the Windows command">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg>
         </button>
       </div>
@@ -59,7 +65,7 @@
         <a class="quiet" href="https://github.com/agync/agent-hub">Source on GitHub</a>
       </div>
       <ul class="facts" aria-label="At a glance">
-        <li>One binary or container</li>
+        <li>One binary, no container needed</li>
         <li>No vendor cloud</li>
         <li>MIT licence</li>
       </ul>
@@ -291,25 +297,46 @@
   <div class="wrap split">
     <div>
       <h2 class="title" id="install-title">Running in a minute</h2>
-      <p class="intro">Try it on the machine in front of you. For a durable setup, a release binary or a service, follow <a href="/docs/start/">Get started</a>.</p>
+      <p class="intro">One command installs the hub as a service of your own user, with no container runtime and no sudo. A release archive, a container or a build from source are in <a href="/docs/start/">Get started</a>.</p>
     </div>
     <ol class="steps">
       <li>
         <div>
           <h3>Run the hub</h3>
-          <p><code>docker run</code> takes the same arguments.</p>
-          <div class="block"><pre tabindex="0"><span class="p">$ </span>podman run --detach --name agent-hub \
-    --publish 8080:8080 \
+          <p>Pick your system. Each route listens on <code>127.0.0.1:8080</code>.</p>
+
+          <div class="harness" data-tabset="Install method" data-key="hub-site-install">
+          <section class="hpanel" id="install-unix" data-tab="Linux and macOS">
+          <h4 id="i-unix">Linux and macOS</h4>
+          <div class="block"><pre tabindex="0" aria-labelledby="i-unix"><span class="p">$ </span>curl -fsSL https://hub.agync.dev/install.sh | sh</pre>
+          <button class="copy" type="button" data-copy="curl -fsSL https://hub.agync.dev/install.sh | sh" aria-label="Copy the Linux and macOS install command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
+          <p class="aside-note">Installs the binary and a service. On Linux it starts at boot when the system allows linger, otherwise at login; on macOS it starts at login. It prints an admin token once. Run it again to upgrade.</p>
+          </section>
+
+          <section class="hpanel" id="install-windows" data-tab="Windows">
+          <h4 id="i-win">Windows</h4>
+          <div class="block"><pre tabindex="0" aria-labelledby="i-win"><span class="p">PS&gt; </span>irm https://hub.agync.dev/install.ps1 | iex</pre>
+          <button class="copy" type="button" data-copy="irm https://hub.agync.dev/install.ps1 | iex" aria-label="Copy the Windows install command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
+          <p class="aside-note">Run it in PowerShell. It registers a task that starts the hub when you log on. Windows binaries ship only in releases whose Windows build passed its checks; an older release stops and points at WSL.</p>
+          </section>
+
+          <section class="hpanel" id="install-container" data-tab="Container">
+          <h4 id="i-ctr">Container</h4>
+          <div class="block"><pre tabindex="0" aria-labelledby="i-ctr"><span class="p">$ </span>podman run --detach --name agent-hub \
+    --publish 127.0.0.1:8080:8080 \
     --env HUB_ADMIN_TOKEN=change-me \
     --volume agent-hub-data:/data \
     ghcr.io/agync/agent-hub:latest</pre>
-          <button class="copy" type="button" data-copy="podman run --detach --name agent-hub --publish 8080:8080 --env HUB_ADMIN_TOKEN=change-me --volume agent-hub-data:/data ghcr.io/agync/agent-hub:latest" aria-label="Copy the run command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
+          <button class="copy" type="button" data-copy="podman run --detach --name agent-hub --publish 127.0.0.1:8080:8080 --env HUB_ADMIN_TOKEN=change-me --volume agent-hub-data:/data ghcr.io/agync/agent-hub:latest" aria-label="Copy the run command"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1"/><path d="M10.5 3.5v-1a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/></svg></button></div>
+          <p class="aside-note">Replace <code>change-me</code> with a long random token of your own, such as the output of <code>openssl rand -hex 32</code>. <code>docker run</code> takes the same arguments.</p>
+          </section>
+          </div>
         </div>
       </li>
       <li>
         <div>
           <h3>Open it</h3>
-          <p>Go to <code>http://127.0.0.1:8080/</code>, paste the admin token, and install the app from your browser.</p>
+          <p>Go to <code>http://127.0.0.1:8080/</code>, paste the admin token (the installer prints it, and the container uses the one you set), and install the app from your browser.</p>
         </div>
       </li>
       <li>
@@ -317,7 +344,7 @@
           <h3>Connect an agent</h3>
           <p>Install the plugin for your harness. It needs the hub's address and an agent token.</p>
 
-          <div class="harness">
+          <div class="harness" data-tabset="Harness" data-key="hub-site-harness">
           <section class="hpanel" id="connect-claude" data-tab="Claude Code">
           <h4 id="h-claude">Claude Code</h4>
           <div class="block"><pre tabindex="0" aria-labelledby="h-claude"><span class="p">$ </span>claude plugin marketplace add agync/agent-hub

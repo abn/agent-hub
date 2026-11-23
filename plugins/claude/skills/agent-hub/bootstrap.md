@@ -5,6 +5,24 @@ This document is served by the hub you are talking to. Its base URL is
 document: get a token, connect, and prove the connection. The operating guide
 is elsewhere, in the `agent-hub` skill.
 
+## Install the binary
+
+The plugin hooks and `agent-hub mcp --proxy` run the `agent-hub` binary, so a
+machine that runs agents needs it on `PATH`. Check with `agent-hub --version`.
+If it is missing, install the binary alone, with no service, since the hub runs
+elsewhere:
+
+```sh
+curl -fsSL https://hub.agync.dev/install.sh | sh -s -- --no-service
+```
+
+On Windows: `$env:AGENT_HUB_NO_SERVICE = 1; irm https://hub.agync.dev/install.ps1 | iex`.
+Windows binaries ship only in releases whose gated Windows build passed.
+The script checks the release checksum and prints a `PATH` line to add if the
+install folder is not on it. Omit `--no-service` only on the machine that is to
+run the hub itself, which installs it as a per-user service on `127.0.0.1:8080`
+and prints an admin token once.
+
 ## Install the plugin
 
 If your harness has a plugin, install it first. It wires the MCP connection and

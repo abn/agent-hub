@@ -71,9 +71,29 @@ calls that the image leaves out.
 | `aarch64-apple-darwin` | `macos-15` | Apple silicon |
 | `x86_64-apple-darwin` | `macos-15` | Intel, cross-compiled by the Apple toolchain |
 
-Windows and 32-bit ARM are not built. The store and the session filesystem
-assume a Unix host, and the engine's `io-uring` dependency has no 32-bit ARM
+32-bit ARM is not built: the engine's `io-uring` dependency has no 32-bit ARM
 bindings.
+
+Windows is supported in the source, and a release carries a Windows archive
+only when the gate passes. `.github/workflows/binaries-windows.yml` is called
+by `release.yml` as its own job, so the Unix archives and the release never
+wait on it. It builds `x86_64-pc-windows-msvc` on `windows-2025`, packages
+`agent-hub-<version>-x86_64-pc-windows-msvc.zip` and its checksum, runs
+`tests/install/e2e/windows.ps1` against that exact zip (the real `install.ps1`,
+the scheduled task, a stop and an uninstall), attests it, and only then uploads
+it. The job is `continue-on-error`: if the build, the smoke or the upload
+fails, that release has no Windows archive and `install.ps1` exits 3 and points
+at WSL. A later release can carry one again.
+
+Every archive is attested with `actions/attest-build-provenance`, which needs
+the `id-token` and `attestations` write permissions on the calling job. A
+consumer checks one with `gh attestation verify <archive> --repo agync/agent-hub`;
+the install scripts do that when `gh` is present, and `--require-provenance`
+makes it mandatory. The `installers` job also uploads `install.sh` and
+`install.ps1` with their checksums to each release, and the `smoke` job installs
+the published release with `--no-service --require-provenance`. The same two
+scripts are served at `https://hub.agync.dev/install.sh` and `/install.ps1` by
+the site build.
 
 Each job installs the pinned toolchain, and Zig with `cargo-zigbuild` for the
 Linux targets, then hands the build, the archive, the checksum and the upload to

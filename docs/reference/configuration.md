@@ -18,12 +18,17 @@ The binary reads `config.toml`: a system file at `/etc/agent-hub/config.toml`
 (or the path in `AGENT_HUB_SYSTEM_CONFIG`) layered under a user file. The user
 file is the first of these that exists:
 
+- on Windows, `%APPDATA%\agent-hub\config.toml`
 - `$XDG_CONFIG_HOME/agent-hub/config.toml`, else
-  `~/.config/agent-hub/config.toml`
+  `~/.config/agent-hub/config.toml` (also on macOS)
 - `~/.agent-hub/config.toml`
 
+On Windows, `USERPROFILE` stands in where `HOME` is not set.
+
 `HUB_CONFIG` names a different file and replaces both layers. Environment
-variables override the files. A missing file is not an error, and a file that
+variables override the files. A service made by `agent-hub service install` pins
+`HUB_CONFIG` to the user file the installer wrote, so it does not read
+`/etc/agent-hub/config.toml`. A missing file is not an error, and a file that
 others can read warns on stderr when it holds a token, and still works.
 
 The file carries two tables:
@@ -58,8 +63,9 @@ took effect.
 | Key | Variable | Default | Purpose |
 |---|---|---|---|
 | `bind` | `HUB_BIND` | `127.0.0.1:8080` | Socket address the HTTP API binds to; with port `0` the system picks a free port and the startup line names the bound address |
-| `data_dir` | `HUB_DATA_DIR` | `./data` | Directory for the hub store, session files, artifact blobs, and the tailnet key state |
-| `admin_token` | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface. Required when the bind is not loopback; a loopback hub without one starts but its app refuses every request, so set it before opening the app |
+| `data_dir` | `HUB_DATA_DIR` | `./data` for `serve`; the platform data directory for `start` and `service install` | Directory for the hub store, session files, artifact blobs, and the tailnet key state. The platform directory is `~/.local/share/agent-hub` on Linux, `~/Library/Application Support/agent-hub` on macOS and `%LOCALAPPDATA%\agent-hub\data` on Windows; `service install` writes it into `config.toml` as an absolute path |
+| `log_file` | `HUB_LOG_FILE` | unset (stderr) | File `serve` writes its log to instead of stderr, rotated at 10 MiB with three archives kept. `start` and the macOS and Windows services set it to the platform log path; a Linux service logs to the journal. A path that cannot be opened stops the start, and a name of `hub.lock`, `hub.pid.json` or ending in `.start` is refused |
+| `admin_token` | `HUB_ADMIN_TOKEN` | unset | Admin token for the control surface. Required when the bind is not loopback; a loopback hub without one starts but its app refuses every request, so set it before opening the app. `service install` generates one (64 hex characters) when none is set and saves it here |
 | `node_name` | `HUB_NODE_NAME` | the host name | Name the human sees for this node; set it when the host name is a generated container id |
 | `public_url` | `HUB_PUBLIC_URL` | unset | External origin the hub is reached at, such as `https://hub.example`; overrides the address derived from the request |
 | `active_window_secs` | `HUB_ACTIVE_WINDOW_SECS` | `900` | How long after its last tool call a session still counts its owner as an agent at work; 1 to 2592000 seconds |
@@ -125,6 +131,12 @@ directory, and checks again with symlinks resolved before each backup.
 | `agent_id` | `HUB_AGENT_ID` | unset | The name the client declares in `X-Agent-Id`. Beside a token it is a sub-identity of the token's agent, for attribution only; on a loopback hub with no token it is the agent's identity |
 | `project` | `HUB_PROJECT` | unset | Project the knowledge-base shorthands act on when no flag names one |
 | `timeout` | `HUB_TIMEOUT` | `120` | Seconds one call may take, handshake to answer; a number above zero, fractional allowed (for example `2.5`) |
+
+`service install` writes `url` as `http://<bind host>:<port>` when it is unset,
+so the stdio proxy (`mcp`) and the other client commands reach the local hub
+rather than falling back to the embedded store. `health` and `backup --url`
+take their address from `--url`, not from this key. It never writes the admin token as `token`: agents
+do not use it.
 
 These settings are read by the binary's client commands: the stdio proxy, the
 one-shot `call`, the `kb` shorthands, and `enrol`. [CLI](/reference/cli.md)

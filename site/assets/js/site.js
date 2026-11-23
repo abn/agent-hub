@@ -13,13 +13,13 @@
     });
   });
 
-  // Install step 3: one tab per harness. Without script every panel stays
-  // stacked under its heading; with it the headings become the tabs.
-  const harness = document.querySelector('.harness');
-  if (harness) {
-    const panels = [...harness.querySelectorAll('.hpanel')], KEY = 'hub-site-harness';
+  // Install steps 1 and 3: one tab per install route and per harness. Without
+  // script every panel stays stacked under its heading; with it the headings
+  // become the tabs.
+  document.querySelectorAll('[data-tabset]').forEach(harness => {
+    const panels = [...harness.querySelectorAll('.hpanel')], KEY = harness.dataset.key;
     const list = document.createElement('div'), tabs = [];
-    list.className = 'tabs'; list.setAttribute('role', 'tablist'); list.setAttribute('aria-label', 'Harness');
+    list.className = 'tabs'; list.setAttribute('role', 'tablist'); list.setAttribute('aria-label', harness.dataset.tabset);
     panels.forEach(p => {
       const tab = document.createElement('button');
       tab.type = 'button'; tab.id = 'tab-' + p.id; tab.className = 'tab'; tab.textContent = p.dataset.tab;
@@ -32,8 +32,13 @@
       tabs.forEach((t, k) => {
         t.setAttribute('aria-selected', k === i); t.tabIndex = k === i ? 0 : -1; panels[k].toggleAttribute('data-off', k !== i);
       });
-      tabs[i].scrollIntoView({ block: 'nearest', inline: 'nearest' });
-      if (focus) tabs[i].focus();
+      // Bring the tab into view inside its own strip; never scroll the page.
+      const t = tabs[i];
+      const lr = list.getBoundingClientRect(), tr = t.getBoundingClientRect();
+      const left = tr.left - lr.left + list.scrollLeft, right = left + tr.width;
+      if (left < list.scrollLeft) list.scrollLeft = left;
+      else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
+      if (focus) t.focus({ preventScroll: true });
       try { localStorage.setItem(KEY, panels[i].id); } catch {}
     };
     list.addEventListener('keydown', e => {
@@ -56,7 +61,7 @@
     // A hidden panel cannot be scrolled to, so a link to one opens it first.
     addEventListener('hashchange', () => { const i = named(); if (i >= 0) { pick(i); harness.scrollIntoView(); } });
     if (named() >= 0) requestAnimationFrame(() => harness.scrollIntoView());
-  }
+  });
 
   // The desk: made-up asks, answered with the same keys as the app.
   const asks = [

@@ -1,9 +1,10 @@
 # Operate
 
-Running the hub on your own node, day to day: deploy it as a service, decide
+Running the hub on your own node, day to day: run it as a service, decide
 how machines reach it, back it up, upgrade it, watch it, and get a nudge when
 something starts waiting on you.
 
+* [Run the hub as a native service](/operate/native-service.md) - Install, start, upgrade and remove the hub as a per-user service, with no container runtime
 * [Deploy as a service](/operate/deploy-as-a-service.md) - Run the hub under Podman Quadlet or Docker, and start it on boot
 * [Network and access](/operate/network-and-access.md) - Bind the hub, terminate TLS, or reach it over a tailnet
 * [Back up and restore](/operate/backup-and-restore.md) - Back up, verify, and restore the hub store as one unit

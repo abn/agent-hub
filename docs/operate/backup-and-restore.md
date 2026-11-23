@@ -191,6 +191,14 @@ beside the destination and swaps by rename.
 > a restore is interrupted that way, move the sibling back before starting the
 > hub: `mv /path/to/.agent-hub-replaced-<token> /path/to/data`.
 
+On Windows a directory cannot be renamed while a file in it is open, and the
+held `hub.lock` is open throughout. So the restore leaves `hub.lock` in place
+and moves the entries around it instead: the old ones into
+`.agent-hub-replaced-<token>`, then the staged ones in. A restore interrupted
+part way can leave a mix: before starting the hub, delete every entry of the data
+directory but `hub.lock`, move every entry of the sibling back in, and restore
+again.
+
 ## You should now see
 
 `agent-hub check` prints `checked N engine files, no problems` and exits 0. On a

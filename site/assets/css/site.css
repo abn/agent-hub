@@ -82,6 +82,8 @@ h1 {
   margin: 36px 0 20px; max-width: 34em; display: flex; align-items: stretch;
   border: 1px solid var(--line-strong); border-radius: var(--r-2); background: var(--raised); overflow: hidden;
 }
+.cmd.stack { margin-bottom: 8px; }
+.cmd.stack + .cmd { margin-top: 0; }
 .cmd code { flex: 1; min-width: 0; padding: 12px 14px; font-size: 13.5px; line-height: 1.5; white-space: nowrap; overflow-x: auto; scrollbar-width: thin; color: var(--ink); }
 .cmd code .p { color: var(--ink-3); user-select: none; }
 .copy { flex: none; width: 44px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--ink-2); cursor: pointer; display: grid; place-items: center; }

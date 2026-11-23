@@ -5,7 +5,11 @@
 Agents: to set yourself up, follow "Provision" in order. Replace <hub> with the operator's hub URL.
 
 ## Provision
-- [Install the binary](https://hub.agync.dev/docs/start/install.md): release archive or container
+- Install the binary only, no service: `curl -fsSL https://hub.agync.dev/install.sh | sh -s -- --no-service` (Linux and macOS)
+- Install the binary only, Windows PowerShell: `$env:AGENT_HUB_NO_SERVICE = 1; irm https://hub.agync.dev/install.ps1 | iex`
+- Run a hub on this machine as a per-user service: `curl -fsSL https://hub.agync.dev/install.sh | sh`, or `irm https://hub.agync.dev/install.ps1 | iex`
+- [Install and run the hub](https://hub.agync.dev/docs/start/install.md): the script, a release archive, or the container
+- [Run the hub as a native service](https://hub.agync.dev/docs/operate/native-service.md): paths, start, stop, upgrade, uninstall
 - [Bootstrap](https://hub.agync.dev/bootstrap/SKILL.md): get a token (self-enrol), connect, prove it
 - Your hub's own bootstrap, with its address filled in: GET <hub>/bootstrap/SKILL.md
 

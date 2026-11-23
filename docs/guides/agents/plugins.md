@@ -21,7 +21,7 @@ step did nothing.
 |---|---|
 | A running hub | see [Install and run the hub](/start/install.md) |
 | An agent token, from `agent-hub enrol` | the plugin reads it from `config.toml`, or asks for it at install |
-| The `agent-hub` binary on `PATH` | Claude Code and Antigravity run it as their hooks. OpenCode does not need it |
+| The `agent-hub` binary on `PATH` | Claude Code and Antigravity run it as their hooks. OpenCode does not need it. On a machine that only runs agents, `curl -fsSL https://hub.agync.dev/install.sh \| sh -s -- --no-service` places the binary and installs no service |
 
 `agent-hub enrol` asks the hub to let this agent in, waits for the human to
 approve it in the inbox, and writes the hub URL and the token to

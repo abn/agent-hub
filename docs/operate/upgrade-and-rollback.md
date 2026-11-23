@@ -35,13 +35,32 @@ To upgrade:
 
 1. Take a backup first,
    ([Back up and restore](/operate/backup-and-restore.md) has the command).
-2. Pull the new image tag, or unpack the new release binary.
+2. Pull the new image tag, or unpack the new release binary. A native install
+   upgrades by running the installer again (below).
 3. Restart the service. Under compose or Docker, replace the image tag and
    re-run; under Quadlet or a binary, stop the unit, swap the image or binary,
    and start it.
 
 The store migrates forward on startup. There is no separate migrate command and
 nothing to run by hand.
+
+### A native install
+
+Re-run the install command:
+
+```sh
+curl -fsSL https://hub.agync.dev/install.sh | sh
+```
+
+On Windows run `irm https://hub.agync.dev/install.ps1 | iex`. The script keeps
+the current binary as `agent-hub.prev` (`agent-hub.prev.exe` on Windows) in the
+state directory (for example `~/.local/state/agent-hub/` on Linux, which
+`XDG_STATE_HOME` moves, though not the binary), installs the new one, re-renders the
+service definition, and restarts the hub if it was running. It leaves the
+config and the data alone, other than adding keys that are new. `--version
+vX.Y.Z` pins a release, and an install of the version already present says so
+and changes nothing. [Run the hub as a native service](/operate/native-service.md)
+has the paths for each platform.
 
 ## You should now see
 
@@ -65,7 +84,10 @@ refuses a set it cannot verify.
    because `hub.db` alone omits whatever is still in the write-ahead log.
 3. Remove a `hub.db-wal` or `hub.db-shm` the backup did not carry, so the store
    is not opened over a stale log.
-4. Start the older binary against the data directory.
+4. Start the older binary against the data directory. On a native install the
+   previous binary is `agent-hub.prev` (`agent-hub.prev.exe` on Windows) in the
+   state directory: copy it over `agent-hub` (`agent-hub.exe`), then
+   `agent-hub start`.
 
 ```sh
 docker compose -f deploy/compose.yaml down          # or: systemctl stop the unit
