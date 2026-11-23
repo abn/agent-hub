@@ -20,9 +20,11 @@ use serde_json::{Value, json};
 use crate::config::ClientConfig;
 
 pub mod backup;
+pub mod credential;
 pub mod enrol;
 pub mod hook;
 pub mod kb_bundle;
+pub mod lockdir;
 pub mod projects;
 mod proxy;
 

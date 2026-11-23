@@ -1068,3 +1068,314 @@ async fn assert_project_active(tx: &crate::store::WriteTx, project_id: &str) -> 
     }
     Ok(())
 }
+
+// Shared sessions: participants, names, and the write-order entry points.
+// The MCP tools and the REST handlers call these; nothing outside the store
+// writes `sessions` or `session_participants`.
+
+/// One participant of a session: a member's agent that wrote or read in it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Participant {
+    pub member: String,
+    /// The canonical agent slug; `''` for a participant migrated without one.
+    pub agent: String,
+    pub joined_at: String,
+    pub last_seen_at: String,
+    /// Set by `session_leave`; cleared by the participant's next call.
+    pub left_at: Option<String>,
+}
+
+/// What a start found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StartOutcome {
+    /// A new session.
+    Created,
+    /// A live session of that name, joined.
+    Resumed,
+    /// An ended session of that name, reopened.
+    Reopened,
+}
+
+/// Whether a join inserted the caller's participant row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Joined {
+    /// True when this call made the caller a participant, which also seeded
+    /// its notify cursor at the session floor.
+    pub first: bool,
+}
+
+/// A `session_start` request.
+#[derive(Debug, Clone)]
+pub struct StartRequest<'a> {
+    pub project_id: &'a str,
+    pub session_name: &'a str,
+    /// Who starts it: the `started_*` columns for a new session, and the
+    /// participant that joins. A human writer starts without joining.
+    pub writer: &'a crate::author::Writer,
+    /// Refuse any live or ended session of that name with
+    /// [`SessionReason::NameTaken`](crate::error::SessionReason::NameTaken).
+    pub exclusive: bool,
+    /// Fork: copy this session's brain into the new session. The caller has
+    /// resolved it already. Forking onto an existing name is refused.
+    pub fork_from: Option<&'a str>,
+}
+
+/// What a start did.
+#[derive(Debug, Clone)]
+pub struct Started {
+    pub session: Session,
+    pub outcome: StartOutcome,
+    pub joined: Joined,
+}
+
+/// The longest segment of a new session name.
+pub const NAME_SEGMENT_MAX: usize = 64;
+
+/// The longest new session name, separators included.
+pub const NAME_MAX: usize = 128;
+
+/// The immediate parent of a child name: `feat-x` for `feat-x/review`.
+pub fn parent_name(name: &str) -> Option<&str> {
+    name.rsplit_once('/').map(|(parent, _)| parent)
+}
+
+/// Check a name a call is about to create. Migrated names are never checked.
+///
+/// Each `/`-separated segment is 1 to 64 of `[A-Za-z0-9_-]`, the whole name is
+/// at most 128, and no segment is a UUID (32 hex, dashes optional in
+/// 8-4-4-4-12) or a ULID (26 Crockford base32). Whether each parent is live is
+/// the store's check, not this one.
+pub fn check_new_name(name: &str) -> Result<()> {
+    use crate::error::SessionReason;
+    let shape = || {
+        Error::Session(
+            SessionReason::Invalid,
+            format!(
+                "session name '{name}' must be segments of 1 to {NAME_SEGMENT_MAX} letters, digits, \
+                 '-' or '_', joined by '/', at most {NAME_MAX} in all"
+            ),
+            None,
+        )
+    };
+    if name.is_empty() || name.len() > NAME_MAX {
+        return Err(shape());
+    }
+    for segment in name.split('/') {
+        let valid = !segment.is_empty()
+            && segment.len() <= NAME_SEGMENT_MAX
+            && segment
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if !valid {
+            return Err(shape());
+        }
+        if is_opaque(segment) {
+            return Err(Error::Session(
+                SessionReason::NameOpaque,
+                "session names are for people: use a branch, worktree or topic".to_string(),
+                None,
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn is_opaque(segment: &str) -> bool {
+    let hex = |s: &str| s.chars().all(|c| c.is_ascii_hexdigit());
+    let plain_uuid = segment.len() == 32 && hex(segment);
+    let dashed_uuid = segment.len() == 36 && {
+        let parts: Vec<&str> = segment.split('-').collect();
+        parts.iter().map(|p| p.len()).eq([8, 4, 4, 4, 12]) && parts.iter().all(|p| hex(p))
+    };
+    let ulid = segment.len() == 26
+        && segment.chars().all(|c| {
+            let c = c.to_ascii_uppercase();
+            c.is_ascii_digit() || (c.is_ascii_uppercase() && !matches!(c, 'I' | 'L' | 'O' | 'U'))
+        })
+        && segment.starts_with(|c: char| ('0'..='7').contains(&c));
+    plain_uuid || dashed_uuid || ulid
+}
+
+/// A session by id, directly or through `session_aliases`, live, ended or
+/// tombstoned.
+pub async fn lookup_id(db: &Database, session_id: &str) -> Result<Option<Session>> {
+    let _ = (db, session_id);
+    Err(super::unbuilt("sessions::lookup_id"))
+}
+
+/// The session holding `name` in a project: the live or ended one if any,
+/// else the newest tombstoned one.
+pub async fn lookup_name(db: &Database, project_id: &str, name: &str) -> Result<Option<Session>> {
+    let _ = (db, project_id, name);
+    Err(super::unbuilt("sessions::lookup_name"))
+}
+
+/// Live sessions named `name` in any project that the participant is in, for
+/// a bare name with no project on a read.
+pub async fn live_named_for(
+    db: &Database,
+    key: &crate::author::ParticipantKey,
+    name: &str,
+) -> Result<Vec<Session>> {
+    let _ = (db, key, name);
+    Err(super::unbuilt("sessions::live_named_for"))
+}
+
+/// `session_start`: find, reopen or create, then join.
+pub async fn start_session(db: &Database, request: &StartRequest<'_>) -> Result<Started> {
+    let _ = (db, request);
+    Err(super::unbuilt("sessions::start_session"))
+}
+
+/// The session a write lands in: the live session of that name in the
+/// project, auto-created when absent (the name is checked as new), joined by
+/// the writer's participant in the same transaction. Ended answers
+/// `session_ended`, tombstoned answers `session_pruned`.
+pub async fn open_for_write(
+    db: &Database,
+    project_id: &str,
+    name: &str,
+    writer: &crate::author::Writer,
+) -> Result<(Session, Joined)> {
+    let _ = (db, project_id, name, writer);
+    Err(super::unbuilt("sessions::open_for_write"))
+}
+
+/// Upsert the participant: insert seeds its notify cursor at the session
+/// floor; update refreshes `last_seen_at` (coalesced) and clears `left_at`.
+/// Only a live session is joined.
+pub async fn join(
+    db: &Database,
+    session_id: &str,
+    key: &crate::author::ParticipantKey,
+) -> Result<Joined> {
+    let _ = (db, session_id, key);
+    Err(super::unbuilt("sessions::join"))
+}
+
+/// `session_leave`: set the caller's `left_at`. Ends nothing.
+pub async fn leave(
+    db: &Database,
+    session_id: &str,
+    key: &crate::author::ParticipantKey,
+) -> Result<()> {
+    let _ = (db, session_id, key);
+    Err(super::unbuilt("sessions::leave"))
+}
+
+/// The session and its live descendants, parent first: the gates an end or a
+/// prune takes, in this set.
+pub async fn family(db: &Database, session_id: &str) -> Result<Vec<String>> {
+    let _ = (db, session_id);
+    Err(super::unbuilt("sessions::family"))
+}
+
+/// End a session for everyone, with its live children, one `ended` event
+/// each authored by `writer`. The caller holds the exclusive gate of every id
+/// [`family`] returned. Returns the ids it ended.
+pub async fn end_session(
+    db: &Database,
+    _gates: &[tokio::sync::OwnedRwLockWriteGuard<()>],
+    session_id: &str,
+    writer: &crate::author::Writer,
+    handoff: Option<&str>,
+) -> Result<Vec<String>> {
+    let _ = (db, session_id, writer, handoff);
+    Err(super::unbuilt("sessions::end_session"))
+}
+
+/// Every participant of a session, newest `last_seen_at` first.
+pub async fn participants(db: &Database, session_id: &str) -> Result<Vec<Participant>> {
+    let _ = (db, session_id);
+    Err(super::unbuilt("sessions::participants"))
+}
+
+/// How many sessions are live (active, with a participant seen inside the
+/// activity window and not left), in one project or across the hub.
+pub async fn live_count(db: &Database, since: &str, project_id: Option<&str>) -> Result<i64> {
+    let _ = (db, since, project_id);
+    Err(super::unbuilt("sessions::live_count"))
+}
+
+/// The filters `GET /api/v1/sessions` and `session_list` take.
+#[derive(Debug, Clone, Default)]
+pub struct SessionFilter<'a> {
+    pub project_id: Option<&'a str>,
+    pub status: Option<&'a str>,
+    pub member: Option<&'a str>,
+    /// A canonical slug.
+    pub agent: Option<&'a str>,
+    /// Only live sessions (`live=1`).
+    pub live: bool,
+    /// Only children of this session id.
+    pub parent: Option<&'a str>,
+    /// The activity window `live` counts in.
+    pub since: Option<&'a str>,
+    pub limit: Option<i64>,
+}
+
+/// A session row with what a listing shows beside it.
+#[derive(Debug, Clone, Serialize)]
+pub struct ListedSession {
+    #[serde(flatten)]
+    pub session: Session,
+    pub participants: Vec<Participant>,
+    pub children_count: i64,
+    pub started_by: crate::author::AuthorView,
+}
+
+/// List sessions with their participants.
+pub async fn list_filtered(
+    db: &Database,
+    filter: &SessionFilter<'_>,
+) -> Result<Vec<ListedSession>> {
+    let _ = (db, filter);
+    Err(super::unbuilt("sessions::list_filtered"))
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+    use crate::error::SessionReason;
+
+    fn reason(name: &str) -> Option<SessionReason> {
+        match check_new_name(name) {
+            Ok(()) => None,
+            Err(Error::Session(reason, _, _)) => Some(reason),
+            Err(other) => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn people_names_and_children_pass() {
+        assert_eq!(reason("feat-redesign"), None);
+        assert_eq!(reason("feat-x/review-1a2b3c4d"), None);
+        assert_eq!(reason(&"a".repeat(64)), None);
+        assert_eq!(parent_name("feat-x/review"), Some("feat-x"));
+        assert_eq!(parent_name("feat-x"), None);
+    }
+
+    #[test]
+    fn bad_shapes_and_opaque_ids_are_refused() {
+        assert_eq!(reason(""), Some(SessionReason::Invalid));
+        assert_eq!(reason("a b"), Some(SessionReason::Invalid));
+        assert_eq!(reason("feat-x/"), Some(SessionReason::Invalid));
+        assert_eq!(reason(&"a".repeat(65)), Some(SessionReason::Invalid));
+        assert_eq!(
+            reason(&format!("{}/{}", "a".repeat(64), "b".repeat(64))),
+            Some(SessionReason::Invalid)
+        );
+        assert_eq!(
+            reason("0f8e5c2a-1b3d-4e5f-8a9b-0c1d2e3f4a5b"),
+            Some(SessionReason::NameOpaque)
+        );
+        assert_eq!(
+            reason("0f8e5c2a1b3d4e5f8a9b0c1d2e3f4a5b"),
+            Some(SessionReason::NameOpaque)
+        );
+        assert_eq!(
+            reason("feat/01JD8X7Q2ZC5M3N4P6R8S9T0VW"),
+            Some(SessionReason::NameOpaque)
+        );
+    }
+}

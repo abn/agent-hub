@@ -14,6 +14,7 @@ pub mod ideas;
 pub mod idempotency;
 pub mod identity;
 pub mod inbox;
+pub mod migrate;
 pub mod notifications;
 pub mod page_comments;
 pub mod projects;
@@ -408,6 +409,11 @@ fn terminate_unc_root(wide: &mut Vec<u16>) {
     if is_unc && !matches!(wide.last(), Some(&BACKSLASH | &SLASH)) {
         wide.push(BACKSLASH);
     }
+}
+
+/// The refusal a declared function gives until its body is built.
+pub(crate) fn unbuilt(what: &str) -> Error {
+    Error::Unavailable(format!("{what} is not built yet"))
 }
 
 pub(crate) fn engine(err: turso::Error) -> Error {

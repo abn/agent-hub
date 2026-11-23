@@ -1531,6 +1531,7 @@ fn mcp_writes_record_audit_rows_and_emit_signal() {
             session_id: None,
             include_audit: true,
             hide_dismissed: false,
+            author: Default::default(),
         };
         let page = agent_hub::store::events::read_feed(&db, "proj", &query)
             .await
@@ -1631,6 +1632,7 @@ fn brain_promote_copies_session_entry_with_citation_and_emits_signal() {
             session_id: None,
             include_audit: true,
             hide_dismissed: false,
+            author: Default::default(),
         };
         let page = agent_hub::store::events::read_feed(&db, "proj", &query)
             .await
