@@ -28,6 +28,25 @@ pub struct Settings {
     pub token: Option<String>,
     /// Sent as `X-Agent-Id`.
     pub agent_name: String,
+    /// The name the harness's own MCP connection declares, when the hook can
+    /// know it: the Claude plugin option, and `antigravity` for the Antigravity
+    /// plugin. The hooks and the model's tools should act as one agent.
+    pub reported_name: Option<String>,
+}
+
+impl Settings {
+    /// One line for the session block when the hooks run under another agent
+    /// name than the harness's MCP connection, so a session the hook starts and
+    /// one the model starts are not mistaken for the same.
+    pub fn name_note(&self) -> Option<String> {
+        let reported = self.reported_name.as_deref()?;
+        (reported != self.agent_name).then(|| {
+            format!(
+                "Note: the hooks run as agent name {}, this harness's MCP connection as {reported}.",
+                self.agent_name
+            )
+        })
+    }
 }
 
 fn present(value: Option<String>) -> Option<String> {
@@ -69,10 +88,13 @@ fn config_files(env: &dyn Fn(&str) -> Option<String>) -> (Vec<ParsedConfigFile>,
     (files, errors)
 }
 
-/// Resolve the settings: `HUB_*` environment, then the plugin options for
-/// Claude, then each `config.toml` in turn. The first source that has a URL
-/// wins, with only its own token, so a project-scoped option cannot collect the
-/// token of a hub configured elsewhere.
+/// Resolve the settings: for Claude the plugin options, which the plugin's own
+/// MCP entry uses, then the `HUB_*` environment, then each `config.toml` in
+/// turn. The first source that has a URL wins, with only its own token, so a
+/// project-scoped option cannot collect the token of a hub configured
+/// elsewhere. The agent name follows the same order for Claude. Antigravity's
+/// MCP entry fixes its name, so the hook's is `HUB_AGENT_ID` or `antigravity`,
+/// and never the name in a config file.
 pub fn resolve_settings(
     harness: Harness,
     env: &dyn Fn(&str) -> Option<String>,
@@ -91,8 +113,8 @@ pub fn resolve_settings(
     };
 
     let mut sources = vec![
-        (get("HUB_URL"), get("HUB_TOKEN")),
         (plugin("HUB_URL"), plugin("HUB_TOKEN")),
+        (get("HUB_URL"), get("HUB_TOKEN")),
     ];
     sources.extend(files.iter().map(|file| {
         (
@@ -113,14 +135,24 @@ pub fn resolve_settings(
         ));
     };
 
-    let agent_name = get("HUB_AGENT_ID")
-        .or_else(|| plugin("AGENT_NAME"))
-        .or_else(|| from_file("agent_id"))
-        .unwrap_or_else(|| harness.name().to_string());
+    let (agent_name, reported_name) = match harness {
+        Harness::Claude => (
+            plugin("AGENT_NAME")
+                .or_else(|| get("HUB_AGENT_ID"))
+                .or_else(|| from_file("agent_id"))
+                .unwrap_or_else(|| harness.name().to_string()),
+            plugin("AGENT_NAME"),
+        ),
+        Harness::Antigravity => (
+            get("HUB_AGENT_ID").unwrap_or_else(|| harness.name().to_string()),
+            Some(harness.name().to_string()),
+        ),
+    };
     Ok(Settings {
         url: url.trim_end_matches('/').to_string(),
         token,
         agent_name,
+        reported_name,
     })
 }
 
@@ -167,6 +199,11 @@ impl Hub {
 
     /// The agent name the hub is told, when the hub would accept it beside the
     /// token.
+    /// The settings this hub was opened with.
+    pub fn settings(&self) -> &Settings {
+        &self.settings
+    }
+
     fn declared(&self) -> Option<&str> {
         let name = self.settings.agent_name.as_str();
         (self.settings.token.is_none() || crate::principal::is_declared_name(name)).then_some(name)

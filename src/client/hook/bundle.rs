@@ -28,6 +28,9 @@ pub struct Request<'a> {
     pub hub: &'a Hub,
     pub harness_name: &'a str,
     pub agent_name: &'a str,
+    /// A line for the block when the hooks and the harness's MCP connection
+    /// run under different agent names.
+    pub name_note: Option<String>,
     pub harness_session_id: &'a str,
     pub cwd: &'a str,
     pub env: &'a dyn Fn(&str) -> Option<String>,
@@ -292,7 +295,11 @@ pub async fn start(request: &Request<'_>) -> Result<Started, Failure> {
         session_name: resolved.session_name.clone(),
         session_id: session_id.clone(),
         actor: actor.clone(),
-        context_lines: resolved.context_lines(),
+        context_lines: resolved
+            .context_lines()
+            .into_iter()
+            .chain(request.name_note.clone())
+            .collect(),
         brief: brief_lines(gathered.brief.as_ref()),
         anchor: anchor_view(started.get("anchor"), request.now_secs),
         handoff,

@@ -16,10 +16,10 @@
     "known_projects": [
       "agent-hub"
     ],
-    "personal_project": "abn-claude"
+    "personal_project": "dev-claude"
   },
   "expected": {
-    "project_id": "abn-claude",
+    "project_id": "dev-claude",
     "project_source": "personal",
     "session_name": "feat-x",
     "session_source": "branch",

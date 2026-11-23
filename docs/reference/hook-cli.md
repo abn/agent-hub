@@ -56,6 +56,13 @@ shows the agent, and exit `2` is what wakes an idle session. See
 
 An event a harness never raises is still accepted, and answers with the no-op.
 
+The Antigravity plugin sets the hook `timeout` in its `hooks.json` to `20000`.
+The unit was not measured. Read as milliseconds it is 20 seconds, above the
+hook's own 10 second deadline plus 1 second grace. Read as seconds it is never
+reached, because the hook exits first. A value of `10` would kill every hook
+after 10 milliseconds in the first reading, and race the hook's own deadline in
+the second.
+
 Antigravity has no session-start event. Its startup is a `prompt` with no local
 state for the conversation, or with `invocation_num` 0, and it gets the full
 `agent-hub` block. Every later `prompt` gets the session pointer instead: the
@@ -105,10 +112,15 @@ carrying an empty string.
 Settings resolve in this order, and the first non-empty value wins. An empty
 value counts as unset.
 
-1. `HUB_*` environment variables
-2. for `--harness claude`, `CLAUDE_PLUGIN_OPTION_HUB_URL`, `CLAUDE_PLUGIN_OPTION_HUB_TOKEN`
+1. for `--harness claude`, `CLAUDE_PLUGIN_OPTION_HUB_URL`, `CLAUDE_PLUGIN_OPTION_HUB_TOKEN`
    and `CLAUDE_PLUGIN_OPTION_AGENT_NAME`
+2. `HUB_*` environment variables
 3. the client settings in [Configuration](/reference/configuration.md)
+
+The plugin options come first because they are what the Claude plugin's own MCP
+entry sends. A `HUB_*` variable left in the shell that launched Claude Code
+therefore cannot move the hooks to another hub, token or agent name than the
+model's tools use. `HUB_*` applies only where the option is empty.
 
 The url and the token come from the same source, the first one that has a url.
 Each `config.toml` is a source of its own, in the order of the client settings,
@@ -120,10 +132,21 @@ or parsed is skipped, so it never blocks a configuration that is complete
 without it; it is reported only when no source has a url. A config file is read
 only when it is a regular file, so a FIFO in its place cannot hold the hook.
 
-The agent name is `HUB_AGENT_ID`, then `CLAUDE_PLUGIN_OPTION_AGENT_NAME`, then
-`agent_id` in the client settings, and defaults to the harness name. It is sent
-as `X-Agent-Id`, so the hub records the work as `<token agent>/<harness>`. A
-name the hub would refuse beside a token is left off.
+The agent name for `--harness claude` is `CLAUDE_PLUGIN_OPTION_AGENT_NAME`,
+then `HUB_AGENT_ID`, then `agent_id` in the client settings, and defaults to
+`claude`. For `--harness antigravity` it is `HUB_AGENT_ID` and otherwise
+`antigravity`; `agent_id` in the client settings is not read, because the
+plugin's MCP entry fixes the name to `antigravity` and the hooks must act as the
+same agent. The name is sent as `X-Agent-Id`, so the hub records the work as
+`<token agent>/<name>`. A name the hub would refuse beside a token is left off.
+
+A session the hooks start belongs to the agent that started it, so the hooks and
+the model's MCP connection have to share one name, or answers to the model's
+questions never reach the hook's watcher and prompts. When the name the hooks
+resolved differs from the one the harness's MCP connection uses, the session
+block carries one line after the header:
+`Note: the hooks run as agent name <name>, this harness's MCP connection as <name>.`
+It appears when `HUB_AGENT_ID` overrides the Antigravity name.
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -186,7 +209,7 @@ remain, it is the first 8 hexadecimal characters of the SHA-256 of the original
 id, taken over its UTF-8 bytes.
 
 Session names always match `[A-Za-z0-9_-]{1,64}`. A branch name with a slash, such as
-`feat/claude-mod`, becomes `feat-claude-mod`. Branch naming gives one brain per
+`feat/login-flow`, becomes `feat-login-flow`. Branch naming gives one brain per
 line of work, so a restart or a new instance on the branch resumes it, while
 `main` and detached checkouts get a brain per conversation instead of one pile.
 
@@ -214,8 +237,9 @@ and is never waited on without a limit, so a stuck holder cannot hold a hook pas
 its time. When it cannot be taken, a prompt does not peek and sends the no-op
 path, and `session-end` leaves the state where it is; the watcher then stops at
 its own maximum time. The `.lock` file is removed with the state. The
-`.watch.lock` file is never removed, because a lock is only as good as the one
-inode every watcher locks.
+`.watch.lock` file is removed by `session-end` only while no watcher holds it;
+a lock is only as good as the one inode every watcher locks, so a held file is
+never touched.
 
 ## What each event does
 
@@ -225,7 +249,17 @@ inode every watcher locks.
 | `prompt` | one `GET /api/v1/me/pending` for the session. Only when it reports items, a connection and `notify_wait(0, session)` | `Pending:` lines, or the no-op when nothing waits |
 | `pre-compact` | `brain_put` of `/kv/harness/precompact` in the session store | the compaction instructions |
 | `subagent-start` | none | the instruction not to start a session |
-| `session-end` | the state is removed first, which stops the session's watcher, then `session_end` | the no-op |
+| `session-end` | the state is removed first, which stops the session's watcher, then `session_end`, unless another live instance shares the hub session | the no-op |
+
+Two instances of a harness on one branch share one hub session. `session-end`
+therefore skips `session_end` when another state file of the same harness names
+the same hub session id and was written within the last 24 hours: that instance
+still uses the session, and ending it would delete its subscriptions. A file
+older than that is a crashed instance's leftover and does not count. The last
+instance to end closes the session. A prompt whose peek the hub refuses because
+the session has ended, which another client of the session may have done, clears
+the stored hub session id and starts the session again, as a prompt on a
+conversation with none does, and so is held to the same once-a-minute limit.
 
 A prompt with nothing pending makes exactly one request. A prompt on a session
 that has no hub session id, because its start failed or never ran, starts the
@@ -279,8 +313,8 @@ therefore loses its indentation.
 
 ```text
 <agent-hub>
-project agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude
-Bind your hub connection now: session_start(project_id: "agent-hub", session_name: "feat-claude-mod").
+project agent-hub | session feat-login-flow (s_01J8) | you are dev/claude
+Bind your hub connection now: session_start(project_id: "agent-hub", session_name: "feat-login-flow").
 Do not call session_brief; this block is the brief.
 Since your last look: 3 answers, 2 comments on your artifacts, 1 page changed.
 Last anchor (phase "plugins design", 2h ago):
@@ -290,7 +324,7 @@ Resume with the hook CLI tests.
 KB index:
 # Index
 Pending:
-- [comment] human on "The board": move the docs task to now (agent-hub, evt_01B)
+- [comment] human on "Task list": move the docs task to now (agent-hub, evt_01B)
 </agent-hub>
 ```
 
@@ -339,9 +373,19 @@ Clients never compute it.
 | `never` | nothing; items wait for the next prompt |
 
 A wake is also limited to one per 300 seconds per session, read from
-`last_wake_at` in the local state: with a previous wake less than 300 seconds
-ago, nothing wakes. A blocked item is not lost and not drained: `watch` remembers
-it and keeps waiting, and the next prompt delivers it.
+`last_wake_ms` in the local state: with a previous wake less than 300 seconds
+ago, nothing wakes. A blocked item is not lost and not drained. The watcher does
+not remember it: its cursor moves past the item, it does not wake when the
+cooldown ends, and the next prompt delivers it.
+
+A watcher exits `0` at once, before it reads stdin or takes a lock, when Claude
+Code is running headless. `claude -p` and the Agent SDKs set
+`CLAUDE_CODE_ENTRYPOINT` to `sdk-cli`, `sdk-ts` or `sdk-py`, and no one is idle
+there to wake. Without this a scripted `claude -p` does not end while the Stop
+hook's watcher holds its peek, which is up to 3300 seconds. The Stop hook's own
+input carries no headless marker, so the environment variable is the signal.
+`HUB_WAKE=never` is the manual switch, for any run where the watcher is not
+wanted.
 
 `watch` runs this loop and never drains an item that cannot wake the agent.
 
@@ -369,13 +413,17 @@ it and keeps waiting, and the next prompt delivers it.
 The lock is an exclusive kernel lock on a `.watch.lock` file beside the state
 file, held for the watcher's whole life. A second watcher whose attempt to take
 it fails exits `0`. The kernel releases the lock when its holder dies, so a lock
-can never be stale and no process id is recorded or signalled. The lock file is
-never deleted, and the watcher holds the lock until the process exits, wake
-output included.
+can never be stale and no process id is recorded or signalled. The watcher holds the
+lock until the process exits, wake output included. `session-end` deletes the
+lock file only when it can take the lock itself, and deletes it while holding
+it, so a lock a watcher holds is never deleted. A watcher whose locked file is
+no longer the one at the path does not run.
 
 A watcher also stops when the state of its session is gone or names another hub
 session. It checks after every peek returns, before it decides anything about the
-batch, and exits `0` without draining. `session-end` removes the state, which is
+batch, and exits `0` without draining. A peek or a drain the hub refuses because
+the session has ended stops it the same way, and it clears the stored hub session
+id so the next prompt starts the session again. `session-end` removes the state, which is
 therefore the stop request, and a watcher can outlast its session by one held
 peek, 60 seconds at most. A watcher never writes state back for a session that
 ended.

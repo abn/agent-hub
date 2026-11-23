@@ -53,7 +53,7 @@ fn opencode_snippet_is_the_entry_the_plugin_registers() {
             "type": "remote",
             "url": "{{base_url}}/mcp",
             "headers": {
-                "Authorization": "Bearer {file:~/.config/agent-hub/token}",
+                "Authorization": "Bearer {env:HUB_TOKEN}",
                 "X-Agent-Id": "opencode"
             }
         }}

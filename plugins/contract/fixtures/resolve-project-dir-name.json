@@ -16,7 +16,7 @@
     "known_projects": [
       "my-project"
     ],
-    "personal_project": "abn-claude"
+    "personal_project": "dev-claude"
   },
   "expected": {
     "project_id": "my-project",

@@ -98,11 +98,12 @@ function fakeCtx(options = {}) {
   return ctx;
 }
 
-async function boot({ ctxOptions, env = {}, sse = false, blockedState = false, plugin: pluginOptions = {} } = {}) {
+async function boot({ ctxOptions, env = {}, sse = false, blockedState = false, plugin: pluginOptions = {}, prepare } = {}) {
   fake = await startFakeHub({ sse, pollMs: 40 });
   mkdirSync(scratchRoot, { recursive: true });
   scratch = mkdtempSync(join(scratchRoot, "opencode-plugin-"));
   const ctx = fakeCtx(ctxOptions ?? {});
+  prepare?.(ctx);
   if (blockedState) {
     writeFileSync(join(scratch, "blocker"), "a file, not a directory");
     env = { ...env, XDG_STATE_HOME: join(scratch, "blocker") };
@@ -270,6 +271,141 @@ describe("the plugin against a fake hub", () => {
     ctx.emit(event("session.compaction.ended", "ses_root"));
     await until(() => ctx.entries.length === 2);
     expect(ctx.entries[1].value).toBe(ctx.entries[0].value);
+  });
+
+  describe("on a host without the instructions API", () => {
+    const without = (ctx) => {
+      delete ctx.session.instructions;
+    };
+    const call = (ctx, sessionID = "ses_root") => {
+      const hook = { sessionID, system: [] };
+      ctx.hooks.context(hook);
+      return hook.system.map((part) => part.text);
+    };
+    const settled = async (ctx) => {
+      await until(() => fake.count("notify_subscribe") === 2);
+      await new Promise((r) => setTimeout(r, 30));
+      return ctx;
+    };
+
+    it("injects the block through the context hook on the first call and not on the next", async () => {
+      const ctx = await boot({ prepare: without });
+      ctx.emit(created("ses_root"));
+      await settled(ctx);
+      const first = call(ctx);
+      expect(first).toHaveLength(1);
+      expect(first[0]).toContain("project proj | session work (s_01TEST) | you are tester/opencode");
+      expect(first[0]).toContain("KB index:\n# Index");
+      expect(call(ctx)).toEqual([]);
+    });
+
+    it("injects the block again after compaction", async () => {
+      const ctx = await boot({ prepare: without });
+      ctx.emit(created("ses_root"));
+      await settled(ctx);
+      const first = call(ctx);
+      expect(call(ctx)).toEqual([]);
+      ctx.emit(event("session.compaction.ended", "ses_root"));
+      await new Promise((r) => setTimeout(r, 30));
+      const again = call(ctx);
+      expect(again).toEqual(first);
+      expect(call(ctx)).toEqual([]);
+    });
+
+    it("still follows the session, so a mid-turn item reaches the context hook", async () => {
+      const ctx = await boot({ prepare: without });
+      ctx.emit(created("ses_root"));
+      await settled(ctx);
+      call(ctx);
+      ctx.emit(event("session.execution.started", "ses_root"));
+      const base = fake.count("notify_wait");
+      fake.pending.push(item("evt_1", true));
+      await until(() => fake.count("notify_wait") > base);
+      await new Promise((r) => setTimeout(r, 30));
+      expect(ctx.prompts).toEqual([]);
+      const texts = call(ctx);
+      expect(texts).toHaveLength(1);
+      expect(texts[0]).toContain("- [answer] t evt_1 (proj, evt_1)");
+    });
+
+    it("gives a child session the subagent instruction through the context hook", async () => {
+      const ctx = await boot({ prepare: without });
+      ctx.emit(created("ses_root"));
+      await settled(ctx);
+      ctx.emit(created("ses_child", "ses_root"));
+      await new Promise((r) => setTimeout(r, 50));
+      const texts = call(ctx, "ses_child");
+      expect(texts).toHaveLength(1);
+      expect(texts[0]).toContain("Do not call session_start");
+      expect(call(ctx, "ses_child")).toEqual([]);
+    });
+
+    it("carries the block on the very first context call of a session it adopts there", async () => {
+      const ctx = await boot({ prepare: without });
+      ctx.sessions.ses_new = { id: "ses_new", location: { directory: scratch } };
+      const hook = { sessionID: "ses_new", system: [] };
+      await ctx.hooks.context(hook);
+      expect(hook.system).toHaveLength(1);
+      expect(hook.system[0].text).toContain("project proj | session work (s_01TEST) | you are tester/opencode");
+    });
+
+    it("treats a session adopted on a context call as busy, so an item waits for the context hook", async () => {
+      const ctx = await boot({ prepare: without });
+      ctx.sessions.ses_new = { id: "ses_new", location: { directory: scratch } };
+      await ctx.hooks.context({ sessionID: "ses_new", system: [] });
+      const base = fake.count("notify_wait");
+      fake.pending.push(item("evt_1", true));
+      await until(() => fake.count("notify_wait") > base);
+      await new Promise((r) => setTimeout(r, 30));
+      expect(ctx.prompts).toEqual([]);
+      const texts = call(ctx, "ses_new");
+      expect(texts[0]).toContain("- [answer] t evt_1 (proj, evt_1)");
+    });
+
+    it("falls back to the context hook when the entry put is refused", async () => {
+      const ctx = await boot({
+        prepare(c) {
+          c.session.instructions.entry.put = () => Promise.reject(new Error("refused"));
+        },
+      });
+      ctx.emit(created("ses_root"));
+      await settled(ctx);
+      expect(call(ctx)[0]).toContain("<agent-hub>");
+    });
+
+    it("starts without the optional prompt and mcp APIs and still follows", async () => {
+      const ctx = await boot({
+        prepare(c) {
+          without(c);
+          delete c.session.prompt;
+          delete c.mcp;
+        },
+      });
+      ctx.emit(created("ses_root"));
+      await settled(ctx);
+      expect(call(ctx)[0]).toContain("<agent-hub>");
+      fake.pending.push(item("evt_1", true));
+      await until(() => fake.count("notify_wait") >= 1);
+      await new Promise((r) => setTimeout(r, 30));
+      expect(call(ctx)[0]).toContain("- [answer] t evt_1 (proj, evt_1)");
+    });
+  });
+
+  it("uses one agent name for the MCP entry and for the plugin's own hub calls", async () => {
+    const ctx = await boot({ ctxOptions: { agentName: "oc-work" } });
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    expect(ctx.mcps["agent-hub"].headers["X-Agent-Id"]).toBe("oc-work");
+    expect(fake.requests.length).toBeGreaterThan(0);
+    for (const request of fake.requests) expect(request.headers["x-agent-id"]).toBe("oc-work");
+  });
+
+  it("uses the default agent name for both when none is set", async () => {
+    const ctx = await boot();
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    expect(ctx.mcps["agent-hub"].headers["X-Agent-Id"]).toBe("opencode");
+    for (const request of fake.requests) expect(request.headers["x-agent-id"]).toBe("opencode");
   });
 
   it("wakes an idle session with a prompt on a direct item", async () => {

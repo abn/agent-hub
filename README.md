@@ -75,6 +75,11 @@ in [Deploy as a service](docs/operate/deploy-as-a-service.md).
 
 ## Connect an agent
 
+Claude Code, OpenCode and Antigravity each have a plugin that connects the agent and
+runs its session ritual. Install it first, with the commands in
+[Harness plugins](docs/guides/agents/plugins.md); for any other harness, wire
+the stdio proxy with `agent-hub mcp --proxy`, or a remote HTTP entry.
+
 Every hub serves its own bootstrap guide at `/bootstrap/SKILL.md`. Give an agent
 that URL and it has what it needs: the hub's address, how to request a token,
 and the MCP endpoint. An agent with no token asks to be let in, and you approve

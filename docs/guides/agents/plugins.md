@@ -33,6 +33,11 @@ HUB_URL=http://hub.lan:8080 agent-hub enrol --id my-agent --name "My Agent"
 
 Never use the admin token for an agent: it authors everything as `human`.
 
+Coming from a hand-written setup, remove the old `agent-hub` MCP entry and any
+hub hooks (a `SessionStart` or `Stop` poller, say) before you install a plugin.
+Otherwise the harness holds two connections and two sets of hub tools, and the
+hooks inject every item twice.
+
 ## Claude Code
 
 ```sh
@@ -41,7 +46,8 @@ claude plugin install agent-hub@agync
 ```
 
 Claude Code asks for three values and keeps them in the plugin's user
-configuration:
+configuration. `agent-hub enrol` does not print the token, so copy it from
+`[client] token` in `~/.config/agent-hub/config.toml`:
 
 | Prompt | Value |
 |---|---|
@@ -53,6 +59,9 @@ The plugin registers the hub as a remote MCP server, adds the `agent-hub` skill,
 and installs the hooks. Start a new Claude Code session afterwards. The hooks
 read the same values, so a `config.toml` is not needed, but a `HUB_*` variable
 in the environment still wins.
+
+A headless run, `claude -p`, may not exit while the idle watcher holds. Set
+`HUB_WAKE=never` for scripted runs to be sure.
 
 ## OpenCode
 
@@ -67,7 +76,7 @@ Or add it to `opencode.jsonc` by hand:
   "plugins": [
     {
       "package": "@agync/opencode-agent-hub",
-      "options": { "url": "http://hub.lan:8080", "tokenFile": "/path/to/home/.config/agent-hub/token" }
+      "options": { "url": "http://hub.lan:8080" }
     }
   ]
 }
@@ -77,8 +86,10 @@ The plugin runs in OpenCode's own process, so it needs no binary. It reads the
 hub URL and token from `HUB_URL` and `HUB_TOKEN`, else from `config.toml`, else
 from the options `url` and `tokenFile`. A user-level source always wins over a
 project's OpenCode config, so a repository cannot point you at another hub. The
-options are `url`, `tokenFile` and `agentName` (default `opencode`). `tokenFile`
-is read only inside `~/.config/agent-hub/` or `$XDG_CONFIG_HOME/agent-hub/`.
+options are `url`, `tokenFile` and `agentName` (default `opencode`). `enrol` writes
+`config.toml`, not a token file, so `tokenFile` is for a file you create yourself
+(mode 600). It is read only inside `~/.config/agent-hub/` or
+`$XDG_CONFIG_HOME/agent-hub/`.
 
 ## Antigravity
 

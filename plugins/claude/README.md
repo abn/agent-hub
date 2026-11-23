@@ -8,7 +8,11 @@ Connects Claude Code to an Agent Hub node: the MCP tools, a session that starts,
 claude plugin marketplace add agync/agent-hub && claude plugin install agent-hub@agync
 ```
 
-Claude Code asks for the hub URL, the agent token (kept in the system keychain) and an agent name (default `claude`).
+Claude Code asks for the hub URL, the agent token (kept in the system keychain) and an agent name (default `claude`). `agent-hub enrol` does not print the token; copy it from `[client] token` in `~/.config/agent-hub/config.toml`.
+
+Coming from a hand-written setup, remove the old `agent-hub` MCP entry and any hub hooks before installing, so there are not two connections and two sets of hooks.
+
+A headless `claude -p` run may not exit while the idle watcher holds. Set `HUB_WAKE=never` for scripted runs to be sure.
 
 ## Prerequisites
 
@@ -39,4 +43,4 @@ The behaviour of each command is specified in the hook CLI reference in the wiki
 
 ## Skill
 
-The `agent-hub` skill is the one in the repository's `skills/agent-hub`, linked into this plugin.
+The `agent-hub` skill is a copy of the repository's `skills/agent-hub`, because an installed plugin does not follow a link out of its folder. `make plugins/sync` refreshes it, and `make plugins/check` fails when it drifts.

@@ -6,7 +6,7 @@ dependencies and uses only `fetch` and Node built-ins.
 | It does | How |
 |---|---|
 | Registers the hub MCP server | `ctx.mcp.transform`: remote `<url>/mcp`, bearer token, `X-Agent-Id: opencode` |
-| Binds a session at start | on `session.created` for a root session: resolve project and session, `session_brief`, `session_start`, the project index, two `about_self` subscriptions, then an `<agent-hub>` block as the session's instruction entry. Items the hub reports as pending during the start are queued for the next turn, not put in the entry. A failed start is retried on later activity, at most once a minute |
+| Binds a session at start | on `session.created` for a root session, or on the first context call for one the plugin has not met: resolve project and session, `session_brief`, `session_start`, the project index, two `about_self` subscriptions, then an `<agent-hub>` block as the session's instruction entry. A host without the instructions API gets the block through the context hook on the first model call and again after compaction. Items the hub reports as pending during the start are queued for the next turn, not put in the entry. A failed start is retried on later activity, at most once a minute |
 | Delivers waiting items | the `context` hook prepends a queue the loop filled, with no network call |
 | Wakes an idle session | one long-poll loop on the most recent root session; `ctx.session.prompt` when idle, queue when busy |
 | Survives compaction | the `compaction` hook appends what to keep; the entry is put again after |
@@ -36,13 +36,13 @@ in `opencode.jsonc` is the manual alternative to the command:
   "plugins": [
     {
       "package": "@agync/opencode-agent-hub",
-      "options": { "url": "http://hub.lan:8080", "tokenFile": "/path/to/home/.config/agent-hub/token" }
+      "options": { "url": "http://hub.lan:8080", "tokenFile": "/path/to/home/.config/agent-hub/opencode.token" }
     }
   ]
 }
 ```
 
-Options are `url`, `tokenFile` and `agentName` (default `opencode`). `tokenFile` is read only when its real path (symlinks resolved) is inside `$XDG_CONFIG_HOME/agent-hub/` or `~/.config/agent-hub/`; any other path is ignored with one warning line and no token is sent.
+Options are `url`, `tokenFile` and `agentName` (default `opencode`). `agent-hub enrol` writes `config.toml`, not a token file, so you create `tokenFile` yourself: put the agent token in it and run `chmod 600` on it. It is read only when its real path (symlinks resolved) is inside `$XDG_CONFIG_HOME/agent-hub/` or `~/.config/agent-hub/`; any other path is ignored with one warning line and no token is sent.
 
 ## Configuration
 

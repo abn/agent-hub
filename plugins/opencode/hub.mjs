@@ -1,7 +1,19 @@
 // The hub client: REST peek and JSON-RPC over streamable HTTP MCP, with fetch only.
 
+import { readFileSync } from "node:fs";
+
 const PROTOCOL_VERSION = "2025-06-18";
-const CLIENT_INFO = { name: "agent-hub-opencode", version: "0.1.0" };
+
+const packageVersion = () => {
+  try {
+    const { version } = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
+    return typeof version === "string" && version ? version : "unknown";
+  } catch {
+    return "unknown";
+  }
+};
+
+export const CLIENT_INFO = { name: "agent-hub-opencode", version: packageVersion() };
 
 export class HubError extends Error {
   constructor(message, status) {

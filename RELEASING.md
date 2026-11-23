@@ -120,7 +120,8 @@ publish and the plugins are listed nowhere but this repository.
    automation token as the repository secret `NPM_TOKEN`, or configure npm
    trusted publishing for the package (repository `agync/agent-hub`, workflow
    `release.yml`) and set the repository variable `PUBLISH_NPM` to `true`. The
-   first publish creates the package.
+   first publish creates the package. Trusted publishing needs npm 11.5.1 or later,
+   so the `opencode` job runs on Node 24.
 2. **Antigravity marketplace.** Listing is a manual step: submit the release
    archive through the Antigravity marketplace intake form. Repeat it for a
    release that should replace the listed version.

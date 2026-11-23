@@ -2,9 +2,9 @@
   "name": "context-brief-capped-at-12",
   "input": {
     "project_id": "agent-hub",
-    "session_name": "feat-claude-mod",
+    "session_name": "feat-login-flow",
     "session_id": "s_01J8",
-    "actor": "abn/claude",
+    "actor": "dev/claude",
     "brief": [
       "brief line 01",
       "brief line 02",
@@ -28,7 +28,7 @@
     "pending": []
   },
   "expected": {
-    "text": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\nDo not call session_brief; this block is the brief.\nbrief line 01\nbrief line 02\nbrief line 03\nbrief line 04\nbrief line 05\nbrief line 06\nbrief line 07\nbrief line 08\nbrief line 09\nbrief line 10\nbrief line 11\nbrief line 12\n</agent-hub>",
+    "text": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-login-flow\").\nDo not call session_brief; this block is the brief.\nbrief line 01\nbrief line 02\nbrief line 03\nbrief line 04\nbrief line 05\nbrief line 06\nbrief line 07\nbrief line 08\nbrief line 09\nbrief line 10\nbrief line 11\nbrief line 12\n</agent-hub>",
     "truncated": false
   }
 }

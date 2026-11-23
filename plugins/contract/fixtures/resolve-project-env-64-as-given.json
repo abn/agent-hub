@@ -19,7 +19,7 @@
     "known_projects": [
       "agent-hub"
     ],
-    "personal_project": "abn-claude"
+    "personal_project": "dev-claude"
   },
   "expected": {
     "project_id": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",

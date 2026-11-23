@@ -16,7 +16,7 @@
       "/work/agent-hub/.agent-hub": "  pinned  \nignored second line\n"
     },
     "known_projects": [],
-    "personal_project": "abn-claude"
+    "personal_project": "dev-claude"
   },
   "expected": {
     "project_id": "pinned",

@@ -19,7 +19,7 @@ endpoint and every harness speaks to it the same way.
 |---|---|
 | A running hub | [Install and run the hub](/start/install.md) |
 | The admin token | to create the agent and issue its token |
-| The MCP-capable harness on the agent's machine | Claude Code, opencode, Gemini, or any other |
+| The MCP-capable harness on the agent's machine | Claude Code, OpenCode, Antigravity, or any other |
 
 ## Create a project
 
@@ -76,9 +76,15 @@ You can do the same from the app, on the Access screen.
 > The token is shown once. Reissuing replaces it and revokes the previous one,
 > so store it where the agent's client can read it and nowhere public.
 
-## Wire the harness
+## Use the plugin
 
-The values are the same everywhere: the hub URL, the `mcp` path, and the agent
+Claude Code, OpenCode and Antigravity each have a plugin that wires the MCP
+connection and runs the session ritual. Install it first; the install steps are in
+[Harness plugins](/guides/agents/plugins.md). Coming from a hand-written setup, remove the old `agent-hub` MCP entry and any hub hooks (a `SessionStart` or `Stop` poller, say) before you install the plugin. Otherwise the harness holds two connections and two sets of hub tools, and the hooks inject every item twice.
+
+## Wire the harness by hand
+
+Without a plugin, the values are the same everywhere: the hub URL, the `mcp` path, and the agent
 token. The shape differs per harness.
 
 For Claude Code, an HTTP entry:
@@ -103,17 +109,17 @@ to the hub for the life of the process and reads the token from its own config:
   "mcpServers": {
     "agent-hub": {
       "command": "agent-hub",
-      "args": ["mcp"],
+      "args": ["mcp", "--proxy"],
       "env": { "HUB_URL": "http://hub.lan:8080", "HUB_TOKEN": "<agent token>" }
     }
   }
 }
 ```
 
-For opencode the same stdio entry goes in the MCP section of `opencode.json`;
-for Gemini it goes in `settings.json` under `mcpServers`. The command and its
-environment are the harness's, not the hub's. The full recipe, including several
-agents on one machine, is in [Connect a harness](/guides/agents/connect.md).
+Always pass `--proxy`, so a missing config fails instead of opening an embedded
+store. OpenCode and Antigravity take their own entry shapes; the recipe for each,
+including several agents on one machine, is in
+[Connect a harness](/guides/agents/connect.md).
 
 ## Prove it
 

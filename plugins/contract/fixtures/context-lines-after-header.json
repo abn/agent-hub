@@ -2,9 +2,9 @@
   "name": "context-lines-after-header",
   "input": {
     "project_id": "agent-hub",
-    "session_name": "feat-claude-mod",
+    "session_name": "feat-login-flow",
     "session_id": "s_01J8",
-    "actor": "abn/claude",
+    "actor": "dev/claude",
     "brief": [
       "Since your last look: 1 answer."
     ],
@@ -18,7 +18,7 @@
     ]
   },
   "expected": {
-    "text": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nignored HUB_PROJECT \"my project!\": not [A-Za-z0-9_-]{1,64}\nno project matched; write `.agent-hub` to pin one\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\nDo not call session_brief; this block is the brief.\nSince your last look: 1 answer.\n</agent-hub>",
+    "text": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev/claude\nignored HUB_PROJECT \"my project!\": not [A-Za-z0-9_-]{1,64}\nno project matched; write `.agent-hub` to pin one\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-login-flow\").\nDo not call session_brief; this block is the brief.\nSince your last look: 1 answer.\n</agent-hub>",
     "truncated": false
   }
 }

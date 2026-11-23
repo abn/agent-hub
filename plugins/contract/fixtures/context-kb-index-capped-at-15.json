@@ -2,9 +2,9 @@
   "name": "context-kb-index-capped-at-15",
   "input": {
     "project_id": "agent-hub",
-    "session_name": "feat-claude-mod",
+    "session_name": "feat-login-flow",
     "session_id": "s_01J8",
-    "actor": "abn/claude",
+    "actor": "dev/claude",
     "brief": [],
     "anchor": null,
     "handoff": [],
@@ -33,7 +33,7 @@
     "pending": []
   },
   "expected": {
-    "text": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\nDo not call session_brief; this block is the brief.\nKB index:\nkb line 01\nkb line 02\nkb line 03\nkb line 04\nkb line 05\nkb line 06\nkb line 07\nkb line 08\nkb line 09\nkb line 10\nkb line 11\nkb line 12\nkb line 13\nkb line 14\nkb line 15\n</agent-hub>",
+    "text": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-login-flow\").\nDo not call session_brief; this block is the brief.\nKB index:\nkb line 01\nkb line 02\nkb line 03\nkb line 04\nkb line 05\nkb line 06\nkb line 07\nkb line 08\nkb line 09\nkb line 10\nkb line 11\nkb line 12\nkb line 13\nkb line 14\nkb line 15\n</agent-hub>",
     "truncated": false
   }
 }

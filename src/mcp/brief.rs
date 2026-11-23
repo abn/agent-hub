@@ -2,12 +2,13 @@
 //! would otherwise piece together from the feed, the inbox, its sessions and
 //! the knowledge base, in one compact read.
 //!
-//! The brief writes nothing and moves no feed cursor; the trailer on it
-//! counts the answers it lists as delivered. Every section reads the same
-//! window, the events above the caller's feed cursor, so what one section
-//! leaves out another carries. Each section is
-//! capped, ranked, and counts what it left out, and every entry points at the
-//! record the full text lives in.
+//! The brief writes nothing and moves no feed cursor, and marks nothing
+//! delivered; the trailer on it leaves out the answers it lists, and a
+//! session's own trailer later still reports the ones asked in it. Every
+//! section reads the same window, the events above the caller's feed cursor,
+//! so what one section leaves out another carries. Each section is capped,
+//! ranked, and counts what it left out, and every entry points at the record
+//! the full text lives in.
 
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{CallToolResult, ErrorData};
@@ -33,7 +34,7 @@ use crate::brain::RECOVERY_PATH;
 #[tool_router(router = brief_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Brief yourself on a project before you start or resume work, in one call. Every section reads the events since your feed cursor, or since your previous session when you have never read the feed, and is capped and ranked: `answers`, the answers and decisions on your own questions and approvals, newest first; `previous_session`, your most recent other session in the project with the handoff note it left; `events`, the rest of what happened, open items first and your own and session events last; and `stale_pages`, knowledge base pages past their stale_after. `more` counts what a section left out, and `more_capped` says the count stopped at its cap. Call it before session_start. Moves no feed cursor; the answers it lists count as delivered, so the notification trailer does not repeat them. Read the detail with inbox_read, feed_read and brain_get."
+        description = "Brief yourself on a project before you start or resume work, in one call. Every section reads the events since your feed cursor, or since your previous session when you have never read the feed, and is capped and ranked: `answers`, the answers and decisions on your own questions and approvals, newest first; `previous_session`, your most recent other session in the project with the handoff note it left; `events`, the rest of what happened, open items first and your own and session events last; and `stale_pages`, knowledge base pages past their stale_after. `more` counts what a section left out, and `more_capped` says the count stopped at its cap. Call it before session_start. Moves no feed cursor and marks nothing delivered: the trailer on this call leaves out the answers it lists, but the trailer of a session you start later still reports an answer to a question asked in that session. Read the detail with inbox_read, feed_read and brain_get."
     )]
     async fn session_brief(
         &self,
