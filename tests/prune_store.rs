@@ -21,10 +21,10 @@ async fn open(dir: &TempDir) -> turso::Database {
 async fn prune_hides_a_session_and_undo_restores_it() {
     let dir = TempDir::new("prune");
     let db = open(&dir).await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
 
@@ -48,7 +48,7 @@ async fn prune_hides_a_session_and_undo_restores_it() {
 async fn sweep_commits_an_expired_prune() {
     let dir = TempDir::new("prune-sweep");
     let db = open(&dir).await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -59,7 +59,7 @@ async fn sweep_commits_an_expired_prune() {
     let brain_file = dir.join(&session.brain_path);
     assert!(brain_file.exists());
 
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");
@@ -107,14 +107,14 @@ async fn sweep_skips_a_session_it_cannot_commit() {
     let dir = TempDir::new("prune-sweep-skip");
     let db = open(&dir).await;
 
-    let blocked = sessions::start(&db, "proj", "blocked", "agent-one")
+    let blocked = common::seed::start_session(&db, "proj", "blocked", "agent-one")
         .await
         .expect("start");
-    let next = sessions::start(&db, "proj", "nightly", "agent-one")
+    let next = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     for session in [&blocked, &next] {
-        sessions::end(&db, &session.id, "agent-one", None, None)
+        common::seed::end_session(&db, &session.id, "agent-one", None)
             .await
             .expect("end");
         prune::prune_session(&db, &session.id).await.expect("prune");
@@ -207,7 +207,7 @@ async fn a_committed_prune_removes_exactly_the_sessions_own_lifecycle_events() {
     let dir = TempDir::new("prune-set");
     let db = open(&dir).await;
 
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     // Ordinary work written during the session, one of every kind storage must
@@ -221,7 +221,7 @@ async fn a_committed_prune_removes_exactly_the_sessions_own_lifecycle_events() {
         events::append(
             &db,
             0,
-            "agent-one",
+            &common::seed::writer("agent-one"),
             None,
             NewEvent {
                 project_id: "proj".to_string(),
@@ -236,7 +236,7 @@ async fn a_committed_prune_removes_exactly_the_sessions_own_lifecycle_events() {
         .await
         .expect("append");
     }
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
 
@@ -271,13 +271,13 @@ async fn pruning_a_source_session_keeps_the_fork_it_left_behind() {
     let dir = TempDir::new("prune-fork");
     let db = open(&dir).await;
 
-    let source = sessions::start(&db, "proj", "nightly", "agent-one")
+    let source = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    let fork = sessions::insert_fork(&db, &source, "nightly-copy", "agent-two", "forked-one")
+    let fork = common::seed::fork_session(&db, &source, "nightly-copy", "agent-two")
         .await
         .expect("fork");
-    sessions::end(&db, &source.id, "agent-one", None, None)
+    common::seed::end_session(&db, &source.id, "agent-one", None)
         .await
         .expect("end");
 
@@ -295,7 +295,7 @@ async fn pruning_a_source_session_keeps_the_fork_it_left_behind() {
         .collect();
     assert_eq!(
         summaries,
-        vec!["session nightly-copy forked from agent-one"],
+        vec!["session nightly-copy forked from nightly"],
         "the fork's own lifecycle event names the source and belongs to the fork"
     );
     assert!(
@@ -321,14 +321,20 @@ async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
         thread_id: None,
         session_id: None,
     };
-    let kept = events::append(&db, 0, "agent-one", Some("keep-key"), event())
-        .await
-        .expect("append keyed event");
+    let kept = events::append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        Some("keep-key"),
+        event(),
+    )
+    .await
+    .expect("append keyed event");
 
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");
@@ -349,9 +355,15 @@ async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
     .expect("age");
     prune::sweep(&db, &dir).await.expect("sweep");
 
-    let retry = events::append(&db, 0, "agent-one", Some("keep-key"), event())
-        .await
-        .expect("retry");
+    let retry = events::append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        Some("keep-key"),
+        event(),
+    )
+    .await
+    .expect("retry");
     assert_eq!(
         kept, retry,
         "a key whose event still exists is not garbage-collected"
@@ -371,10 +383,10 @@ async fn prune_keeps_a_keyed_event_and_its_idempotency_row() {
 async fn a_fresh_prune_is_not_committed() {
     let dir = TempDir::new("prune-fresh");
     let db = open(&dir).await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     prune::prune_session(&db, &session.id).await.expect("prune");
@@ -393,7 +405,7 @@ async fn a_fresh_prune_is_not_committed() {
 async fn pruning_an_active_session_is_rejected() {
     let dir = TempDir::new("prune-active");
     let db = open(&dir).await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     let err = prune::prune_session(&db, &session.id)
@@ -411,10 +423,10 @@ async fn a_resume_racing_a_prune_never_leaves_a_session_active_and_pruned() {
     // the race is run repeatedly against a fresh session each round.
     for round in 0..20 {
         let name = format!("nightly-{round}");
-        let session = sessions::start(&db, "proj", &name, "agent-one")
+        let session = common::seed::start_session(&db, "proj", &name, "agent-one")
             .await
             .expect("start");
-        sessions::end(&db, &session.id, "agent-one", None, None)
+        common::seed::end_session(&db, &session.id, "agent-one", None)
             .await
             .expect("end");
 
@@ -422,10 +434,9 @@ async fn a_resume_racing_a_prune_never_leaves_a_session_active_and_pruned() {
         let id = session.id.clone();
         let prune = tokio::spawn(async move { prune::prune_session(&pruning, &id).await });
         let resuming = db.clone();
-        let resume =
-            tokio::spawn(
-                async move { sessions::start(&resuming, "proj", &name, "agent-one").await },
-            );
+        let resume = tokio::spawn(async move {
+            common::seed::start_session(&resuming, "proj", &name, "agent-one").await
+        });
         let _ = prune.await.expect("join prune");
         let _ = resume.await.expect("join resume");
 
@@ -448,10 +459,11 @@ async fn a_prune_that_loses_to_another_prune_says_the_session_is_pruned() {
     // Two humans, or two tabs, prune the same ended session. The loser's write
     // misses on the tombstone, which is only reached when the two overlap.
     for round in 0..20 {
-        let session = sessions::start(&db, "proj", &format!("nightly-{round}"), "agent-one")
-            .await
-            .expect("start");
-        sessions::end(&db, &session.id, "agent-one", None, None)
+        let session =
+            common::seed::start_session(&db, "proj", &format!("nightly-{round}"), "agent-one")
+                .await
+                .expect("start");
+        common::seed::end_session(&db, &session.id, "agent-one", None)
             .await
             .expect("end");
 
@@ -490,10 +502,11 @@ async fn an_undo_the_commit_beat_is_not_reported_as_a_restore() {
     // The gap between the undo's window check and its write is narrow, so the
     // race is run repeatedly against a fresh session each round.
     for round in 0..20 {
-        let session = sessions::start(&db, "proj", &format!("nightly-{round}"), "agent-one")
-            .await
-            .expect("start");
-        sessions::end(&db, &session.id, "agent-one", None, None)
+        let session =
+            common::seed::start_session(&db, "proj", &format!("nightly-{round}"), "agent-one")
+                .await
+                .expect("start");
+        common::seed::end_session(&db, &session.id, "agent-one", None)
             .await
             .expect("end");
         let token = prune::prune_session(&db, &session.id).await.expect("prune");
@@ -533,10 +546,10 @@ async fn an_undo_the_commit_beat_is_not_reported_as_a_restore() {
 async fn undo_after_the_window_is_rejected() {
     let dir = TempDir::new("prune-late-undo");
     let db = open(&dir).await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     let token = prune::prune_session(&db, &session.id).await.expect("prune");
@@ -566,7 +579,7 @@ async fn undo_after_the_window_is_rejected() {
 async fn sweep_cannot_remove_session_or_brain_after_undo_returned_success() {
     let dir = TempDir::new("prune-undo-sweep-order");
     let db = open(&dir).await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -576,7 +589,7 @@ async fn sweep_cannot_remove_session_or_brain_after_undo_returned_success() {
     let brain_file = dir.join(&session.brain_path);
     assert!(brain_file.exists());
 
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     let token = prune::prune_session(&db, &session.id).await.expect("prune");
@@ -603,7 +616,7 @@ async fn sweep_cannot_remove_session_or_brain_after_undo_returned_success() {
 async fn undo_cannot_succeed_after_sweep_claims_session() {
     let dir = TempDir::new("prune-sweep-undo-order");
     let db = open(&dir).await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -611,7 +624,7 @@ async fn undo_cannot_succeed_after_sweep_claims_session() {
     let brain = store.open("proj", &session.id).await.expect("open brain");
     brain.put("/kv/note", b"data").await.expect("put");
 
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     let token = prune::prune_session(&db, &session.id).await.expect("prune");
@@ -636,7 +649,7 @@ async fn undo_cannot_succeed_after_sweep_claims_session() {
 async fn interrupted_sweep_recovers_at_startup_and_cleans_quarantine_files() {
     let dir = TempDir::new("prune-recovery");
     let db = open(&dir).await;
-    let session = sessions::start(&db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -646,7 +659,7 @@ async fn interrupted_sweep_recovers_at_startup_and_cleans_quarantine_files() {
     let brain_file = dir.join(&session.brain_path);
     assert!(brain_file.exists());
 
-    sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     let _token = prune::prune_session(&db, &session.id).await.expect("prune");

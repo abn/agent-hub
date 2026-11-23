@@ -61,8 +61,8 @@ pub async fn authorize(
 
     // Ownership rule: writing to another agent's personal space is never allowed.
     if access == Access::Write
-        && project.owner_agent.is_some()
-        && !owned_by(&project.owner_agent, principal.member())
+        && project.owner_member.is_some()
+        && !owned_by(&project.owner_member, principal.member())
     {
         tracing::debug!(
             member = ?principal.member(),
@@ -139,13 +139,13 @@ pub(crate) async fn authorize_in_tx(
         return Ok(());
     }
 
-    let owner_agent = match row.get_value(1).map_err(engine)? {
+    let owner_member = match row.get_value(1).map_err(engine)? {
         Value::Text(val) => Some(val),
         _ => None,
     };
     if access == Access::Write
-        && owner_agent.is_some()
-        && !owned_by(&owner_agent, principal.member())
+        && owner_member.is_some()
+        && !owned_by(&owner_member, principal.member())
     {
         tracing::debug!(
             member = ?principal.member(),

@@ -26,7 +26,7 @@ async fn seed(db: &turso::Database, dir: &std::path::Path) {
         thread_id: None,
         session_id: None,
     };
-    append(db, 0, "agent-one", None, event)
+    append(db, 0, &common::seed::writer("agent-one"), None, event)
         .await
         .expect("append");
 
@@ -34,7 +34,7 @@ async fn seed(db: &turso::Database, dir: &std::path::Path) {
         db,
         dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Engine report",
             kind: "markdown",
@@ -231,7 +231,7 @@ async fn ranking_prefers_the_higher_term_frequency() {
     append(
         &db,
         0,
-        "a",
+        &common::seed::writer("a"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -250,7 +250,7 @@ async fn ranking_prefers_the_higher_term_frequency() {
     append(
         &db,
         0,
-        "a",
+        &common::seed::writer("a"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -692,7 +692,7 @@ async fn append_with(db: &turso::Database, summary: &str, payload: Option<serde_
     append(
         db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "proj".to_string(),
@@ -826,7 +826,7 @@ async fn an_artifact_snippet_is_still_the_opening_of_its_content() {
 async fn soft_pruned_session_brain_is_immediately_excluded_from_search() {
     let dir = TempDir::new("search-soft-prune");
     let db = open(&dir).await;
-    let session = agent_hub::store::sessions::start(&db, "proj", "worker", "agent-one")
+    let session = common::seed::start_session(&db, "proj", "worker", "agent-one")
         .await
         .expect("start");
 
@@ -853,7 +853,7 @@ async fn soft_pruned_session_brain_is_immediately_excluded_from_search() {
     assert_eq!(hits[0].kind, "brain");
 
     // End and soft-prune the session
-    agent_hub::store::sessions::end(&db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&db, &session.id, "agent-one", None)
         .await
         .expect("end");
     let token = agent_hub::store::prune::prune_session(&db, &session.id)

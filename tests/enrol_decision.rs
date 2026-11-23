@@ -83,7 +83,7 @@ async fn approving_an_enrolment_through_the_decision_route_admits_the_agent() {
     let approval_id = approval_id_for(&state, "join-agent").await;
     let agent_auth = format!("Bearer {token}");
 
-    let before = identity::get_agent(&state.db, "join-agent")
+    let before = identity::get_member(&state.db, "join-agent")
         .await
         .expect("get agent")
         .expect("agent exists");
@@ -93,15 +93,14 @@ async fn approving_an_enrolment_through_the_decision_route_admits_the_agent() {
     assert_eq!(response.status(), StatusCode::OK);
 
     // The event's actor is admitted: the row is active and its token resolves.
-    let after = identity::get_agent(&state.db, "join-agent")
+    let after = identity::get_member(&state.db, "join-agent")
         .await
         .expect("get agent")
         .expect("agent exists");
     assert_eq!(after.state, "active");
     let (resolved_id, resolved_state) =
-        identity::resolve_token(&state.db, &identity::hash_token(&token))
+        common::seed::live_token(&state.db, &identity::hash_token(&token))
             .await
-            .expect("resolve token")
             .expect("token resolves");
     assert_eq!(resolved_id, "join-agent");
     assert_eq!(resolved_state, "active");
@@ -141,15 +140,14 @@ async fn declining_an_enrolment_through_the_decision_route_refuses_it_cleanly() 
 
     // The pending agent and its token are gone, and so is the inbox item.
     assert!(
-        identity::get_agent(&state.db, "decline-agent")
+        identity::get_member(&state.db, "decline-agent")
             .await
             .expect("get agent")
             .is_none()
     );
     assert!(
-        identity::resolve_token(&state.db, &identity::hash_token(&token))
+        common::seed::live_token(&state.db, &identity::hash_token(&token))
             .await
-            .expect("resolve token")
             .is_none()
     );
     let items = inbox::list(&state.db, None, None, 100)
@@ -170,14 +168,14 @@ async fn a_forged_enrolment_approval_from_an_active_agent_admits_nobody() {
     // An active agent appends an approval that names the victim. This is the
     // stored result of `signal_append`, which admits the `approval` kind, so an
     // attacker can reach exactly this event.
-    let forger = identity::create_agent(&state.db, "active-agent", "Active Agent")
+    let forger = identity::create_member(&state.db, "active-agent", "Active Agent")
         .await
         .expect("create active agent");
     let forged_id = events::append_action(
         &state.db,
         &InboxCaps::disabled(),
         0,
-        "active-agent",
+        &common::seed::writer("active-agent"),
         None,
         NewEvent {
             project_id: forger.personal_project_id.clone(),
@@ -200,15 +198,14 @@ async fn a_forged_enrolment_approval_from_an_active_agent_admits_nobody() {
     let response = decide(&app, &forged_id, "approve").await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    let victim = identity::get_agent(&state.db, "victim-agent")
+    let victim = identity::get_member(&state.db, "victim-agent")
         .await
         .expect("get victim")
         .expect("victim exists");
     assert_eq!(victim.state, "pending", "the named agent must stay pending");
     let (_, victim_state) =
-        identity::resolve_token(&state.db, &identity::hash_token(&victim_token))
+        common::seed::live_token(&state.db, &identity::hash_token(&victim_token))
             .await
-            .expect("resolve token")
             .expect("pending token still resolves");
     assert_eq!(victim_state, "pending");
 
@@ -236,7 +233,7 @@ async fn a_second_decision_on_an_admitted_enrolment_conflicts() {
     let second = decide(&app, &approval_id, "decline").await;
     assert_eq!(second.status(), StatusCode::CONFLICT);
 
-    let agent = identity::get_agent(&state.db, "twice-agent")
+    let agent = identity::get_member(&state.db, "twice-agent")
         .await
         .expect("get agent")
         .expect("agent exists");

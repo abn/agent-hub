@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use agent_hub::store::{identity, projects, sessions};
+use agent_hub::store::{identity, projects};
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
@@ -47,14 +47,15 @@ impl Hub {
 
     /// An agent that is not the admin, granted write on one project.
     async fn agent(&self, id: &str, project_id: &str) -> String {
-        identity::create_agent(&self.state.db, id, id)
+        identity::create_member(&self.state.db, id, id)
             .await
             .expect("create agent");
         identity::add_grant(&self.state.db, id, project_id)
             .await
             .expect("grant write");
-        identity::issue_token(&self.state.db, id)
+        identity::issue_member_token(&self.state.db, id)
             .await
+            .map(|(issued, _)| issued)
             .expect("issue token")
             .token
     }
@@ -177,6 +178,7 @@ impl Hub {
             token: token.to_string(),
             session,
             next_id: 1,
+            following: None,
         }
     }
 
@@ -272,10 +274,32 @@ struct Mcp<'a> {
     token: String,
     session: String,
     next_id: u64,
+    /// The hub session the connection started, which every later call names,
+    /// as a harness plugin does.
+    following: Option<Value>,
 }
 
 impl Mcp<'_> {
     async fn call(&mut self, tool: &str, arguments: Value) -> Value {
+        let mut arguments = arguments;
+        if let (Some(following), Some(object)) = (&self.following, arguments.as_object_mut())
+            && tool != "session_start"
+            && !object.contains_key("session")
+        {
+            object.insert("session".to_string(), following.clone());
+        }
+        let reply = self.send(tool, arguments).await;
+        if tool == "session_start"
+            && let Some(id) = reply
+                .pointer("/result/structuredContent/session_id")
+                .and_then(Value::as_str)
+        {
+            self.following = Some(json!({ "session_id": id }));
+        }
+        reply
+    }
+
+    async fn send(&mut self, tool: &str, arguments: Value) -> Value {
         self.next_id += 1;
         self.hub
             .mcp_post(
@@ -398,7 +422,7 @@ async fn every_route_reports_a_project_that_does_not_exist_as_not_found() {
     let hub = Hub::start().await;
     let session = {
         let project = hub.project("real").await;
-        sessions::start(&hub.state.db, &project, "work", "agent-one")
+        common::seed::start_session(&hub.state.db, &project, "work", "agent-one")
             .await
             .expect("start session")
     };
@@ -1275,7 +1299,7 @@ async fn a_page_verified_before_the_log_marked_it_is_still_judged_by_its_time() 
         kb.record_write(
             "kb.put",
             &path,
-            "deploy-bot",
+            &common::seed::writer("deploy-bot"),
             Some(page.len()),
             Some(&agent_hub::brain::version(page.as_bytes())),
         )
@@ -1809,7 +1833,7 @@ async fn history_and_last_write_survive_a_long_log() {
         kb.record_write(
             "kb.put",
             &format!("/fs/bulk/{}.md", n % 7),
-            "bulk-agent",
+            &common::seed::writer("bulk-agent"),
             Some(1),
             Some("sha256:00"),
         )
@@ -2068,7 +2092,7 @@ async fn review_and_promote_refuse_a_page_they_would_push_over_the_limit() {
 
     // A session value at the page limit fits its own store, and the block a
     // promotion adds would take the page over.
-    let session = sessions::start(&hub.state.db, &project, "work", "agent-one")
+    let session = common::seed::start_session(&hub.state.db, &project, "work", "agent-one")
         .await
         .expect("start session");
     hub.state
@@ -2105,7 +2129,7 @@ async fn review_and_promote_refuse_a_page_they_would_push_over_the_limit() {
 async fn a_session_value_keeps_the_limit_it_shipped_with() {
     let hub = Hub::start().await;
     let project = hub.project("limits").await;
-    let session = sessions::start(&hub.state.db, &project, "work", "agent-one")
+    let session = common::seed::start_session(&hub.state.db, &project, "work", "agent-one")
         .await
         .expect("start session");
     let brain = hub
@@ -2463,12 +2487,15 @@ async fn one_actors_writes_to_a_page_make_one_event_and_a_second_actor_makes_ano
     assert_eq!(events[0].1["path"], "/fs/plan.md");
     assert_eq!(events[0].1["action"], "created");
     assert_eq!(events[0].1["prev_actor"], Value::Null);
-    assert_eq!(events[0].1["audience"], json!([]));
+    assert_eq!(
+        events[0].1["audience"],
+        json!({"sessions": [], "participants": [], "labels": []})
+    );
 
     agent_hub::brain::knowledge::put(
         &hub.state,
         "proj",
-        "agent-w",
+        &common::seed::writer("agent-w"),
         "/fs/plan.md",
         "# Three\n",
         None,
@@ -2484,12 +2511,15 @@ async fn one_actors_writes_to_a_page_make_one_event_and_a_second_actor_makes_ano
     assert_eq!(events[1].0, "agent-w");
     assert_eq!(events[1].1["action"], "updated");
     assert_eq!(events[1].1["prev_actor"], "human");
-    assert_eq!(events[1].1["audience"], json!(["human"]));
+    assert_eq!(
+        events[1].1["audience"],
+        json!({"sessions": [], "participants": [], "labels": ["human"]})
+    );
 
     agent_hub::brain::knowledge::put(
         &hub.state,
         "proj",
-        "agent-w",
+        &common::seed::writer("agent-w"),
         "/fs/plan.md",
         "# Four\n",
         None,
@@ -2501,7 +2531,7 @@ async fn one_actors_writes_to_a_page_make_one_event_and_a_second_actor_makes_ano
     agent_hub::brain::knowledge::put(
         &hub.state,
         "proj",
-        "agent-w",
+        &common::seed::writer("agent-w"),
         "/fs/other.md",
         "# Other\n",
         None,
@@ -2555,7 +2585,7 @@ async fn a_write_after_the_coalescing_window_makes_a_new_event_that_names_ones_o
     assert_eq!(events[1].1["prev_actor"], "human");
     assert_eq!(
         events[1].1["audience"],
-        json!(["human"]),
+        json!({"sessions": [], "participants": [], "labels": ["human"]}),
         "the audience is the previous writer even when it is the writer"
     );
 }
@@ -2573,7 +2603,7 @@ async fn concurrent_writers_each_see_the_writer_before_them() {
             agent_hub::brain::knowledge::put(
                 &state,
                 "proj",
-                &format!("agent-{n}"),
+                &common::seed::writer(&format!("agent-{n}")),
                 "/fs/plan.md",
                 &format!("# Edit {n}\n"),
                 None,

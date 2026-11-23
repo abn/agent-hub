@@ -24,12 +24,10 @@ pub struct PageComment {
     pub id: String,
     pub project_id: String,
     pub path: String,
-    /// The writer's key. Kept as `author` until every reader takes `actor`.
-    pub author: String,
     /// The writer's key, as every other row names it.
     pub actor: String,
     /// Who wrote it.
-    pub author_record: crate::author::AuthorView,
+    pub author: crate::author::AuthorView,
     /// `hub` for the hub's own act, null for a call.
     pub origin: Option<String>,
     pub body: String,
@@ -43,11 +41,10 @@ pub async fn add_comment(
     db: &Database,
     project_id: &str,
     path: &str,
-    writer: impl Into<crate::author::Writer>,
+    writer: &crate::author::Writer,
     body: &str,
     anchor: Option<serde_json::Value>,
 ) -> Result<PageComment> {
-    let writer: crate::author::Writer = writer.into();
     let author = check_author(writer.actor())?;
     let body = check_body(body)?;
     let anchor = check_anchor(anchor)?;
@@ -236,9 +233,8 @@ fn comment_from_row(row: &Row) -> Result<PageComment> {
         id: required_text(row, 0)?,
         project_id: required_text(row, 1)?,
         path: required_text(row, 2)?,
-        author: required_text(row, 3)?,
         actor: required_text(row, 3)?,
-        author_record: crate::store::events::author_at(row, 8, 3)?.view(None),
+        author: crate::store::events::author_at(row, 8, 3)?.view(None),
         origin: text_at(row, 12)?,
         body: required_text(row, 4)?,
         anchor,

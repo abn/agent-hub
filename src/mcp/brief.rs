@@ -79,11 +79,12 @@ impl HubServer {
             (None, Some(session)) => (id_floor(&session.last_activity), "previous_session"),
             (None, None) => (None, "none"),
         };
+        let reader = principal.writer(None);
         let (answers, listed) = answers_section(
             &self.state.db,
             &project_id,
             since.as_deref(),
-            &principal.actor,
+            reader.actor(),
         )
         .await
         .map_err(to_error_data)?;
@@ -91,7 +92,7 @@ impl HubServer {
             &self.state.db,
             &project_id,
             since.as_deref(),
-            &principal.actor,
+            reader.actor(),
             &listed,
         )
         .await

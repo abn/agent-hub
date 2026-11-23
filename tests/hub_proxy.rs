@@ -218,7 +218,7 @@ fn a_proxy_outlives_a_hub_restart() {
         }),
     );
     assert!(noted.get("error").is_none(), "{noted}");
-    let session_id = structured(&noted)["session"]["id"]
+    let session_id = structured(&noted)["session"]
         .as_str()
         .unwrap_or_else(|| panic!("the write names its session: {noted}"))
         .to_string();
@@ -393,7 +393,7 @@ fn one_proxy_process_reads_back_what_it_wrote_through_the_hub() {
         }),
     );
     assert!(written.get("error").is_none(), "{written}");
-    let session_id = structured(&written)["session"]["id"]
+    let session_id = structured(&written)["session"]
         .as_str()
         .unwrap_or_else(|| panic!("the write names its session: {written}"))
         .to_string();

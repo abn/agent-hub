@@ -62,7 +62,7 @@ async fn post_action(
         &state.db,
         &state.config.inbox_caps,
         0,
-        &payload.actor,
+        &common::seed::writer(&payload.actor),
         None,
         NewEvent {
             project_id: payload.project_id,

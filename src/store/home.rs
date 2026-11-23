@@ -51,8 +51,6 @@ pub struct Home {
     /// [`HOME_WAITING_LIMIT`] of them, so the list does not depend on a
     /// waiting item being among the newest events.
     pub waiting_items: Vec<inbox::InboxItem>,
-    /// Agents with a session touched inside the active window.
-    pub agents_active: i64,
     /// Live sessions across the hub.
     pub sessions_live: i64,
     /// When the newest event landed, absent when nothing has happened yet.
@@ -89,7 +87,6 @@ pub async fn home(
     };
     let recent = events::recent(db, recent_limit).await?;
     let unseen = events::unseen_counts(db).await?;
-    let agents_active = crate::store::sessions::agents_active(db, active_since, None).await?;
     let sessions_live = crate::store::sessions::live_count(db, active_since, None).await?;
 
     // One read names every project the feed rows mention. A waiting item
@@ -119,7 +116,6 @@ pub async fn home(
         unread: counts.unread,
         waiting: counts.waiting,
         waiting_items,
-        agents_active,
         sessions_live,
         last_event_at: recent.first().map(|row| row.event.created_at.clone()),
         recent,

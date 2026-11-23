@@ -28,11 +28,9 @@ pub struct ProjectUsage {
     pub prunable_bytes: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_write: Option<String>,
-    /// Distinct agents with a live session in this project. Carried here so the
-    /// storage screen can mark a project live without asking once per project,
-    /// which on this hub would be six round trips for six booleans.
-    pub agents_active: i64,
-    /// Live sessions in this project.
+    /// Live sessions in this project. Carried here so the storage screen can
+    /// mark a project live without asking once per project, which on this hub
+    /// would be six round trips for six booleans.
     pub sessions_live: i64,
 }
 
@@ -154,7 +152,6 @@ pub async fn usage_from(
                 prunable_sessions: 0,
                 prunable_bytes: 0,
                 last_write: None,
-                agents_active: 0,
                 sessions_live: 0,
             });
         }
@@ -267,28 +264,6 @@ pub async fn usage_from(
     drop(last_writes);
 
     // Live agents per project, in one query rather than one per row.
-    let mut live = conn
-        .query(
-            "SELECT project_id, COUNT(DISTINCT started_label) FROM sessions
-             WHERE status = 'active' AND deleted_at IS NULL AND last_activity >= ?1
-             GROUP BY project_id",
-            vec![Value::Text(active_since.to_string())],
-        )
-        .await
-        .map_err(engine)?;
-    while let Some(row) = live.next().await.map_err(engine)? {
-        let project_id = text(row.get_value(0).map_err(engine)?);
-        let count = row
-            .get_value(1)
-            .map_err(engine)?
-            .as_integer()
-            .copied()
-            .unwrap_or(0);
-        if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == project_id) {
-            entry.agents_active = count;
-        }
-    }
-    drop(live);
     for (project_id, count) in crate::store::sessions::live_by_project(db, active_since).await? {
         if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == project_id) {
             entry.sessions_live = count;

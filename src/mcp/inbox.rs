@@ -71,7 +71,7 @@ impl HubServer {
             &self.state.config.inbox_caps,
             self.state.config.events_per_project.per_project,
             NewQuestion {
-                actor: &principal.actor,
+                writer: &principal.writer(resolved.session_id()),
                 project_id: &params.project_id,
                 subject: &params.subject,
                 body: params.body.as_deref(),
@@ -253,6 +253,7 @@ impl HubServer {
         let mut ticker = self.state.ticker.subscribe();
         let deadline = Instant::now() + Duration::from_secs(wait);
         let mut since = params.since.clone();
+        let asker = principal.writer(None);
 
         loop {
             self.state.settle_before_read().await;
@@ -260,7 +261,7 @@ impl HubServer {
                 &self.state.db,
                 None,
                 params.project_id.as_deref(),
-                Some(&principal.actor),
+                Some(asker.actor()),
                 since.as_deref(),
                 FEED_LIMIT_MAX,
                 visible.as_filter(),

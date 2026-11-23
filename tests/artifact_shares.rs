@@ -40,7 +40,7 @@ async fn publish_artifact(
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-writer",
+            writer: &common::seed::writer("agent-writer"),
             project_id: "proj",
             title,
             kind: "markdown",
@@ -428,7 +428,7 @@ async fn an_owner_pass_reads_the_page_and_body_a_live_share_conceals() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-writer",
+            writer: &common::seed::writer("agent-writer"),
             project_id: "proj",
             title: "Shared Page",
             kind: "html",
@@ -585,10 +585,13 @@ async fn minting_a_pass_needs_the_admin_token() {
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
-    identity::create_agent(&state.db, "agent-one", "Agent")
+    identity::create_member(&state.db, "agent-one", "Agent")
         .await
         .unwrap();
-    let issued = identity::issue_token(&state.db, "agent-one").await.unwrap();
+    let issued = identity::issue_member_token(&state.db, "agent-one")
+        .await
+        .map(|(issued, _)| issued)
+        .unwrap();
     let req = Request::builder()
         .method("GET")
         .uri(format!("/api/v1/artifacts/{id}/viewer-pass"))
@@ -669,7 +672,7 @@ async fn share_link_is_version_pinned_after_artifact_update() {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-writer",
+        &common::seed::writer("agent-writer"),
         &id,
         b"Version 2 Text",
         EnvelopeUpdate::Keep,
@@ -714,10 +717,13 @@ async fn share_endpoints_require_admin_authorization() {
     assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
 
     // Agent token (non-admin) POST /api/v1/artifacts/{id}/share -> 401
-    identity::create_agent(&state.db, "agent-one", "Agent")
+    identity::create_member(&state.db, "agent-one", "Agent")
         .await
         .unwrap();
-    let issued = identity::issue_token(&state.db, "agent-one").await.unwrap();
+    let issued = identity::issue_member_token(&state.db, "agent-one")
+        .await
+        .map(|(issued, _)| issued)
+        .unwrap();
     let agent_tok = issued.token;
 
     let req = Request::builder()
@@ -775,7 +781,7 @@ async fn html_artifact_frame_serves_via_share_token() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-writer",
+            writer: &common::seed::writer("agent-writer"),
             project_id: "proj",
             title: "HTML Doc",
             kind: "html",

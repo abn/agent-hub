@@ -705,7 +705,7 @@ async fn audit_record_write_and_recent() {
         .record_write(
             "brain.put",
             "/fs/note.md",
-            "agent-alpha",
+            &common::seed::writer("agent-alpha"),
             Some(42),
             Some("sha256:abc"),
         )
@@ -731,9 +731,15 @@ async fn audit_record_write_and_recent() {
 
     // Project knowledge base file records store = "project"
     let kb = store.open("proj", "kb").await.expect("open kb");
-    kb.record_write("kb.put", "/fs/index.md", "human", Some(100), None)
-        .await
-        .expect("record kb write");
+    kb.record_write(
+        "kb.put",
+        "/fs/index.md",
+        &common::seed::writer("human"),
+        Some(100),
+        None,
+    )
+    .await
+    .expect("record kb write");
     let kb_recent = kb.audit_recent(None).await.expect("kb recent");
     assert_eq!(kb_recent.len(), 1);
     assert_eq!(kb_recent[0].name, "kb.put");

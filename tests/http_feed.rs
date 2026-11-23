@@ -33,12 +33,18 @@ fn event(summary: &str) -> NewEvent {
 async fn the_human_feed_hides_system_events() {
     let state = state().await;
     let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
-    append(&state.db, 0, "agent", None, event("a signal"))
-        .await
-        .expect("append signal");
+    append(
+        &state.db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("a signal"),
+    )
+    .await
+    .expect("append signal");
     let mut audit = event("agent created");
     audit.kind = "system".to_string();
-    append(&state.db, 0, "human", None, audit)
+    append(&state.db, 0, &common::seed::writer("human"), None, audit)
         .await
         .expect("append system");
 
@@ -106,12 +112,24 @@ async fn missing_token_is_a_problem() {
 async fn bearer_token_reads_events_newest_first() {
     let state = state().await;
     let _ = agent_hub::store::projects::create(&state.db, "proj", "Default Project").await;
-    append(&state.db, 0, "agent", None, event("first"))
-        .await
-        .expect("append first");
-    append(&state.db, 0, "agent", None, event("second"))
-        .await
-        .expect("append second");
+    append(
+        &state.db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("first"),
+    )
+    .await
+    .expect("append first");
+    append(
+        &state.db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("second"),
+    )
+    .await
+    .expect("append second");
 
     let app = router(state.clone());
     let response = app
@@ -178,12 +196,24 @@ async fn the_feed_says_how_far_the_human_has_read_it() {
     let state = state().await;
     let _ = agent_hub::store::projects::create(&state.db, "proj", "Proj").await;
     let _ = agent_hub::store::projects::create(&state.db, "other", "Other").await;
-    let first = append(&state.db, 0, "agent", None, event("first"))
-        .await
-        .expect("append first");
-    let second = append(&state.db, 0, "agent", None, event("second"))
-        .await
-        .expect("append second");
+    let first = append(
+        &state.db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("first"),
+    )
+    .await
+    .expect("append first");
+    let second = append(
+        &state.db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("second"),
+    )
+    .await
+    .expect("append second");
 
     let page = read_feed_page(&state).await;
     assert!(
@@ -210,7 +240,7 @@ async fn the_feed_says_how_far_the_human_has_read_it() {
     let elsewhere = append(
         &state.db,
         0,
-        "agent",
+        &common::seed::writer("agent"),
         None,
         NewEvent {
             project_id: "other".to_string(),
@@ -276,9 +306,15 @@ async fn feed_query_decoding_handles_repeated_kinds_and_percent_decoding() {
     agent_hub::store::projects::create(&state.db, "proj", "Proj")
         .await
         .expect("create project");
-    append(&state.db, 0, "agent", None, event("sig"))
-        .await
-        .expect("append");
+    append(
+        &state.db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("sig"),
+    )
+    .await
+    .expect("append");
 
     let app = router(state.clone());
     let res = app
@@ -299,12 +335,24 @@ async fn a_dismissed_event_leaves_the_human_feed_and_the_global_feed() {
     agent_hub::store::projects::create(&state.db, "proj", "Proj")
         .await
         .expect("create project");
-    append(&state.db, 0, "agent", None, event("kept"))
-        .await
-        .expect("append kept");
-    let gone = append(&state.db, 0, "agent", None, event("gone"))
-        .await
-        .expect("append gone");
+    append(
+        &state.db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("kept"),
+    )
+    .await
+    .expect("append kept");
+    let gone = append(
+        &state.db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("gone"),
+    )
+    .await
+    .expect("append gone");
 
     let response = router(state.clone())
         .oneshot(post(
@@ -361,12 +409,24 @@ async fn dismiss_read_takes_the_cursor_and_nothing_until_there_is_one() {
     agent_hub::store::projects::create(&state.db, "proj", "Proj")
         .await
         .expect("create project");
-    let first = append(&state.db, 0, "agent", None, event("first"))
-        .await
-        .expect("append first");
-    append(&state.db, 0, "agent", None, event("second"))
-        .await
-        .expect("append second");
+    let first = append(
+        &state.db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("first"),
+    )
+    .await
+    .expect("append first");
+    append(
+        &state.db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        event("second"),
+    )
+    .await
+    .expect("append second");
 
     let response = router(state.clone())
         .oneshot(post(
@@ -476,9 +536,15 @@ async fn the_human_feed_omits_comment_and_page_events_but_an_agent_read_keeps_th
     for kind in ["signal", "comment", "page"] {
         let mut agent_event = event(kind);
         agent_event.kind = kind.to_string();
-        append(&state.db, 0, "agent", None, agent_event)
-            .await
-            .expect("append");
+        append(
+            &state.db,
+            0,
+            &common::seed::writer("agent"),
+            None,
+            agent_event,
+        )
+        .await
+        .expect("append");
     }
 
     for uri in ["/api/v1/projects/proj/feed", "/api/v1/feed"] {
@@ -517,9 +583,15 @@ async fn the_human_feed_omits_comment_and_page_events_but_an_agent_read_keeps_th
 async fn agent_event(state: &AppState, kind: &str, summary: &str) -> String {
     let mut agent_event = event(summary);
     agent_event.kind = kind.to_string();
-    append(&state.db, 0, "agent", None, agent_event)
-        .await
-        .expect("append")
+    append(
+        &state.db,
+        0,
+        &common::seed::writer("agent"),
+        None,
+        agent_event,
+    )
+    .await
+    .expect("append")
 }
 
 #[tokio::test]

@@ -59,7 +59,7 @@ fn enrol_req_from(
 }
 
 #[tokio::test]
-async fn security_invariant_pending_token_refusal_is_byte_for_byte_identical_to_junk_token() {
+async fn a_pending_token_is_refused_like_a_junk_token_with_its_own_reason() {
     let state = state().await;
     let app = router(state.clone());
 
@@ -113,31 +113,42 @@ async fn security_invariant_pending_token_refusal_is_byte_for_byte_identical_to_
         let status_pending = res_pending.status();
         let bytes_pending = body_bytes(res_pending).await;
 
+        // Both are refused the same way and carry nothing of the hub; the
+        // pending holder is told it waits for approval, which it already knows.
         assert_eq!(
             status_pending, status_junk,
             "status mismatch on {method} {uri}"
         );
-        assert_eq!(
-            bytes_pending, bytes_junk,
-            "byte for byte response mismatch on {method} {uri}"
+        let pending: serde_json::Value = serde_json::from_slice(&bytes_pending).expect("json");
+        let junk: serde_json::Value = serde_json::from_slice(&bytes_junk).expect("json");
+        assert_eq!(pending["code"], junk["code"], "{method} {uri}");
+        assert_eq!(junk["details"]["reason"], "token_unknown", "{method} {uri}");
+        assert!(
+            ["token_pending", "token_unknown"]
+                .contains(&pending["details"]["reason"].as_str().unwrap_or_default()),
+            "{method} {uri}: {pending}"
         );
     }
 
-    // Transport resolution (resolve_agent): pending token must return the exact same error as junk token.
+    // On the agent transport a pending token is a caller in waiting, which
+    // sees the enrol surface only; a junk token is refused.
     let err_junk = state
         .auth
         .resolve_agent(&state.db, Some(junk_token))
         .await
         .unwrap_err();
-    let err_pending = state
+    assert_eq!(
+        err_junk.details().expect("details")["reason"],
+        "token_unknown"
+    );
+    let pending = state
         .auth
         .resolve_agent(&state.db, Some(pending_token))
         .await
-        .unwrap_err();
+        .expect("a pending caller");
     assert_eq!(
-        err_pending.to_string(),
-        err_junk.to_string(),
-        "resolve_agent error mismatch between pending token and junk token"
+        pending.credential(),
+        agent_hub::principal::CredentialState::Pending
     );
 }
 
@@ -203,9 +214,11 @@ async fn approving_enrolment_makes_same_token_work_without_reissue() {
         .resolve_agent(&state.db, Some(token))
         .await
         .expect("token should resolve after approval");
-    assert_eq!(principal.actor, "worker");
-    assert_eq!(principal.agent_id.as_deref(), Some("worker"));
-    assert!(!principal.is_pending);
+    assert_eq!(principal.member(), Some("worker"));
+    assert_eq!(
+        principal.credential(),
+        agent_hub::principal::CredentialState::Active
+    );
 }
 
 #[tokio::test]
@@ -241,16 +254,14 @@ async fn refusing_enrolment_deletes_row_and_token_allowing_same_id_again() {
     assert_eq!(refuse_res.status(), StatusCode::NO_CONTENT);
 
     // Row is deleted from database.
-    let agent = identity::get_agent(&state.db, "retry-agent")
+    let agent = identity::get_member(&state.db, "retry-agent")
         .await
         .expect("query");
     assert!(agent.is_none(), "refused agent must be deleted from db");
 
     // Token no longer resolves.
     let token_hash = identity::hash_token(&token);
-    let lookup = identity::resolve_token(&state.db, &token_hash)
-        .await
-        .expect("lookup");
+    let lookup = common::seed::live_token(&state.db, &token_hash).await;
     assert!(lookup.is_none(), "token must be deleted");
 
     // Status route with old token returns unauthenticated.
@@ -569,9 +580,9 @@ fn cli_enrol_shared_approval_writes_token_to_config_at_0600() {
     cmd.env("HUB_CONFIG", &config_file);
     cmd.args([
         "enrol",
-        "--id",
+        "--member",
         "test-cli-agent",
-        "--name",
+        "--display-name",
         "TestCliAgent",
         "--why",
         "CLI enrol test",
@@ -583,7 +594,7 @@ fn cli_enrol_shared_approval_writes_token_to_config_at_0600() {
     assert!(output.status.success(), "enrol should succeed: {output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Enrolment approved for agent 'test-cli-agent'"),
+        stdout.contains("Enrolment approved for member 'test-cli-agent'"),
         "{stdout}"
     );
     assert!(stdout.contains("Token saved to"), "{stdout}");
@@ -591,8 +602,8 @@ fn cli_enrol_shared_approval_writes_token_to_config_at_0600() {
     assert!(config_file.exists(), "config file must exist");
     let content = std::fs::read_to_string(&config_file).expect("read config");
     assert!(
-        content.contains("[client]"),
-        "config must have [client] table"
+        content.contains("[[credential]]"),
+        "config must have a credential entry: {content}"
     );
     assert!(content.contains("token = \""), "config must contain token");
 
@@ -602,7 +613,7 @@ fn cli_enrol_shared_approval_writes_token_to_config_at_0600() {
 }
 
 #[test]
-fn cli_enrol_unshared_approval_does_not_write_file() {
+fn cli_enrol_keeps_the_pending_token_whether_or_not_the_approval_shares_it() {
     let hub = common::hub::Hub::start("enrol-cli-unshared");
     let config_file = hub.config_path().parent().unwrap().join("config.toml");
 
@@ -624,9 +635,9 @@ fn cli_enrol_unshared_approval_does_not_write_file() {
     cmd.env("HUB_CONFIG", &config_file);
     cmd.args([
         "enrol",
-        "--id",
+        "--member",
         "unshared-agent",
-        "--name",
+        "--display-name",
         "UnsharedAgent",
         "--why",
         "Unshared enrol test",
@@ -638,15 +649,14 @@ fn cli_enrol_unshared_approval_does_not_write_file() {
     assert!(output.status.success(), "enrol should succeed: {output:?}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("Enrolment approved for agent 'unshared-agent'"),
+        stdout.contains("Enrolment approved for member 'unshared-agent'"),
         "{stdout}"
     );
-    assert!(stdout.contains("Token: "), "{stdout}");
-
-    assert!(
-        !config_file.exists(),
-        "config file must not be written when unshared"
-    );
+    // The pending token is the one approval turns on, so it is kept from the
+    // moment the request is made, whether or not the approval shares it.
+    let content = std::fs::read_to_string(&config_file).expect("read config");
+    assert!(content.contains("[[credential]]"), "{content}");
+    assert!(content.contains("member = \"unshared-agent\""), "{content}");
 }
 
 #[test]
@@ -671,9 +681,9 @@ fn cli_enrol_refusal_exits_with_denied() {
     cmd.env("HUB_CONFIG", &config_file);
     cmd.args([
         "enrol",
-        "--id",
+        "--member",
         "refused-agent",
-        "--name",
+        "--display-name",
         "RefusedAgent",
         "--why",
         "Refuse test",
@@ -722,9 +732,9 @@ fn cli_enrol_reports_error_without_failing_if_unable_to_write_file() {
     cmd.env("HUB_CONFIG", &config_file);
     cmd.args([
         "enrol",
-        "--id",
+        "--member",
         "ro-agent",
-        "--name",
+        "--display-name",
         "RoAgent",
         "--why",
         "Readonly test",
@@ -744,7 +754,7 @@ fn cli_enrol_reports_error_without_failing_if_unable_to_write_file() {
         "enrol must not fail if unable to write file: {output:?}"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("could not write token to"), "{stderr}");
+    assert!(stderr.contains("could not write the token to"), "{stderr}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Token: "), "{stdout}");
 }

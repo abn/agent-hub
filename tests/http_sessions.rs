@@ -4,7 +4,7 @@ use agent_hub::app::AppState;
 use agent_hub::http::router;
 use agent_hub::store::sessions;
 use axum::body::Body;
-use axum::http::{Request, StatusCode, header};
+use axum::http::{Request, StatusCode};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -55,7 +55,7 @@ async fn a_listing_names_a_filter() {
 #[tokio::test]
 async fn list_returns_the_project_sessions() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -80,7 +80,7 @@ async fn list_returns_the_project_sessions() {
 #[tokio::test]
 async fn end_marks_the_session_ended() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -144,7 +144,7 @@ async fn end_without_token_is_a_problem() {
 #[tokio::test]
 async fn brain_lists_entries() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     let brain = state
@@ -216,7 +216,7 @@ async fn brain_lists_entries() {
 #[tokio::test]
 async fn a_brain_listing_reports_a_level_it_could_not_carry_whole() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "wide", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "wide", "agent-one")
         .await
         .expect("start");
     let brain = state
@@ -255,7 +255,7 @@ async fn a_brain_listing_reports_a_level_it_could_not_carry_whole() {
 #[tokio::test]
 async fn brain_read_does_not_create_a_file() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "fresh", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "fresh", "agent-one")
         .await
         .expect("start");
     let path = state.brain.brain_path("proj", &session.id).expect("path");
@@ -278,10 +278,10 @@ async fn brain_read_does_not_create_a_file() {
 #[tokio::test]
 async fn brain_hides_a_pruned_session() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&state.db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&state.db, &session.id, "agent-one", None)
         .await
         .expect("end");
     agent_hub::store::prune::prune_session(&state.db, &session.id)
@@ -341,23 +341,17 @@ async fn brain_without_token_is_a_problem() {
 }
 
 #[tokio::test]
-async fn a_listing_carries_the_owner_and_where_the_work_came_from() {
+async fn a_listing_carries_who_started_it_and_where_the_work_came_from() {
     let state = state().await;
-    let source = sessions::start(&state.db, "proj", "migration", "agent-one")
+    let source = common::seed::start_session(&state.db, "proj", "migration", "agent-one")
         .await
         .expect("start");
-    sessions::end(
-        &state.db,
-        &source.id,
-        "agent-one",
-        None,
-        Some("half applied"),
-    )
-    .await
-    .expect("end");
-    sessions::start_from(&state.db, "proj", "pickup", "agent-two", &source.id)
+    common::seed::end_session(&state.db, &source.id, "agent-one", Some("half applied"))
         .await
-        .expect("adopt");
+        .expect("end");
+    let fork = common::seed::fork_session(&state.db, &source, "pickup", "agent-two")
+        .await
+        .expect("fork");
 
     let app = router(state.clone());
     let response = app
@@ -370,34 +364,39 @@ async fn a_listing_carries_the_owner_and_where_the_work_came_from() {
         .expect("request");
     assert_eq!(response.status(), StatusCode::OK);
     let body = json_body(response).await;
-    let entry = body["sessions"]
-        .as_array()
-        .expect("sessions")
-        .iter()
-        .find(|entry| entry["id"] == source.id.as_str())
-        .expect("the adopted session is listed")
-        .clone();
+    let listed = |id: &str| {
+        body["sessions"]
+            .as_array()
+            .expect("sessions")
+            .iter()
+            .find(|entry| entry["id"] == id)
+            .unwrap_or_else(|| panic!("{id} is listed: {body}"))
+            .clone()
+    };
 
-    assert_eq!(entry["agent"], "agent-two", "the owner is the current one");
-    assert_eq!(entry["handoff"], "half applied");
-    assert_eq!(entry["adopted_from"], source.id.as_str());
-    // The screen renders "picked up from agent-one" without a second lookup.
-    assert_eq!(entry["lineage"]["kind"], "adopted");
+    let ended = listed(&source.id);
+    assert_eq!(ended["handoff"], "half applied");
+    assert_eq!(ended["started_by"]["member"], "agent-one");
+    let entry = listed(&fork.id);
+    assert_eq!(entry["started_by"]["member"], "agent-two");
+    assert_eq!(entry["forked_from"], source.id.as_str());
+    // The screen renders "forked from migration" without a second lookup.
+    assert_eq!(entry["lineage"]["kind"], "forked");
     assert_eq!(entry["lineage"]["session_id"], source.id.as_str());
-    assert_eq!(entry["lineage"]["agent"], "agent-two");
+    assert_eq!(entry["lineage"]["session_name"], "migration");
     assert_eq!(entry["lineage"]["pruned"], false);
 }
 
 #[tokio::test]
 async fn a_lineage_whose_source_is_gone_reads_as_pruned() {
     let state = state().await;
-    let source = sessions::start(&state.db, "proj", "live", "agent-one")
+    let source = common::seed::start_session(&state.db, "proj", "live", "agent-one")
         .await
         .expect("start");
-    let fork = sessions::insert_fork(&state.db, &source, "branch", "agent-two", "01FORKED")
+    let fork = common::seed::fork_session(&state.db, &source, "branch", "agent-two")
         .await
         .expect("fork");
-    sessions::end(&state.db, &source.id, "agent-one", None, None)
+    common::seed::end_session(&state.db, &source.id, "agent-one", None)
         .await
         .expect("end the source");
     agent_hub::store::prune::prune_session(&state.db, &source.id)
@@ -423,7 +422,7 @@ async fn a_lineage_whose_source_is_gone_reads_as_pruned() {
         .expect("the fork is listed")
         .clone();
     assert_eq!(entry["lineage"]["pruned"], true);
-    assert_eq!(entry["lineage"]["agent"], "agent-one");
+    assert_eq!(entry["lineage"]["session_id"], source.id.as_str());
 
     // Once the sweep has committed the prune the row is gone, and the lineage
     // id is dangling by design.
@@ -458,26 +457,6 @@ async fn a_lineage_whose_source_is_gone_reads_as_pruned() {
     assert_eq!(entry["lineage"]["kind"], "forked");
     assert_eq!(entry["lineage"]["pruned"], true);
     assert_eq!(entry["lineage"]["session_name"], Value::Null);
-}
-
-/// Sessions have no owner to move, so the route that moved one is gone.
-#[tokio::test]
-async fn there_is_no_reassign_route() {
-    let state = state().await;
-    let app = router(state.clone());
-    let response = app
-        .oneshot(
-            Request::builder()
-                .uri("/api/v1/sessions/unknown/reassign")
-                .method("POST")
-                .header(header::AUTHORIZATION, "Bearer token")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"agent":"agent-two"}"#))
-                .expect("build request"),
-        )
-        .await
-        .expect("request");
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 /// The listing filters by member and by agent, and a row carries who took
@@ -613,7 +592,7 @@ async fn write_brain(state: &AppState, session: &sessions::Session) -> i64 {
 #[tokio::test]
 async fn a_session_detail_carries_its_size_events_and_last_line() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     let brain_bytes = write_brain(&state, &session).await;
@@ -624,7 +603,7 @@ async fn a_session_detail_carries_its_size_events_and_last_line() {
         agent_hub::store::events::append(
             &state.db,
             0,
-            "agent-one",
+            &common::seed::writer("agent-one"),
             None,
             agent_hub::store::events::NewEvent {
                 project_id: "proj".to_string(),
@@ -642,7 +621,7 @@ async fn a_session_detail_carries_its_size_events_and_last_line() {
     agent_hub::store::events::append(
         &state.db,
         0,
-        "agent-two",
+        &common::seed::writer("agent-two"),
         None,
         agent_hub::store::events::NewEvent {
             project_id: "proj".to_string(),
@@ -670,7 +649,7 @@ async fn a_session_detail_carries_its_size_events_and_last_line() {
     let body = json_body(response).await;
 
     assert_eq!(body["id"], session.id.as_str());
-    assert_eq!(body["agent"], "agent-one");
+    assert_eq!(body["started_label"], "agent-one");
     assert_eq!(body["created_at"], session.created_at.as_str());
     assert_eq!(body["brain_bytes"], brain_bytes);
     assert_eq!(
@@ -690,7 +669,7 @@ async fn a_session_detail_carries_its_size_events_and_last_line() {
 #[tokio::test]
 async fn a_session_that_wrote_nothing_has_no_line_invented_for_it() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     // The lifecycle event the start wrote is the session's own, so the line is
@@ -723,10 +702,10 @@ async fn a_session_that_wrote_nothing_has_no_line_invented_for_it() {
 #[tokio::test]
 async fn a_pruned_session_has_no_detail() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&state.db, &session.id, "agent-one", None, None)
+    common::seed::end_session(&state.db, &session.id, "agent-one", None)
         .await
         .expect("end");
     agent_hub::store::prune::prune_session(&state.db, &session.id)
@@ -749,7 +728,7 @@ async fn a_pruned_session_has_no_detail() {
 #[tokio::test]
 async fn a_listing_row_carries_the_brain_size_the_prune_button_shows() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     let brain_bytes = write_brain(&state, &session).await;
@@ -773,7 +752,7 @@ async fn a_listing_row_carries_the_brain_size_the_prune_button_shows() {
 #[tokio::test]
 async fn ending_a_session_checkpoints_its_brain_log() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -854,7 +833,7 @@ async fn replay_unknown_session_is_not_found() {
 #[tokio::test]
 async fn replay_for_a_session_returns_its_audit() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
     let app = router(state.clone());
@@ -875,7 +854,7 @@ async fn replay_for_a_session_returns_its_audit() {
 #[tokio::test]
 async fn resume_with_no_anchor_returns_null_anchor_and_empty_events() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -897,14 +876,14 @@ async fn resume_with_no_anchor_returns_null_anchor_and_empty_events() {
 #[tokio::test]
 async fn resume_after_an_anchor_returns_anchor_and_later_events() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
     let source_id = agent_hub::store::events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         agent_hub::store::events::NewEvent {
             project_id: "proj".to_string(),
@@ -922,7 +901,7 @@ async fn resume_after_an_anchor_returns_anchor_and_later_events() {
     let anchor_id = agent_hub::store::events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         agent_hub::store::events::NewEvent {
             project_id: "proj".to_string(),
@@ -944,7 +923,7 @@ async fn resume_after_an_anchor_returns_anchor_and_later_events() {
     agent_hub::store::events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         agent_hub::store::events::NewEvent {
             project_id: "proj".to_string(),
@@ -981,14 +960,14 @@ async fn resume_after_an_anchor_returns_anchor_and_later_events() {
 #[tokio::test]
 async fn a_human_score_route_writes_a_score_citing_the_anchor() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
     let anchor_id = agent_hub::store::events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         agent_hub::store::events::NewEvent {
             project_id: "proj".to_string(),
@@ -1045,17 +1024,17 @@ async fn a_human_score_route_writes_a_score_citing_the_anchor() {
 #[tokio::test]
 async fn a_score_naming_an_anchor_from_another_session_is_refused() {
     let state = state().await;
-    let session_a = sessions::start(&state.db, "proj", "nightly-a", "agent-one")
+    let session_a = common::seed::start_session(&state.db, "proj", "nightly-a", "agent-one")
         .await
         .expect("start a");
-    let session_b = sessions::start(&state.db, "proj", "nightly-b", "agent-two")
+    let session_b = common::seed::start_session(&state.db, "proj", "nightly-b", "agent-two")
         .await
         .expect("start b");
 
     let anchor_b = agent_hub::store::events::append(
         &state.db,
         0,
-        "agent-two",
+        &common::seed::writer("agent-two"),
         None,
         agent_hub::store::events::NewEvent {
             project_id: "proj".to_string(),
@@ -1097,14 +1076,14 @@ async fn a_score_naming_an_anchor_from_another_session_is_refused() {
 #[tokio::test]
 async fn a_score_with_zero_or_blank_rationale_is_refused() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
     let anchor_id = agent_hub::store::events::append(
         &state.db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         agent_hub::store::events::NewEvent {
             project_id: "proj".to_string(),
@@ -1161,12 +1140,13 @@ async fn a_score_with_zero_or_blank_rationale_is_refused() {
 #[tokio::test]
 async fn a_score_with_an_agent_token_is_refused() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    let _ = agent_hub::store::identity::create_agent(&state.db, "worker", "Worker").await;
-    let issued = agent_hub::store::identity::issue_token(&state.db, "worker")
+    let _ = agent_hub::store::identity::create_member(&state.db, "worker", "Worker").await;
+    let issued = agent_hub::store::identity::issue_member_token(&state.db, "worker")
         .await
+        .map(|(issued, _)| issued)
         .expect("issue token");
     let bearer = format!("Bearer {}", issued.token);
 

@@ -13,6 +13,7 @@ use serde_json::json;
 
 use super::{Brain, KNOWLEDGE_FILE, Stamp, WriteFilter, WriteRecord, canonical_path};
 use crate::app::AppState;
+use crate::author::Writer;
 use crate::error::{Error, Result};
 use crate::okf::frontmatter::{PromoteParams, promote_frontmatter, review_frontmatter};
 use crate::okf::{LintFinding, extract_links, lint_page_write, parse_frontmatter};
@@ -127,7 +128,7 @@ pub fn no_page(path: &str) -> Error {
 pub async fn put(
     state: &AppState,
     project_id: &str,
-    actor: &str,
+    actor: &Writer,
     path: &str,
     content: &str,
     if_version: Option<&str>,
@@ -178,7 +179,7 @@ async fn page_write_turn(project_id: &str) -> tokio::sync::OwnedMutexGuard<()> {
 async fn page_written(
     state: &AppState,
     project_id: &str,
-    actor: &str,
+    actor: &Writer,
     path: &str,
     prev_actor: Option<&str>,
 ) {
@@ -187,7 +188,7 @@ async fn page_written(
             &state.db,
             project_id,
             path,
-            actor,
+            actor.actor(),
             prev_actor,
             prev_actor.is_none(),
         )
@@ -224,7 +225,7 @@ async fn page_written(
 pub async fn delete(
     state: &AppState,
     project_id: &str,
-    actor: &str,
+    actor: &Writer,
     session_id: Option<&str>,
     path: &str,
     if_version: Option<&str>,
@@ -239,7 +240,7 @@ pub async fn delete(
     };
     let stamp = Stamp {
         op: "kb.delete",
-        actor,
+        writer: actor,
         verifies: None,
     };
     let deleted = brain
@@ -327,7 +328,7 @@ pub async fn stamp_review(
         brain,
         project_id,
         REVIEW_OP,
-        HUMAN,
+        &Writer::human(),
         path,
         &reviewed,
         Some(expected),
@@ -336,7 +337,7 @@ pub async fn stamp_review(
     signal(
         state,
         project_id,
-        HUMAN,
+        &Writer::human(),
         None,
         format!("Reviewed knowledge base page {}", written.path),
         json!({
@@ -369,7 +370,7 @@ pub struct Promotion<'a> {
 pub async fn promote(
     state: &AppState,
     project_id: &str,
-    actor: &str,
+    actor: &Writer,
     promotion: &Promotion<'_>,
 ) -> Result<Written> {
     let to_path = page_path(promotion.to_path)?;
@@ -729,7 +730,7 @@ pub async fn read_version(
 pub async fn revert(
     state: &AppState,
     project_id: &str,
-    actor: &str,
+    actor: &Writer,
     session_id: Option<&str>,
     path: &str,
     version: &str,
@@ -829,7 +830,7 @@ pub async fn forget_history(
         events::append(
             &state.db,
             state.config.events_per_project.per_project,
-            HUMAN,
+            &Writer::human(),
             None,
             event,
         )
@@ -882,7 +883,7 @@ async fn store(
     brain: &Brain,
     project_id: &str,
     op: &str,
-    actor: &str,
+    actor: &Writer,
     path: String,
     content: &str,
     if_version: Option<&str>,
@@ -894,7 +895,7 @@ async fn store(
             if_version,
             Stamp {
                 op,
-                actor,
+                writer: actor,
                 verifies: Some(brings_in_newest_verification),
             },
             async || Ok(()),
@@ -912,7 +913,7 @@ async fn store_unless_same(
     brain: &Brain,
     project_id: &str,
     op: &str,
-    actor: &str,
+    actor: &Writer,
     path: String,
     content: &str,
     if_version: Option<&str>,
@@ -924,7 +925,7 @@ async fn store_unless_same(
             if_version,
             Stamp {
                 op,
-                actor,
+                writer: actor,
                 verifies: Some(brings_in_newest_verification),
             },
             async || Ok(()),
@@ -1086,7 +1087,7 @@ fn doc_id(project_id: &str, path: &str) -> String {
 async fn signal(
     state: &AppState,
     project_id: &str,
-    actor: &str,
+    actor: &Writer,
     session_id: Option<&str>,
     summary: String,
     payload: serde_json::Value,
@@ -1183,7 +1184,15 @@ mod tests {
 
         let payload = json!({"action": "kb_written", "store": "project", "path": "/fs/a.md"});
         let summary = "Knowledge base page /fs/a.md written".to_string();
-        signal(&state, "proj", "human", None, summary, payload.clone()).await;
+        signal(
+            &state,
+            "proj",
+            &Writer::human(),
+            None,
+            summary,
+            payload.clone(),
+        )
+        .await;
         assert_eq!(stored().await, 1);
         assert!(
             ticks.try_recv().is_ok(),
@@ -1192,7 +1201,7 @@ mod tests {
         assert!(ticks.try_recv().is_err(), "and by one only");
 
         let too_long = "x".repeat(crate::limits::EVENT_SUMMARY_CHARS_MAX + 1);
-        signal(&state, "proj", "human", None, too_long, payload).await;
+        signal(&state, "proj", &Writer::human(), None, too_long, payload).await;
         assert_eq!(stored().await, 1, "the feed refused the second event");
         assert!(
             ticks.try_recv().is_err(),

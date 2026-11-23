@@ -12,12 +12,15 @@ use common::temp::TempDir;
 async fn open(dir: &std::path::Path) -> turso::Database {
     let db = common::store::open(dir).await;
     let _ = projects::create(&db, "proj", "Default Project").await;
+    for id in ["sess-1", "sess-2"] {
+        common::seed::session_with_id(&db, "proj", id).await;
+    }
     db
 }
 
 fn public<'a>(title: &'a str, content: &'a [u8]) -> NewArtifact<'a> {
     NewArtifact {
-        actor: "agent-one",
+        writer: common::seed::lasting_writer("agent-one"),
         project_id: "proj",
         title,
         description: "",
@@ -49,7 +52,7 @@ async fn a_draft_forks_one_version_and_leaves_the_current_one_alone() {
     let drafted = artifacts::draft(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"# Notes\n\nsecond",
         EnvelopeUpdate::Keep,
@@ -87,7 +90,7 @@ async fn later_drafts_rewrite_the_same_version() {
         let drafted = artifacts::draft(
             &db,
             &dir,
-            "agent-one",
+            &common::seed::writer("agent-one"),
             &artifact.id,
             content,
             EnvelopeUpdate::Keep,
@@ -125,7 +128,7 @@ async fn publishing_seals_the_live_version_in_place() {
     artifacts::draft(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"two",
         EnvelopeUpdate::Keep,
@@ -137,7 +140,7 @@ async fn publishing_seals_the_live_version_in_place() {
     let sealed = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"final",
         EnvelopeUpdate::Keep,
@@ -183,7 +186,7 @@ async fn a_second_session_conflicts_unless_forced() {
     artifacts::draft(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"two",
         EnvelopeUpdate::Keep,
@@ -195,7 +198,7 @@ async fn a_second_session_conflicts_unless_forced() {
     let refused = artifacts::draft(
         &db,
         &dir,
-        "agent-two",
+        &common::seed::writer("agent-two"),
         &artifact.id,
         b"two",
         EnvelopeUpdate::Keep,
@@ -208,7 +211,7 @@ async fn a_second_session_conflicts_unless_forced() {
     let taken = artifacts::draft(
         &db,
         &dir,
-        "agent-two",
+        &common::seed::writer("agent-two"),
         &artifact.id,
         b"two",
         EnvelopeUpdate::Keep,
@@ -242,7 +245,7 @@ async fn an_idle_pointer_is_cleared_by_the_sweep() {
     artifacts::draft(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"two",
         EnvelopeUpdate::Keep,
@@ -286,7 +289,7 @@ async fn a_version_can_be_written_again_after_the_sweep_clears_it() {
     artifacts::draft(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"two",
         EnvelopeUpdate::Keep,
@@ -303,7 +306,7 @@ async fn a_version_can_be_written_again_after_the_sweep_clears_it() {
     let again = artifacts::draft(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"three",
         EnvelopeUpdate::Keep,
@@ -323,7 +326,7 @@ async fn a_version_can_be_written_again_after_the_sweep_clears_it() {
     let sealed = artifacts::update(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"final",
         EnvelopeUpdate::Keep,
@@ -352,7 +355,7 @@ async fn sealing_another_sessions_live_version_conflicts() {
     artifacts::draft(
         &db,
         &dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &artifact.id,
         b"two",
         EnvelopeUpdate::Keep,
@@ -364,7 +367,7 @@ async fn sealing_another_sessions_live_version_conflicts() {
     let refused = artifacts::update(
         &db,
         &dir,
-        "agent-two",
+        &common::seed::writer("agent-two"),
         &artifact.id,
         b"two",
         EnvelopeUpdate::Keep,
@@ -381,7 +384,7 @@ async fn sealing_another_sessions_live_version_conflicts() {
     let forced = artifacts::update(
         &db,
         &dir,
-        "agent-two",
+        &common::seed::writer("agent-two"),
         &artifact.id,
         b"two",
         EnvelopeUpdate::Keep,

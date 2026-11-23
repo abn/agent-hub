@@ -54,7 +54,7 @@ async fn post_approval(
         db,
         &InboxCaps::disabled(),
         0,
-        AGENT,
+        &common::seed::writer(AGENT),
         None,
         approval(summary),
         Some(&deadline),
@@ -69,7 +69,7 @@ async fn post_question(db: &turso::Database, subject: &str, deadline: Deadline) 
         &InboxCaps::disabled(),
         0,
         NewQuestion {
-            actor: AGENT,
+            writer: &common::seed::writer(AGENT),
             project_id: PROJECT,
             subject,
             body: None,
@@ -183,9 +183,17 @@ async fn a_human_decision_before_the_deadline_wins() {
     let now = OffsetDateTime::now_utc();
     let id = post_approval(&db, "ship the release", HOUR, Some("approve"), now).await;
 
-    questions::decide(&db, 0, "human", &id, false, Some("not today"), None)
-        .await
-        .expect("the human decides in time");
+    questions::decide(
+        &db,
+        0,
+        &common::seed::writer("human"),
+        &id,
+        false,
+        Some("not today"),
+        None,
+    )
+    .await
+    .expect("the human decides in time");
     assert_eq!(
         questions::expire_due(&db, now + Duration::hours(2))
             .await
@@ -210,7 +218,7 @@ async fn an_answer_before_the_deadline_wins() {
         .expect("asked for");
     let id = post_question(&db, "Which region?", deadline).await;
 
-    questions::answer(&db, 0, "human", &id, "eu-west", None)
+    questions::answer(&db, 0, &common::seed::writer("human"), &id, "eu-west", None)
         .await
         .expect("answered in time");
     questions::expire_due(&db, now + Duration::hours(2))
@@ -235,7 +243,7 @@ async fn a_decision_after_the_deadline_is_refused() {
         &db,
         &InboxCaps::disabled(),
         0,
-        AGENT,
+        &common::seed::writer(AGENT),
         None,
         approval("late call"),
         Some(&past),
@@ -243,9 +251,17 @@ async fn a_decision_after_the_deadline_is_refused() {
     .await
     .expect("post approval");
 
-    let late = questions::decide(&db, 0, "human", &id, true, None, None)
-        .await
-        .expect_err("the deadline has passed");
+    let late = questions::decide(
+        &db,
+        0,
+        &common::seed::writer("human"),
+        &id,
+        true,
+        None,
+        None,
+    )
+    .await
+    .expect_err("the deadline has passed");
     assert_eq!(late.code(), ErrorCode::Conflict);
     assert_eq!(answers_on(&db, &id).await, 0, "the refusal writes nothing");
 
@@ -264,7 +280,15 @@ async fn a_decision_and_the_sweep_racing_resolve_the_item_once() {
     let id = post_approval(&db, "race", HOUR, Some("approve"), now).await;
 
     let (decided, swept) = tokio::join!(
-        questions::decide(&db, 0, "human", &id, false, None, None),
+        questions::decide(
+            &db,
+            0,
+            common::seed::lasting_writer("human"),
+            &id,
+            false,
+            None,
+            None
+        ),
         questions::expire_due(&db, now + Duration::hours(2)),
     );
     let swept = swept.expect("the sweep runs");
@@ -432,7 +456,7 @@ async fn one_settle_drains_more_due_items_than_one_batch() {
 #[tokio::test]
 async fn no_agent_can_take_the_hub_as_its_name() {
     let db = open("deadline-reserved").await;
-    let refused = agent_hub::store::identity::create_agent(&db, HUB_ACTOR, "Impostor")
+    let refused = agent_hub::store::identity::create_member(&db, HUB_ACTOR, "Impostor")
         .await
         .expect_err("the hub's name is reserved");
     assert_eq!(refused.code(), ErrorCode::InvalidArgument);
@@ -447,11 +471,12 @@ async fn an_agent_upgraded_under_the_hubs_name_loses_its_token() {
     // now is to write it under the store, as an older binary could have.
     let token = {
         let db = common::store::open(dir.path()).await;
-        identity::create_agent(&db, "legacy", "Legacy")
+        identity::create_member(&db, "legacy", "Legacy")
             .await
             .expect("create agent");
-        let issued = identity::issue_token(&db, "legacy")
+        let issued = identity::issue_member_token(&db, "legacy")
             .await
+            .map(|(issued, _)| issued)
             .expect("issue token");
         let conn = db.connect().expect("connect");
         conn.execute_batch(
@@ -461,9 +486,7 @@ async fn an_agent_upgraded_under_the_hubs_name_loses_its_token() {
         .await
         .expect("rename the agent to hub");
         assert_eq!(
-            identity::resolve_token(&db, &identity::hash_token(&issued.token))
-                .await
-                .expect("resolve"),
+            common::seed::live_token(&db, &identity::hash_token(&issued.token)).await,
             Some((HUB_ACTOR.to_string(), "active".to_string())),
             "the older store's agent signs as the hub"
         );
@@ -474,19 +497,18 @@ async fn an_agent_upgraded_under_the_hubs_name_loses_its_token() {
         .await
         .expect("the hub opens the upgraded store");
     assert_eq!(
-        identity::resolve_token(&state.db, &identity::hash_token(&token))
-            .await
-            .expect("resolve"),
+        common::seed::live_token(&state.db, &identity::hash_token(&token)).await,
         None,
         "no live token signs as the hub"
     );
-    let agent = identity::get_agent(&state.db, HUB_ACTOR)
+    let agent = identity::get_member(&state.db, HUB_ACTOR)
         .await
         .expect("get agent")
         .expect("the agent and its history stay");
     assert!(!agent.has_live_token);
-    let refused = identity::issue_token(&state.db, HUB_ACTOR)
+    let refused = identity::issue_member_token(&state.db, HUB_ACTOR)
         .await
+        .map(|(issued, _)| issued)
         .expect_err("the reserved name is given no new token");
     assert_eq!(refused.code(), ErrorCode::InvalidArgument);
 }
@@ -514,11 +536,12 @@ async fn the_reserved_name_revoke_sorts_after_every_id_the_store_holds() {
         agent_hub::store::projects::create(&db, PROJECT, "Project")
             .await
             .expect("create project");
-        identity::create_agent(&db, "legacy", "Legacy")
+        identity::create_member(&db, "legacy", "Legacy")
             .await
             .expect("create agent");
-        identity::issue_token(&db, "legacy")
+        identity::issue_member_token(&db, "legacy")
             .await
+            .map(|(issued, _)| issued)
             .expect("issue token");
         let conn = db.connect().expect("connect");
         conn.execute_batch(

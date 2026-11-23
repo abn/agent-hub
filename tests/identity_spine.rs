@@ -41,9 +41,9 @@ fn require_admin_accepts_only_the_admin_token() {
     let auth = Auth::from_config(&config());
 
     let admin = auth.require_admin(Some(ADMIN_TOKEN)).expect("admin");
-    assert_eq!(admin.actor, "human");
-    assert!(admin.is_admin);
-    assert!(admin.agent_id.is_none());
+    assert_eq!(admin.writer(None).actor(), "human");
+    assert!(admin.is_admin());
+    assert!(admin.member().is_none());
 
     let denied = auth
         .require_admin(Some("not-the-admin-token"))
@@ -63,7 +63,7 @@ fn local_stdio_is_the_local_administrator() {
     assert!(local.is_admin(), "stdio is the operator's local bridge");
     assert_eq!(local.member(), Some("local"));
     assert_eq!(local.kind(), AuthorKind::Local);
-    assert_eq!(local.actor, "local");
+    assert_eq!(local.writer(None).actor(), "local");
 }
 
 #[tokio::test]

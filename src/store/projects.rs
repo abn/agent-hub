@@ -14,23 +14,19 @@ use crate::error::{Error, Result};
 pub struct Project {
     pub id: String,
     pub display_name: String,
-    /// The member whose personal space this is. Kept under its old name until
-    /// every reader takes `owner_member`.
-    pub owner_agent: Option<String>,
+    /// The member whose personal space this is.
     pub owner_member: Option<String>,
-    /// Whether this is an agent's personal space rather than an ordinary
-    /// project. An agent sees every other agent's space in its listing, so it
-    /// needs to tell them apart to label or filter them, and `owner_agent`
+    /// Whether this is a member's personal space rather than an ordinary
+    /// project. A member sees every other member's space in its listing, so it
+    /// needs to tell them apart to label or filter them, and `owner_member`
     /// alone would have it infer that from the id prefix.
     pub is_personal: bool,
     pub created_at: String,
     /// Feed events newer than the human's last-seen cursor on this project.
     pub unseen_events: i64,
-    /// Distinct agents with a live session here. Carried on the listing so a
-    /// screen showing many projects learns it once, not once per project on
-    /// every navigation.
-    pub agents_active: i64,
     /// Live sessions here: active, with a participant seen inside the window.
+    /// Carried on the listing so a screen showing many projects learns it
+    /// once, not once per project on every navigation.
     pub sessions_live: i64,
     /// Whether the project is confidential and hidden without a grant.
     pub confidential: bool,
@@ -66,7 +62,6 @@ pub async fn list(db: &Database, active_since: &str) -> Result<Vec<Project>> {
 
     // One grouped count for the whole listing rather than one per project.
     let unseen = crate::store::events::unseen_counts(db).await?;
-    let live = crate::store::sessions::agents_active_by_project(db, active_since).await?;
     let sessions_live = crate::store::sessions::live_by_project(db, active_since).await?;
     for project in &mut projects {
         project.sessions_live = sessions_live
@@ -77,10 +72,6 @@ pub async fn list(db: &Database, active_since: &str) -> Result<Vec<Project>> {
             .iter()
             .find(|row| row.project_id == project.id)
             .map_or(0, |row| row.events);
-        project.agents_active = live
-            .iter()
-            .find(|(id, _)| id == &project.id)
-            .map_or(0, |(_, count)| *count);
     }
     Ok(projects)
 }
@@ -218,12 +209,10 @@ pub async fn create_with_confidential(
     Ok(Project {
         id: id.to_string(),
         display_name: display_name.to_string(),
-        owner_agent: None,
         owner_member: None,
         is_personal: false,
         created_at,
         unseen_events: 0,
-        agents_active: 0,
         sessions_live: 0,
         confidential,
         status: "active".to_string(),
@@ -284,13 +273,13 @@ pub async fn update(db: &Database, id: &str, changes: ProjectChanges<'_>) -> Res
 
 /// Insert a project inside a caller's transaction.
 ///
-/// `owner_agent` is set when the project is an agent's personal space, so the
+/// `owner_member` is set when the project is a member's personal space, so the
 /// agent row and its space can be written as one unit.
 pub(crate) async fn insert_owned(
     tx: &crate::store::WriteTx,
     id: &str,
     display_name: &str,
-    owner_agent: Option<&str>,
+    owner_member: Option<&str>,
     created_at: &str,
     confidential: bool,
 ) -> Result<()> {
@@ -300,7 +289,7 @@ pub(crate) async fn insert_owned(
         vec![
             Value::Text(id.to_string()),
             Value::Text(display_name.to_string()),
-            owner_agent.map_or(Value::Null, |agent| Value::Text(agent.to_string())),
+            owner_member.map_or(Value::Null, |member| Value::Text(member.to_string())),
             Value::Text(created_at.to_string()),
             Value::Integer(if confidential { 1 } else { 0 }),
         ],
@@ -321,14 +310,10 @@ pub struct ProjectStats {
     pub sessions: i64,
     /// Pages in the project knowledge base.
     pub kb_pages: i64,
-    /// Agents with a session in this project touched inside the active window.
-    pub agents_active: i64,
     /// Live sessions: active, with a participant seen inside the window.
     pub sessions_live: i64,
     /// Distinct non-null threads across events in this project.
     pub threads: i64,
-    /// Distinct non-null actors across events in this project.
-    pub agents_written: i64,
     /// Distinct members that wrote events in this project.
     pub members_written: i64,
     /// Total bytes on disk for this project (artifacts, session brains, knowledge base).
@@ -415,14 +400,9 @@ pub async fn stats(
         // write and its row goes on delete, so this needs no walk of the file.
         kb_pages: count("SELECT COUNT(*) FROM search_docs WHERE project_id = ?1 AND type = 'kb'")
             .await?,
-        agents_active: crate::store::sessions::agents_active(db, active_since, Some(id)).await?,
         sessions_live: crate::store::sessions::live_count(db, active_since, Some(id)).await?,
         threads: count(
             "SELECT COUNT(DISTINCT thread_id) FROM events WHERE project_id = ?1 AND thread_id IS NOT NULL",
-        )
-        .await?,
-        agents_written: count(
-            "SELECT COUNT(DISTINCT actor) FROM events WHERE project_id = ?1 AND actor IS NOT NULL",
         )
         .await?,
         members_written: count(
@@ -480,7 +460,7 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
         )
         .await
         .map_err(engine)?;
-    let (owner_agent, status) = match rows.next().await.map_err(engine)? {
+    let (owner_member, status) = match rows.next().await.map_err(engine)? {
         Some(row) => {
             let owner: Option<String> = match row.get_value(0).map_err(engine)? {
                 Value::Text(s) => Some(s),
@@ -494,7 +474,7 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
         }
         None => return Err(Error::NotFound(format!("project {id} not found"))),
     };
-    if owner_agent.is_some() {
+    if owner_member.is_some() {
         return Err(Error::Conflict(format!(
             "project {id} is an agent's personal space"
         )));
@@ -752,7 +732,7 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
             ))),
         }
     };
-    let owner_agent = match row.get_value(2).map_err(engine)? {
+    let owner_member = match row.get_value(2).map_err(engine)? {
         Value::Text(value) => Some(value),
         _ => None,
     };
@@ -769,14 +749,12 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
         display_name: text(1)?,
         // The one thing that makes a project an agent's personal space is that
         // an agent owns it, so the marker is read rather than kept beside it.
-        is_personal: owner_agent.is_some(),
-        owner_member: owner_agent.clone(),
-        owner_agent,
+        is_personal: owner_member.is_some(),
+        owner_member,
         created_at: text(3)?,
         // Filled by the caller, which counts every project it returns in one
         // query rather than one query per row.
         unseen_events: 0,
-        agents_active: 0,
         sessions_live: 0,
         confidential,
         status,

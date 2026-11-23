@@ -43,7 +43,8 @@ async fn add_and_list_a_comment_on_a_page() {
     let comment = &posted["comment"];
     let comment_id = comment["id"].as_str().expect("comment id").to_string();
     assert_eq!(comment["body"], "Looks good");
-    assert_eq!(comment["author"], "human");
+    assert_eq!(comment["actor"], "human");
+    assert_eq!(comment["author"]["kind"], "human");
     assert_eq!(comment["done"], false);
     assert_eq!(comment["path"], "/fs/notes/todo.md");
 
@@ -227,7 +228,7 @@ async fn a_page_comment_appends_a_comment_event_naming_the_pages_writer() {
     agent_hub::brain::knowledge::put(
         &state,
         "proj",
-        "agent-writer",
+        &common::seed::writer("agent-writer"),
         "/fs/notes/todo.md",
         "# Todo\n",
         None,
@@ -255,38 +256,8 @@ async fn a_page_comment_appends_a_comment_event_naming_the_pages_writer() {
     assert_eq!(payload["target"], "page");
     assert_eq!(payload["path"], "/fs/notes/todo.md");
     assert_eq!(payload["author"], "human");
-    assert_eq!(payload["audience"], json!(["agent-writer"]));
-}
-
-#[tokio::test]
-async fn a_page_comment_event_carries_the_stored_author() {
-    let state = state().await;
-    let response = router(state.clone())
-        .oneshot(request(
-            "POST",
-            "/api/v1/projects/proj/kb/comments",
-            Some(ADMIN),
-            Some(json!({ "path": "notes/todo.md", "body": "Hi", "author": "  agent-x  " })),
-        ))
-        .await
-        .expect("request");
-    assert_eq!(response.status(), StatusCode::CREATED);
-    assert_eq!(json_body(response).await["comment"]["author"], "agent-x");
-
-    let page = agent_hub::store::events::read_feed(
-        &state.db,
-        "proj",
-        &agent_hub::store::events::FeedQuery {
-            kinds: Some(vec!["comment".to_string()]),
-            ..Default::default()
-        },
-    )
-    .await
-    .expect("read the feed");
-    assert_eq!(page.events.len(), 1);
-    assert_eq!(page.events[0].actor, "agent-x");
     assert_eq!(
-        page.events[0].payload.as_ref().expect("payload")["author"],
-        "agent-x"
+        payload["audience"],
+        json!({"sessions": [], "participants": [{"member": "agent-writer", "agent": "cli"}], "labels": []})
     );
 }

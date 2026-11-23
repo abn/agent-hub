@@ -6,7 +6,6 @@ use agent_hub::http::problem::Problem;
 use agent_hub::http::router;
 use agent_hub::store::artifacts::{self, EnvelopeUpdate, NewArtifact, UpdateOptions};
 use agent_hub::store::comments;
-use agent_hub::store::sessions;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use serde_json::{Value, json};
@@ -88,7 +87,7 @@ async fn publish_public(state: &AppState, project_id: &str, title: &str, content
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id,
             title,
             kind: "html",
@@ -115,7 +114,7 @@ async fn publish_protected(
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id,
             title,
             kind: "html",
@@ -306,7 +305,7 @@ async fn host_inlines_rendered_markdown_safely() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Notes",
             kind: "markdown",
@@ -363,7 +362,7 @@ async fn host_leaves_the_mermaid_runtime_to_the_frame() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Diagram",
             kind: "markdown",
@@ -398,7 +397,7 @@ async fn host_shows_the_title_for_markdown_without_a_heading() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Bare note",
             kind: "markdown",
@@ -537,7 +536,7 @@ async fn the_viewer_page_carries_its_rules_and_nothing_authored_reaches_the_styl
             &state.db,
             &state.data_dir,
             NewArtifact {
-                actor: "agent-one",
+                writer: &common::seed::writer("agent-one"),
                 project_id: "proj",
                 title: STYLE_BREAKOUT,
                 kind,
@@ -618,7 +617,7 @@ async fn host_escapes_authored_metadata_and_envelopes() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Report",
             kind: "html",
@@ -673,7 +672,7 @@ async fn host_escapes_authored_metadata_and_envelopes() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Sealed",
             kind: "html",
@@ -898,10 +897,10 @@ async fn host_serves_the_locked_shell_for_a_protected_artifact() {
 #[tokio::test]
 async fn pruning_a_session_returns_a_token_and_undo_restores_it() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
-    sessions::end(&state.db, &session.id, "human", None, None)
+    common::seed::end_session(&state.db, &session.id, "human", None)
         .await
         .expect("end");
     assert_eq!(list_sessions(&state).await.len(), 1);
@@ -952,7 +951,7 @@ async fn pruning_a_session_returns_a_token_and_undo_restores_it() {
 #[tokio::test]
 async fn pruning_requires_a_token() {
     let state = state().await;
-    let session = sessions::start(&state.db, "proj", "nightly", "agent-one")
+    let session = common::seed::start_session(&state.db, "proj", "nightly", "agent-one")
         .await
         .expect("start");
 
@@ -977,7 +976,7 @@ async fn publish_versioned(state: &AppState) -> String {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Report",
             kind: "html",
@@ -995,7 +994,7 @@ async fn publish_versioned(state: &AppState) -> String {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &id,
         b"<p>v2</p>",
         EnvelopeUpdate::Keep,
@@ -1413,7 +1412,7 @@ async fn version_picker_shows_index_with_comment_never_prose_alone() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Report",
             kind: "html",
@@ -1432,7 +1431,7 @@ async fn version_picker_shows_index_with_comment_never_prose_alone() {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &id,
         b"<p>v2</p>",
         EnvelopeUpdate::Keep,
@@ -1618,7 +1617,7 @@ async fn frame_refuses_markdown_with_invalid_argument() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Notes",
             kind: "markdown",
@@ -1714,7 +1713,7 @@ async fn og_card_is_a_static_svg_with_escaped_values() {
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Sales <Q3> & more",
             kind: "html",
@@ -1832,7 +1831,7 @@ async fn the_page_follows_each_version_of_a_mixed_history() {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &id,
         b"<p>in the clear</p>",
         EnvelopeUpdate::Clear,
@@ -1875,7 +1874,7 @@ async fn cleared_label_serves_null_over_rest() {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &id,
         b"<p>v2</p>",
         EnvelopeUpdate::Keep,
@@ -1894,7 +1893,7 @@ async fn cleared_label_serves_null_over_rest() {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &id,
         b"<p>v3</p>",
         EnvelopeUpdate::Keep,
@@ -1930,15 +1929,42 @@ async fn artifact_with_three_comments_and_one_done_reads_counts() {
     let state = state().await;
     let id = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
 
-    let (c1, _) = comments::add_comment(&state.db, &id, "human", "first", None, None, None, None)
-        .await
-        .expect("c1");
-    let (_c2, _) = comments::add_comment(&state.db, &id, "human", "second", None, None, None, None)
-        .await
-        .expect("c2");
-    let (_c3, _) = comments::add_comment(&state.db, &id, "human", "third", None, None, None, None)
-        .await
-        .expect("c3");
+    let (c1, _) = comments::add_comment(
+        &state.db,
+        &id,
+        &common::seed::writer("human"),
+        "first",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("c1");
+    let (_c2, _) = comments::add_comment(
+        &state.db,
+        &id,
+        &common::seed::writer("human"),
+        "second",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("c2");
+    let (_c3, _) = comments::add_comment(
+        &state.db,
+        &id,
+        &common::seed::writer("human"),
+        "third",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("c3");
 
     comments::set_comment_done(&state.db, &c1.id, true)
         .await
@@ -2028,7 +2054,7 @@ async fn comment_anchored_to_older_version_is_counted() {
     comments::add_comment(
         &state.db,
         &id,
-        "human",
+        &common::seed::writer("human"),
         "v1 note",
         None,
         Some(1),
@@ -2042,7 +2068,7 @@ async fn comment_anchored_to_older_version_is_counted() {
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         &id,
         b"<p>v2</p>",
         EnvelopeUpdate::Keep,
@@ -2105,10 +2131,18 @@ async fn deleted_comment_is_not_counted() {
     let state = state().await;
     let id = publish_public(&state, "proj", "Report", b"<p>body</p>").await;
 
-    let (c1, _) =
-        comments::add_comment(&state.db, &id, "human", "temporary", None, None, None, None)
-            .await
-            .expect("c1");
+    let (c1, _) = comments::add_comment(
+        &state.db,
+        &id,
+        &common::seed::writer("human"),
+        "temporary",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("c1");
     comments::delete_comment(&state.db, &c1.id)
         .await
         .expect("delete");
@@ -2152,17 +2186,44 @@ async fn listing_several_artifacts_gives_each_its_own_count() {
     let id_c = publish_public(&state, "proj", "Doc C", b"<p>C</p>").await;
 
     // Artifact A: 2 comments, 2 open
-    comments::add_comment(&state.db, &id_a, "human", "a1", None, None, None, None)
-        .await
-        .expect("a1");
-    comments::add_comment(&state.db, &id_a, "human", "a2", None, None, None, None)
-        .await
-        .expect("a2");
+    comments::add_comment(
+        &state.db,
+        &id_a,
+        &common::seed::writer("human"),
+        "a1",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("a1");
+    comments::add_comment(
+        &state.db,
+        &id_a,
+        &common::seed::writer("human"),
+        "a2",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("a2");
 
     // Artifact B: 1 comment, 1 done (0 open)
-    let (b1, _) = comments::add_comment(&state.db, &id_b, "human", "b1", None, None, None, None)
-        .await
-        .expect("b1");
+    let (b1, _) = comments::add_comment(
+        &state.db,
+        &id_b,
+        &common::seed::writer("human"),
+        "b1",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .expect("b1");
     comments::set_comment_done(&state.db, &b1.id, true)
         .await
         .expect("done");
@@ -2210,7 +2271,7 @@ async fn artifact_carries_creator_actor_on_listing_and_read_and_update_retains_i
         &state.db,
         &state.data_dir,
         NewArtifact {
-            actor: "agent-one",
+            writer: &common::seed::writer("agent-one"),
             project_id: "proj",
             title: "Actor Test",
             kind: "html",
@@ -2261,7 +2322,7 @@ async fn artifact_carries_creator_actor_on_listing_and_read_and_update_retains_i
     artifacts::update(
         &state.db,
         &state.data_dir,
-        "agent-two",
+        &common::seed::writer("agent-two"),
         &id,
         b"<p>updated</p>",
         EnvelopeUpdate::Keep,

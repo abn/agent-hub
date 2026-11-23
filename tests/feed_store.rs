@@ -31,12 +31,24 @@ fn event(summary: &str) -> NewEvent {
 #[tokio::test]
 async fn append_and_read_newest_first() {
     let db = open().await;
-    append(&db, 0, "agent-one", None, event("first"))
-        .await
-        .expect("append first");
-    append(&db, 0, "agent-one", None, event("second needle"))
-        .await
-        .expect("append second");
+    append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("first"),
+    )
+    .await
+    .expect("append first");
+    append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("second needle"),
+    )
+    .await
+    .expect("append second");
 
     let events = read_feed(&db, "proj", &FeedQuery::default())
         .await
@@ -51,12 +63,24 @@ async fn append_and_read_newest_first() {
 #[tokio::test]
 async fn idempotency_key_returns_the_same_event_once() {
     let db = open().await;
-    let first = append(&db, 0, "agent-one", Some("k1"), event("only once"))
-        .await
-        .expect("append");
-    let second = append(&db, 0, "agent-one", Some("k1"), event("only once"))
-        .await
-        .expect("append again");
+    let first = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        Some("k1"),
+        event("only once"),
+    )
+    .await
+    .expect("append");
+    let second = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        Some("k1"),
+        event("only once"),
+    )
+    .await
+    .expect("append again");
     assert_eq!(first, second);
 
     let events = read_feed(&db, "proj", &FeedQuery::default())
@@ -69,9 +93,13 @@ async fn idempotency_key_returns_the_same_event_once() {
 #[tokio::test]
 async fn since_cursor_reads_oldest_first() {
     let db = open().await;
-    let first = append(&db, 0, "a", None, event("one")).await.expect("one");
-    append(&db, 0, "a", None, event("two")).await.expect("two");
-    append(&db, 0, "a", None, event("three"))
+    let first = append(&db, 0, &common::seed::writer("a"), None, event("one"))
+        .await
+        .expect("one");
+    append(&db, 0, &common::seed::writer("a"), None, event("two"))
+        .await
+        .expect("two");
+    append(&db, 0, &common::seed::writer("a"), None, event("three"))
         .await
         .expect("three");
 
@@ -94,7 +122,7 @@ async fn a_default_feed_read_hides_the_audit_trail() {
     let db = open().await;
     let mut audit = event("agent created");
     audit.kind = "system".to_string();
-    append(&db, 0, "human", None, audit)
+    append(&db, 0, &common::seed::writer("human"), None, audit)
         .await
         .expect("append audit event");
 
@@ -113,7 +141,9 @@ async fn payload_over_the_cap_is_rejected() {
     let db = open().await;
     let mut big = event("big");
     big.payload = Some(serde_json::Value::String("x".repeat(300 * 1024)));
-    let err = append(&db, 0, "a", None, big).await.expect_err("too large");
+    let err = append(&db, 0, &common::seed::writer("a"), None, big)
+        .await
+        .expect_err("too large");
     assert_eq!(err.code(), ErrorCode::PayloadTooLarge);
 }
 
@@ -122,16 +152,24 @@ async fn unknown_kind_is_rejected() {
     let db = open().await;
     let mut bad = event("bad kind");
     bad.kind = "telepathy".to_string();
-    let err = append(&db, 0, "a", None, bad).await.expect_err("bad kind");
+    let err = append(&db, 0, &common::seed::writer("a"), None, bad)
+        .await
+        .expect_err("bad kind");
     assert_eq!(err.code(), ErrorCode::InvalidArgument);
 }
 
 #[tokio::test]
 async fn appended_event_is_searchable_through_the_corpus() {
     let db = open().await;
-    append(&db, 0, "a", None, event("the engine keeps session state"))
-        .await
-        .expect("append");
+    append(
+        &db,
+        0,
+        &common::seed::writer("a"),
+        None,
+        event("the engine keeps session state"),
+    )
+    .await
+    .expect("append");
 
     let conn = db.connect().expect("connect");
     let mut rows = conn
@@ -155,7 +193,9 @@ async fn appended_event_is_searchable_through_the_corpus() {
 #[tokio::test]
 async fn empty_forward_poll_keeps_the_since_cursor() {
     let db = open().await;
-    append(&db, 0, "a", None, event("one")).await.expect("one");
+    append(&db, 0, &common::seed::writer("a"), None, event("one"))
+        .await
+        .expect("one");
 
     let first_page = read_feed(&db, "proj", &FeedQuery::default())
         .await
@@ -180,9 +220,13 @@ async fn empty_forward_poll_keeps_the_since_cursor() {
 #[tokio::test]
 async fn before_cursor_pages_backwards_with_both_cursors() {
     let db = open().await;
-    append(&db, 0, "a", None, event("one")).await.expect("one");
-    append(&db, 0, "a", None, event("two")).await.expect("two");
-    let third = append(&db, 0, "a", None, event("three"))
+    append(&db, 0, &common::seed::writer("a"), None, event("one"))
+        .await
+        .expect("one");
+    append(&db, 0, &common::seed::writer("a"), None, event("two"))
+        .await
+        .expect("two");
+    let third = append(&db, 0, &common::seed::writer("a"), None, event("three"))
         .await
         .expect("three");
 
@@ -235,9 +279,15 @@ async fn forward_polling_a_burst_reaches_every_event() {
     let mut ids = Vec::with_capacity(BURST);
     for index in 0..BURST {
         ids.push(
-            append(&db, 0, "a", None, event(&format!("burst {index}")))
-                .await
-                .expect("append"),
+            append(
+                &db,
+                0,
+                &common::seed::writer("a"),
+                None,
+                event(&format!("burst {index}")),
+            )
+            .await
+            .expect("append"),
         );
     }
 
@@ -290,7 +340,7 @@ async fn concurrent_appends_keep_ids_in_commit_order() {
                     append(
                         &db,
                         0,
-                        "a",
+                        &common::seed::writer("a"),
                         None,
                         event(&format!("writer {writer} event {index}")),
                     )
@@ -353,17 +403,23 @@ async fn a_sessions_events_are_counted_over_its_own_column() {
         session_id: Some("sess-one".to_string()),
         ..event("written while the session ran")
     };
-    append(&db, 0, "agent-one", None, mine)
+    append(&db, 0, &common::seed::writer("agent-one"), None, mine)
         .await
         .expect("append");
-    append(&db, 0, "agent-one", None, event("someone else's work"))
-        .await
-        .expect("append");
+    append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("someone else's work"),
+    )
+    .await
+    .expect("append");
     let theirs = NewEvent {
         session_id: Some("sess-two".to_string()),
         ..event("another session's work")
     };
-    append(&db, 0, "agent-two", None, theirs)
+    append(&db, 0, &common::seed::writer("agent-two"), None, theirs)
         .await
         .expect("append");
 
@@ -400,15 +456,33 @@ fn event_in(project_id: &str, summary: &str) -> NewEvent {
 #[tokio::test]
 async fn the_feed_cursor_only_ever_moves_forward() {
     let db = open().await;
-    let first = append(&db, 0, "agent-one", None, event("first"))
-        .await
-        .expect("append");
-    let second = append(&db, 0, "agent-one", None, event("second"))
-        .await
-        .expect("append");
-    let third = append(&db, 0, "agent-one", None, event("third"))
-        .await
-        .expect("append");
+    let first = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("first"),
+    )
+    .await
+    .expect("append");
+    let second = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("second"),
+    )
+    .await
+    .expect("append");
+    let third = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("third"),
+    )
+    .await
+    .expect("append");
 
     assert_eq!(
         events::last_seen(&db, "proj").await.expect("last seen"),
@@ -442,12 +516,24 @@ async fn the_feed_cursor_only_ever_moves_forward() {
 async fn the_cursor_ignores_an_event_from_elsewhere_or_from_nowhere() {
     let db = open().await;
     let _ = agent_hub::store::projects::create(&db, "other", "other").await;
-    let mine = append(&db, 0, "agent-one", None, event("mine"))
-        .await
-        .expect("append");
-    let theirs = append(&db, 0, "agent-one", None, event_in("other", "theirs"))
-        .await
-        .expect("append");
+    let mine = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("mine"),
+    )
+    .await
+    .expect("append");
+    let theirs = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event_in("other", "theirs"),
+    )
+    .await
+    .expect("append");
     events::mark_seen(&db, "proj", &mine)
         .await
         .expect("mark seen");
@@ -475,15 +561,33 @@ async fn the_unseen_count_follows_the_feed_and_the_cursor() {
     for id in ["proj", "other"] {
         let _ = agent_hub::store::projects::create(&db, id, id).await;
     }
-    append(&db, 0, "agent-one", None, event("first"))
-        .await
-        .expect("append");
-    let second = append(&db, 0, "agent-one", None, event("second"))
-        .await
-        .expect("append");
-    append(&db, 0, "agent-one", None, event_in("other", "elsewhere"))
-        .await
-        .expect("append");
+    append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("first"),
+    )
+    .await
+    .expect("append");
+    let second = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("second"),
+    )
+    .await
+    .expect("append");
+    append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event_in("other", "elsewhere"),
+    )
+    .await
+    .expect("append");
 
     assert_eq!(events::unseen_count(&db, "proj").await.expect("count"), 2);
 
@@ -492,9 +596,15 @@ async fn the_unseen_count_follows_the_feed_and_the_cursor() {
         .expect("mark seen");
     assert_eq!(events::unseen_count(&db, "proj").await.expect("count"), 0);
 
-    append(&db, 0, "agent-one", None, event("third"))
-        .await
-        .expect("append");
+    append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("third"),
+    )
+    .await
+    .expect("append");
     assert_eq!(
         events::unseen_count(&db, "proj").await.expect("count"),
         1,
@@ -555,14 +665,20 @@ async fn the_unseen_count_seeks_and_does_not_scan_the_feed() {
 #[tokio::test]
 async fn thread_id_must_name_an_existing_event_in_the_same_project() {
     let db = open().await;
-    let root_id = append(&db, 0, "agent-one", None, event("root event"))
-        .await
-        .expect("append root");
+    let root_id = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("root event"),
+    )
+    .await
+    .expect("append root");
 
     // Valid thread_id in the same project is accepted.
     let mut child = event("child event");
     child.thread_id = Some(root_id.clone());
-    let child_id = append(&db, 0, "agent-one", None, child)
+    let child_id = append(&db, 0, &common::seed::writer("agent-one"), None, child)
         .await
         .expect("append child with valid thread_id");
     assert!(!child_id.is_empty());
@@ -570,7 +686,7 @@ async fn thread_id_must_name_an_existing_event_in_the_same_project() {
     // Unknown thread_id is refused with NotFound.
     let mut unknown = event("unknown thread");
     unknown.thread_id = Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string());
-    let err = append(&db, 0, "agent-one", None, unknown)
+    let err = append(&db, 0, &common::seed::writer("agent-one"), None, unknown)
         .await
         .expect_err("unknown thread_id should be refused");
     assert_eq!(err.code(), ErrorCode::NotFound);
@@ -579,7 +695,7 @@ async fn thread_id_must_name_an_existing_event_in_the_same_project() {
     let mut cross = event("cross-project thread");
     cross.project_id = "other-proj".to_string();
     cross.thread_id = Some(root_id);
-    let err = append(&db, 0, "agent-one", None, cross)
+    let err = append(&db, 0, &common::seed::writer("agent-one"), None, cross)
         .await
         .expect_err("cross-project thread_id should be refused");
     assert_eq!(err.code(), ErrorCode::NotFound);
@@ -588,7 +704,7 @@ async fn thread_id_must_name_an_existing_event_in_the_same_project() {
     let mut orphan = event("orphan answer");
     orphan.kind = "answer".to_string();
     orphan.thread_id = None;
-    let err = append(&db, 0, "agent-one", None, orphan)
+    let err = append(&db, 0, &common::seed::writer("agent-one"), None, orphan)
         .await
         .expect_err("orphan answer should be rejected");
     assert_eq!(err.code(), ErrorCode::InvalidArgument);
@@ -597,12 +713,18 @@ async fn thread_id_must_name_an_existing_event_in_the_same_project() {
 #[tokio::test]
 async fn a_thread_id_must_name_a_thread_root() {
     let db = open().await;
-    let root_id = append(&db, 0, "agent-one", None, event("root event"))
-        .await
-        .expect("append root");
+    let root_id = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("root event"),
+    )
+    .await
+    .expect("append root");
     let mut child = event("child event");
     child.thread_id = Some(root_id.clone());
-    let child_id = append(&db, 0, "agent-one", None, child)
+    let child_id = append(&db, 0, &common::seed::writer("agent-one"), None, child)
         .await
         .expect("append child");
 
@@ -610,7 +732,7 @@ async fn a_thread_id_must_name_a_thread_root() {
     // the child's own: the feed reads a thread by one id.
     let mut grandchild = event("threaded onto a child");
     grandchild.thread_id = Some(child_id.clone());
-    let err = append(&db, 0, "agent-one", None, grandchild)
+    let err = append(&db, 0, &common::seed::writer("agent-one"), None, grandchild)
         .await
         .expect_err("a child is not a thread root");
     assert_eq!(err.code(), ErrorCode::InvalidArgument);
@@ -622,14 +744,20 @@ async fn a_thread_id_must_name_a_thread_root() {
     // A question roots its own thread, so it is a root like any other.
     let mut question = event("a question");
     question.kind = "question".to_string();
-    let question_id = append(&db, 0, "agent-one", None, question)
+    let question_id = append(&db, 0, &common::seed::writer("agent-one"), None, question)
         .await
         .expect("append question");
     let mut under_question = event("under the question");
     under_question.thread_id = Some(question_id);
-    append(&db, 0, "agent-one", None, under_question)
-        .await
-        .expect("a question is a thread root");
+    append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        under_question,
+    )
+    .await
+    .expect("a question is a thread root");
 
     let feed = read_feed(&db, "proj", &FeedQuery::default())
         .await
@@ -644,150 +772,171 @@ async fn a_thread_id_must_name_a_thread_root() {
 #[tokio::test]
 async fn a_decision_still_lands_on_an_approval_that_is_itself_threaded() {
     let db = open().await;
-    let root_id = append(&db, 0, "agent-one", None, event("root event"))
-        .await
-        .expect("append root");
+    let root_id = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("root event"),
+    )
+    .await
+    .expect("append root");
     let mut approval = event("may I deploy");
     approval.kind = "approval".to_string();
     approval.thread_id = Some(root_id);
-    let approval_id = append(&db, 0, "agent-one", None, approval)
+    let approval_id = append(&db, 0, &common::seed::writer("agent-one"), None, approval)
         .await
         .expect("append threaded approval");
 
-    agent_hub::store::questions::decide(&db, 0, "human", &approval_id, true, None, None)
-        .await
-        .expect("the decision names the approval it replies to, root or not");
+    agent_hub::store::questions::decide(
+        &db,
+        0,
+        &common::seed::writer("human"),
+        &approval_id,
+        true,
+        None,
+        None,
+    )
+    .await
+    .expect("the decision names the approval it replies to, root or not");
 }
 
 #[tokio::test]
 async fn a_replayed_write_is_returned_before_its_thread_is_checked() {
     let db = open().await;
-    let root_id = append(&db, 0, "agent-one", None, event("root event"))
-        .await
-        .expect("append root");
+    let root_id = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("root event"),
+    )
+    .await
+    .expect("append root");
     let mut child = event("child event");
     child.thread_id = Some(root_id.clone());
-    let first = append(&db, 0, "agent-one", Some("k-thread"), child)
-        .await
-        .expect("append child");
+    let first = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        Some("k-thread"),
+        child,
+    )
+    .await
+    .expect("append child");
 
     // The retry carries a thread that no longer resolves. The write was
     // accepted once, so the retry is answered with what the first call got.
     let mut retry = event("child event");
     retry.thread_id = Some("01ARZ3NDEKTSV4RRFFQ69G5FAV".to_string());
-    let second = append(&db, 0, "agent-one", Some("k-thread"), retry)
-        .await
-        .expect("a replay is not validated again");
+    let second = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        Some("k-thread"),
+        retry,
+    )
+    .await
+    .expect("a replay is not validated again");
     assert_eq!(first, second);
 
     let mut answer = event("reply event");
     answer.kind = "answer".to_string();
     answer.thread_id = Some(root_id);
-    let first_ans = append(&db, 0, "agent-one", Some("k-answer"), answer)
-        .await
-        .expect("append answer");
+    let first_ans = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        Some("k-answer"),
+        answer,
+    )
+    .await
+    .expect("append answer");
 
     let mut orphan = event("reply event");
     orphan.kind = "answer".to_string();
     orphan.thread_id = None;
-    let third = append(&db, 0, "agent-one", Some("k-answer"), orphan)
-        .await
-        .expect("a replay is not validated again");
+    let third = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        Some("k-answer"),
+        orphan,
+    )
+    .await
+    .expect("a replay is not validated again");
     assert_eq!(first_ans, third);
 }
 
 #[tokio::test]
-async fn agent_cursor_reads_and_advances_per_project_and_agent() {
+async fn a_feed_cursor_reads_and_advances_per_project_and_participant() {
     let db = open().await;
     let _ = agent_hub::store::projects::create(&db, "other", "Other Project").await;
 
-    let first = append(&db, 0, "agent-one", None, event("one"))
-        .await
-        .expect("one");
-    let second = append(&db, 0, "agent-one", None, event("two"))
-        .await
-        .expect("two");
-
-    // A fresh agent has no cursor in either project.
-    assert_eq!(
-        events::agent_cursor(&db, "proj", "agent-one")
-            .await
-            .expect("read cursor"),
-        None
-    );
-    assert_eq!(
-        events::agent_cursor(&db, "other", "agent-one")
-            .await
-            .expect("read cursor"),
-        None
-    );
-
-    // Advancing in one project does not move the other, and a second agent
-    // keeps its own position.
-    let seen = events::advance_agent_cursor(&db, "proj", "agent-one", &second)
-        .await
-        .expect("advance");
-    assert!(seen.advanced);
-    assert_eq!(
-        events::agent_cursor(&db, "proj", "agent-one")
-            .await
-            .expect("read cursor"),
-        Some(second.clone())
-    );
-    assert_eq!(
-        events::agent_cursor(&db, "proj", "agent-two")
-            .await
-            .expect("read cursor"),
-        None
-    );
-    assert_eq!(
-        events::agent_cursor(&db, "other", "agent-one")
-            .await
-            .expect("read cursor"),
-        None
-    );
-
-    // A backwards move is refused: the cursor never steps back over an event.
-    let stalled = events::advance_agent_cursor(&db, "proj", "agent-one", &first)
-        .await
-        .expect("advance backwards");
-    assert!(!stalled.advanced);
-    assert_eq!(
-        events::agent_cursor(&db, "proj", "agent-one")
-            .await
-            .expect("read cursor"),
-        Some(second)
-    );
-
-    // An id that is not an event of this project, and an empty id, move
-    // nothing and insert no row.
-    let other = append(
+    let first = append(
         &db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
-        NewEvent {
-            project_id: "other".to_string(),
-            ..event("elsewhere")
-        },
+        event("one"),
     )
     .await
-    .expect("append elsewhere");
-    let crossed = events::advance_agent_cursor(&db, "proj", "agent-one", &other)
-        .await
-        .expect("advance with a foreign event");
-    assert!(!crossed.advanced);
-    let empty = events::advance_agent_cursor(&db, "proj", "agent-three", "")
-        .await
-        .expect("advance with an empty id");
-    assert!(!empty.advanced);
-    assert_eq!(
-        events::agent_cursor(&db, "proj", "agent-three")
-            .await
-            .expect("read cursor"),
+    .expect("one");
+    let second = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
         None,
-        "an empty id must not create a cursor row"
+        event("two"),
+    )
+    .await
+    .expect("two");
+
+    let key = |member: &str, agent: &str| agent_hub::author::ParticipantKey {
+        member: member.to_string(),
+        agent: agent.to_string(),
+    };
+    let read = |project: &'static str, key: agent_hub::author::ParticipantKey| {
+        let db: turso::Database = (*db).clone();
+        async move {
+            events::feed_cursor(&db, project, &key)
+                .await
+                .expect("read cursor")
+        }
+    };
+
+    // A fresh participant has no cursor in either project.
+    assert_eq!(read("proj", key("agent-one", "cli")).await, None);
+    assert_eq!(read("other", key("agent-one", "cli")).await, None);
+
+    // Advancing in one project does not move the other, and another agent of
+    // the same member keeps its own position.
+    assert!(
+        events::advance_feed_cursor(&db, "proj", &key("agent-one", "cli"), None, &second)
+            .await
+            .expect("advance")
     );
+    assert_eq!(
+        read("proj", key("agent-one", "cli")).await,
+        Some(second.clone())
+    );
+    assert_eq!(read("proj", key("agent-one", "opencode")).await, None);
+    assert_eq!(read("other", key("agent-one", "cli")).await, None);
+
+    // A move from a position the cursor no longer holds is refused, so two
+    // reads of one page move it once.
+    assert!(
+        !events::advance_feed_cursor(&db, "proj", &key("agent-one", "cli"), None, &first)
+            .await
+            .expect("advance from a stale position")
+    );
+    // A backwards move from the right position moves nothing.
+    assert!(
+        events::advance_feed_cursor(&db, "proj", &key("agent-one", "cli"), Some(&second), &first,)
+            .await
+            .expect("advance backwards")
+    );
+    assert_eq!(read("proj", key("agent-one", "cli")).await, Some(second));
 }
 
 #[tokio::test]
@@ -796,12 +945,24 @@ async fn a_dismissal_hides_the_event_from_the_human_and_not_from_an_agent() {
     let _ = agent_hub::store::projects::create(&db, "other", "Other Project")
         .await
         .expect("create other");
-    let kept = append(&db, 0, "agent-one", None, event("kept"))
-        .await
-        .expect("append kept");
-    let gone = append(&db, 0, "agent-one", None, event("gone"))
-        .await
-        .expect("append gone");
+    let kept = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("kept"),
+    )
+    .await
+    .expect("append kept");
+    let gone = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("gone"),
+    )
+    .await
+    .expect("append gone");
 
     let dismissed = events::dismiss(&db, "proj", std::slice::from_ref(&gone))
         .await
@@ -844,7 +1005,7 @@ async fn a_dismissal_hides_the_event_from_the_human_and_not_from_an_agent() {
     let elsewhere = append(
         &db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "other".to_string(),
@@ -878,15 +1039,33 @@ async fn dismiss_read_takes_what_is_above_and_below_the_cursor_by_its_rule() {
     let nothing = events::dismiss_read(&db, "proj").await.expect("dismiss");
     assert_eq!(nothing.dismissed, 0);
 
-    let _first = append(&db, 0, "agent-one", None, event("one"))
-        .await
-        .expect("one");
-    let second = append(&db, 0, "agent-one", None, event("two"))
-        .await
-        .expect("two");
-    append(&db, 0, "agent-one", None, event("three"))
-        .await
-        .expect("three");
+    let _first = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("one"),
+    )
+    .await
+    .expect("one");
+    let second = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("two"),
+    )
+    .await
+    .expect("two");
+    append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("three"),
+    )
+    .await
+    .expect("three");
     events::mark_seen(&db, "proj", &second)
         .await
         .expect("mark seen");
@@ -915,7 +1094,7 @@ async fn dismiss_read_takes_what_is_above_and_below_the_cursor_by_its_rule() {
     let _audit = append(
         &db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             kind: "system".to_string(),
@@ -926,9 +1105,15 @@ async fn dismiss_read_takes_what_is_above_and_below_the_cursor_by_its_rule() {
     )
     .await
     .expect("append the audit event");
-    let third = append(&db, 0, "agent-one", None, event("four"))
-        .await
-        .expect("four");
+    let third = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("four"),
+    )
+    .await
+    .expect("four");
     events::mark_seen(&db, "proj", &third)
         .await
         .expect("mark seen again");
@@ -947,19 +1132,31 @@ async fn home_recent_and_the_unseen_count_leave_out_dismissed_events() {
     let _ = agent_hub::store::projects::create(&db, "other", "Other Project")
         .await
         .expect("create other");
-    let seen = append(&db, 0, "agent-one", None, event("seen"))
-        .await
-        .expect("append seen");
+    let seen = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("seen"),
+    )
+    .await
+    .expect("append seen");
     events::mark_seen(&db, "proj", &seen)
         .await
         .expect("mark seen");
-    let unseen = append(&db, 0, "agent-one", None, event("unseen"))
-        .await
-        .expect("append unseen");
+    let unseen = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("unseen"),
+    )
+    .await
+    .expect("append unseen");
     let elsewhere = append(
         &db,
         0,
-        "agent-one",
+        &common::seed::writer("agent-one"),
         None,
         NewEvent {
             project_id: "other".to_string(),
@@ -998,9 +1195,15 @@ async fn deleting_a_project_takes_its_dismissals_with_it() {
     let _ = agent_hub::store::projects::create(&db, "proj", "Doomed")
         .await
         .expect("create project");
-    let gone = append(&db, 0, "agent-one", None, event("gone"))
-        .await
-        .expect("append");
+    let gone = append(
+        &db,
+        0,
+        &common::seed::writer("agent-one"),
+        None,
+        event("gone"),
+    )
+    .await
+    .expect("append");
     events::dismiss(&db, "proj", std::slice::from_ref(&gone))
         .await
         .expect("dismiss");
