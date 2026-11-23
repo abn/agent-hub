@@ -74,3 +74,28 @@ jobs:
         with:
           tool: nextest
       - run: make test/shard N=${{ matrix.shard }} M=2
+
+  install:
+    name: Install script harness
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: make install/test
+
+  # Windows is gated: this job reports but does not fail the run, until the
+  # subset has proven stable on the runner. It runs the config tests, the
+  # process and service operations and one HTTP smoke test.
+  windows:
+    name: Windows subset
+    runs-on: windows-2025
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
+        with:
+          toolchain: 1.97.1
+          build-warnings: ""
+      - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2
+        with:
+          tool: nextest
+      - run: cargo nextest run --locked --lib --test hub_config --test cli_help --test daemon_ops --test ops_lifecycle --test http_storage

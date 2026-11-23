@@ -512,6 +512,7 @@ async fn a_second_backup_while_one_runs_is_a_conflict() {
     );
 }
 
+#[cfg(unix)]
 #[tokio::test]
 async fn a_backup_directory_that_resolves_into_the_data_directory_is_refused() {
     let outside = TempDir::new("online-link");

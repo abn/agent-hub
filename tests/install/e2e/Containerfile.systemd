@@ -1,0 +1,8 @@
+# A throwaway Linux host with systemd as PID 1, for the service e2e. It runs
+# rootless under podman; the root inside is the container's, never the host's.
+FROM registry.fedoraproject.org/fedora:43
+RUN dnf -y install --setopt=install_weak_deps=False \
+      systemd util-linux shadow-utils procps-ng curl python3 \
+    && dnf clean all
+STOPSIGNAL SIGRTMIN+3
+CMD ["/usr/lib/systemd/systemd"]

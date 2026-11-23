@@ -294,6 +294,7 @@ fn a_hub_page_with_a_broken_link_round_trips() {
     assert_eq!(get(&hub, "/fs/runbooks/deploy.md"), page);
 }
 
+#[cfg(unix)]
 #[test]
 fn an_export_refuses_to_write_through_a_link_out_of_the_folder() {
     let hub = Hub::start("kb-bundle-traversal");
@@ -313,6 +314,7 @@ fn an_export_refuses_to_write_through_a_link_out_of_the_folder() {
     assert!(!dir.join(MANIFEST).exists());
 }
 
+#[cfg(unix)]
 #[test]
 fn an_import_refuses_a_link_out_of_the_folder() {
     let (hub, dir) = exported("kb-bundle-import-link");

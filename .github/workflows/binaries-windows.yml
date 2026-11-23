@@ -1,0 +1,123 @@
+name: binaries-windows
+
+# Builds the x86_64 Windows archive, proves it installs and runs as a service,
+# then attests and publishes it. It is a workflow of its own, called by the
+# release workflow without anything waiting on it: a slow or failing Windows
+# run never holds back the Linux and macOS archives, the release smoke or the
+# image. install.ps1 answers a release with no Windows archive by pointing at
+# WSL, so a skipped publish is a supported state.
+#
+# Order matters. The zip and its checksum are packaged, installed through the
+# real install.ps1 into a Task Scheduler task, and only then attested and
+# uploaded, so an unproven zip is never published. If the upload itself fails,
+# whatever reached the release is removed again.
+
+"on":
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to build and attach to.
+        type: string
+        required: true
+      toolchain:
+        description: The Rust toolchain to build with.
+        type: string
+        default: 1.97.1
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to build and attach to.
+        type: string
+        required: true
+      toolchain:
+        description: The Rust toolchain to build with.
+        type: string
+        default: 1.97.1
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Build x86_64-pc-windows-msvc
+    runs-on: windows-2025
+    # Bounds how long a stuck Windows build can hold the release run's
+    # concurrency lock; the Unix archives never wait on it.
+    timeout-minutes: 45
+    continue-on-error: true
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      TARGET: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          target: x86_64-pc-windows-msvc
+          build-warnings: ""
+          cache-key: x86_64-pc-windows-msvc
+
+      - name: Build
+        shell: bash
+        run: cargo build --release --locked --target "$TARGET"
+
+      # release-please tags agent-hub-v1.2.0; the archive carries v1.2.0 alone.
+      # The layout is the one install.ps1 fetches: <name>.zip holding a leading
+      # <name> directory, and <name>.sha256 as "<hash>  <name>.zip".
+      - name: Package the zip and its checksum
+        id: pack
+        shell: bash
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          case "$TAG" in
+            agent-hub-v[0-9]*) ;;
+            *) printf 'tag %s is not agent-hub-vX.Y.Z\n' "$TAG" >&2; exit 1 ;;
+          esac
+          version=${TAG#agent-hub-}
+          name=agent-hub-$version-$TARGET
+          rel=target/tmp/win-release/$TAG
+          mkdir -p "$rel" "target/tmp/win-stage/$name"
+          cp "target/$TARGET/release/agent-hub.exe" LICENSE README.md "target/tmp/win-stage/$name/"
+          (cd target/tmp/win-stage && 7z a -tzip "../../../$rel/$name.zip" "$name" >/dev/null)
+          sum=$(sha256sum "$rel/$name.zip" | cut -d ' ' -f 1)
+          printf '%s  %s.zip\n' "$sum" "$name" > "$rel/$name.sha256"
+          {
+            printf 'dir=%s\n' "$rel"
+            printf 'zip=%s\n' "$rel/$name.zip"
+            printf 'sha=%s\n' "$rel/$name.sha256"
+          } >> "$GITHUB_OUTPUT"
+
+      # The zip that will be published, installed by the real script from a
+      # local server, then run as a service and removed.
+      - name: Install, run and remove the service from that zip
+        shell: powershell
+        env:
+          RELEASE_ROOT: target\tmp\win-release
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/install/e2e/windows.ps1 -ReleaseDir $env:RELEASE_ROOT -Bin "target\$env:TARGET\release\agent-hub.exe"
+
+      - name: Attest the archive
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ steps.pack.outputs.zip }}
+
+      - name: Publish the zip and its checksum
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          ZIP: ${{ steps.pack.outputs.zip }}
+          SHA: ${{ steps.pack.outputs.sha }}
+        run: |
+          if ! gh release upload "$TAG" "$SHA" "$ZIP" --clobber --repo "$GITHUB_REPOSITORY"; then
+            for f in "$SHA" "$ZIP"; do
+              gh release delete-asset "$TAG" "$(basename "$f")" --yes --repo "$GITHUB_REPOSITORY" || true
+            done
+            exit 1
+          fi

@@ -429,6 +429,7 @@ fn pre_compact_reads_only_the_last_quarter_megabyte_of_a_large_transcript() {
     assert_eq!(excerpt["last_prompt"], "near the end");
 }
 
+#[cfg(unix)]
 #[test]
 fn pre_compact_refuses_a_transcript_outside_the_harness_directory_or_not_a_plain_file() {
     let rig = Rig::start("hook-compact-refused");
@@ -697,6 +698,7 @@ fn settings_resolve_env_then_plugin_options_then_the_config_file_and_a_token_sta
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn an_argument_that_is_not_text_is_still_the_no_op() {
     use std::os::unix::ffi::OsStrExt;
@@ -746,6 +748,7 @@ fn a_prompt_after_a_failed_start_waits_before_asking_again() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn a_git_that_never_answers_is_killed_and_the_start_still_finishes() {
     let rig = Rig::start("hook-slow-git");

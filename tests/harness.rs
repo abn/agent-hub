@@ -123,6 +123,7 @@ fn a_directory_the_test_removed_itself_is_not_a_cleanup_failure() {
     drop(dir);
 }
 
+#[cfg(unix)]
 #[test]
 fn a_directory_that_cannot_be_removed_fails_the_test() {
     use std::os::unix::fs::PermissionsExt;
