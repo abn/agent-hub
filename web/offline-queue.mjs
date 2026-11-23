@@ -100,11 +100,12 @@ const LOCK = "offline-queue";
 const REPLAY_DEADLINE_MS = 15000;
 
 // Where Web Locks exist the replay is origin-wide, so two tabs cannot send the
-// same row; otherwise the per-tab chain is the guard.
+// same row; otherwise the per-tab chain is the guard. The lock settles with
+// what the replay settles with, a count.
 export function flushQueue() {
   const locked = () =>
     typeof navigator !== "undefined" && navigator.locks && typeof navigator.locks.request === "function"
-      ? navigator.locks.request(LOCK, replay)
+      ? navigator.locks.request(LOCK, replay).then((count) => count)
       : replay();
   const run = flushChain.then(locked, locked);
   flushChain = run.catch(() => 0);
