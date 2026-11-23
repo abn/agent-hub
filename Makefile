@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test plugins/sync plugins/antigravity-dist test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e plugins/check net/check serve/check gate gate/quick e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test plugins/sync plugins/antigravity-dist test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e plugins/check install/test net/check serve/check gate gate/quick e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -164,6 +164,9 @@ plugins/antigravity-dist: ## Build target/dist/agent-hub-antigravity-<version>.t
 	if command -v agy >/dev/null 2>&1; then agy plugin validate --strict "$(ANTIGRAVITY_STAGE)/agent-hub"; else echo 'plugins/antigravity-dist: agy not on PATH, skipping validate'; fi; \
 	tar -czf "$(ANTIGRAVITY_STAGE).tar.gz" -C "$(ANTIGRAVITY_STAGE)" agent-hub; \
 	echo "plugins/antigravity-dist: $(ANTIGRAVITY_STAGE).tar.gz"
+
+install/test: ## Test deploy/install.sh against a local release server
+	sh tests/install/run.sh
 
 net/check: ## Test the tailnet configuration path in a build without the feature
 	cargo test --no-default-features --test ops_lifecycle a_tailnet_key
