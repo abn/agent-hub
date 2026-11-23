@@ -831,7 +831,7 @@ mod shared {
             .filter(|won| **won)
             .count();
         assert_eq!(delivered, 1, "exactly one settle wins");
-        let peeked = notifications::peek(&db, &me, &session.id, 10, None)
+        let peeked = notifications::peek(&db, &me, &session.id, None, 10, None)
             .await
             .expect("peek");
         assert!(peeked.items.is_empty());

@@ -43,6 +43,7 @@ pub(crate) async fn read(
     state: &AppState,
     principal: &Principal,
     session: Option<&str>,
+    after: Option<&str>,
     consume: bool,
 ) -> crate::Result<Read> {
     let mut read = Read { pages: Vec::new() };
@@ -56,7 +57,7 @@ pub(crate) async fn read(
         let page = if consume {
             cursors::attention(&state.db, &key, scope_id, PAGE, visible.as_filter()).await?
         } else {
-            cursors::peek(&state.db, &key, scope_id, PAGE, visible.as_filter()).await?
+            cursors::peek(&state.db, &key, scope_id, after, PAGE, visible.as_filter()).await?
         };
         let mut entries: Vec<Entry> = page.items.iter().filter_map(entry).collect();
         entries.extend(page.events.iter().map(event_entry));

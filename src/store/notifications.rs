@@ -103,7 +103,7 @@ pub async fn attention(
     limit: i64,
     visible: Option<&[String]>,
 ) -> Result<Attention> {
-    select(db, key, session_id, limit, visible).await
+    select(db, key, session_id, None, limit, visible).await
 }
 
 /// Settle a delivered page. False when another call settled first, in which
@@ -188,15 +188,18 @@ pub async fn settle(db: &Database, settle: &Settle) -> Result<bool> {
     Ok(true)
 }
 
-/// The same page without consuming it, for `GET /api/v1/me/pending`.
+/// The same page without consuming it, for `GET /api/v1/me/pending`. With
+/// `after`, the page starts past that id when it is past the cursor, so a
+/// reader pages through what is waiting without moving anything.
 pub async fn peek(
     db: &Database,
     key: &crate::author::ParticipantKey,
     session_id: &str,
+    after: Option<&str>,
     limit: i64,
     visible: Option<&[String]>,
 ) -> Result<Attention> {
-    select(db, key, session_id, limit, visible).await
+    select(db, key, session_id, after, limit, visible).await
 }
 
 /// Select a page: the scope's backlog rows, then its items and addressed
@@ -205,12 +208,20 @@ async fn select(
     db: &Database,
     key: &ParticipantKey,
     session_id: &str,
+    after: Option<&str>,
     limit: i64,
     visible: Option<&[String]>,
 ) -> Result<Attention> {
     let limit = limit.clamp(1, crate::limits::FEED_LIMIT_MAX);
     let conn = super::connect(db)?;
     let from = key_cursor_on(&conn, key, session_id).await?;
+    // Where the read starts: the cursor, or a peek's `after` past it. The
+    // settle still names the cursor, so a page read this way moves nothing.
+    let start = match (from.as_deref(), after) {
+        (Some(cursor), Some(after)) if after > cursor => Some(after.to_string()),
+        (None, Some(after)) => Some(after.to_string()),
+        _ => from.clone(),
+    };
 
     let mut backlog = Vec::new();
     {
@@ -261,13 +272,13 @@ async fn select(
     } else {
         AskedIn::Session(session_id)
     };
-    let page = super::inbox::resolved_in(db, scope, from.as_deref(), limit, visible).await?;
+    let page = super::inbox::resolved_in(db, scope, start.as_deref(), limit, visible).await?;
 
     // Comment and page events that name the scope's session, or (sessionless)
     // this participant.
     let mut events = Vec::new();
     {
-        let floor = from.clone().unwrap_or_default();
+        let floor = start.clone().unwrap_or_default();
         let found = super::events::read_feed_scoped(
             db,
             None,
@@ -287,7 +298,11 @@ async fn select(
             } else {
                 audience.names(Some(session_id), None)
             };
-            let own = event.author.member.as_deref() == Some(key.member.as_str())
+            let member = match event.author.kind {
+                crate::author::AuthorKind::Local => Some(crate::author::LOCAL_MEMBER),
+                _ => event.author.member.as_deref(),
+            };
+            let own = member == Some(key.member.as_str())
                 && event.author.agent.as_deref() == Some(key.agent.as_str());
             if readable && named && !own {
                 events.push(event);
