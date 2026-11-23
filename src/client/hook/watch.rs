@@ -109,6 +109,7 @@ pub fn run_watch(args: &[String]) -> u8 {
             runtime.block_on(watch(
                 harness,
                 &input.harness_session_id,
+                input.cwd.as_deref().unwrap_or_default(),
                 deadline,
                 &process_env,
             ))
@@ -160,6 +161,7 @@ pub enum Outcome {
 pub async fn watch(
     harness: Harness,
     harness_session_id: &str,
+    cwd: &str,
     deadline: Instant,
     env: &dyn Fn(&str) -> Option<String>,
 ) -> Result<(Outcome, Option<WatcherLock>), String> {
@@ -174,7 +176,10 @@ pub async fn watch(
     if mode == WakeMode::Never {
         return Ok((Outcome::Quiet, None));
     }
-    let hub = Hub::new(super::hub::resolve_settings(harness, env)?, Some(deadline));
+    let hub = Hub::new(
+        super::hub::resolve_settings(harness, env, cwd)?,
+        Some(deadline),
+    );
     let Some(lock) = store.lock_watcher() else {
         return Ok((Outcome::Quiet, None));
     };

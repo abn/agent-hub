@@ -1,18 +1,21 @@
 {
-  "name": "resolve-session-harness-id-sanitized",
+  "name": "resolve-project-file-after-a-table-ignored",
   "input": {
-    "harness": "claude",
-    "harness_session_id": "a1b2 c3d4/e5f6\u00e97g8",
+    "agent": "claude-code",
+    "date": "2026-11-23",
     "cwd": "/work/agent-hub",
     "env": {},
     "git": {
       "is_repo": true,
       "top_level": "/work/agent-hub",
       "origin_url": "git@github.com:agync/agent-hub.git",
-      "branch": "main",
-      "detached": false
+      "branch": "feat/x",
+      "detached": false,
+      "linked_worktree": false
     },
-    "files": {},
+    "files": {
+      "/work/agent-hub/.agent-hub.toml": "[other]\nproject = \"pinned\"\n"
+    },
     "known_projects": [
       "agent-hub"
     ],
@@ -21,8 +24,8 @@
   "expected": {
     "project_id": "agent-hub",
     "project_source": "origin",
-    "session_name": "claude-a1b2c3d4",
-    "session_source": "harness_session",
+    "session_name": "feat-x",
+    "session_source": "branch",
     "context_line": null
   }
 }

@@ -10,9 +10,25 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use crate::common::hub::{ADMIN_TOKEN, AGENT, Hub, PROJECT};
+use crate::common::hub::{ADMIN_TOKEN, Hub, PROJECT};
 use crate::common::temp::TempDir;
 use crate::common::wire::rest;
+
+pub mod fake;
+
+/// The agent a Claude hook runs as, whatever the token's member.
+pub const CLAUDE: &str = "claude-code";
+
+/// Today in UTC, as the hub suggests a session name from it.
+pub fn today() -> String {
+    let day = time::OffsetDateTime::now_utc().date();
+    format!(
+        "{:04}-{:02}-{:02}",
+        day.year(),
+        u8::from(day.month()),
+        day.day()
+    )
+}
 
 /// A hub, a state directory and a working directory outside any repository.
 pub struct Rig {
@@ -78,6 +94,7 @@ impl Rig {
             // checkout of its own. Git stops looking at the rig's directory.
             .env("GIT_CEILING_DIRECTORIES", &*self.dir)
             .env_remove("HUB_SESSION")
+            .env_remove("HUB_MEMBER")
             .env_remove("HUB_AGENT_ID")
             .env_remove("HUB_WAKE")
             // A test run from inside a headless Claude Code run must not
@@ -109,7 +126,7 @@ impl Rig {
 
     /// A one-shot tool call as the agent a Claude hook runs as.
     pub fn call_as_claude(&self, tool: &str, arguments: &Value) -> Value {
-        self.call_with(tool, arguments, &self.hub.agent_token, "claude")
+        self.call_with(tool, arguments, &self.hub.agent_token, CLAUDE)
     }
 
     pub fn call_with(&self, tool: &str, arguments: &Value, token: &str, agent: &str) -> Value {
@@ -126,16 +143,16 @@ impl Rig {
 
     /// The question the agent asks and the human answers: one direct item.
     pub fn answered_question(&self, subject: &str) {
-        self.answered_question_as("claude", subject);
+        self.answered_question_as(CLAUDE, subject);
     }
 
-    /// The same, asked by the agent under another harness's name.
-    pub fn answered_question_as(&self, harness: &str, subject: &str) {
+    /// The same, asked by the agent under another agent name.
+    pub fn answered_question_as(&self, agent: &str, subject: &str) {
         let asked = self.call_with(
             "question_post",
             &json!({"project_id": PROJECT, "subject": subject, "body": "Ready."}),
             &self.hub.agent_token,
-            harness,
+            agent,
         );
         let id = asked["question_id"].as_str().expect("a question id");
         let answered = rest(
@@ -174,11 +191,6 @@ impl Rig {
             }
         }
         counts
-    }
-
-    /// The agent's token is `my-agent`; its hook calls are recorded as this.
-    pub fn actor(&self) -> String {
-        format!("{AGENT}/claude")
     }
 }
 

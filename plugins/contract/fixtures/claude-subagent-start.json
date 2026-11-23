@@ -4,7 +4,7 @@
     "harness": "claude",
     "event": "subagent-start",
     "output": {
-      "context": "You share the parent's hub connection and session s_01J8. Do not call session_start.",
+      "context": "You work in hub session feat-x/general-purpose-af9c57a0 (project homelab). Hub calls carry it; pass session: {\"project_id\": \"homelab\", \"name\": \"feat-x/general-purpose-af9c57a0\"} if you call a hub tool directly.",
       "compaction_instructions": null
     }
   },
@@ -12,7 +12,7 @@
     "stdout_json": {
       "hookSpecificOutput": {
         "hookEventName": "SubagentStart",
-        "additionalContext": "You share the parent's hub connection and session s_01J8. Do not call session_start."
+        "additionalContext": "You work in hub session feat-x/general-purpose-af9c57a0 (project homelab). Hub calls carry it; pass session: {\"project_id\": \"homelab\", \"name\": \"feat-x/general-purpose-af9c57a0\"} if you call a hub tool directly."
       }
     },
     "exit_code": 0

@@ -1,16 +1,17 @@
 {
-  "name": "resolve-session-harness-id-eight-valid-kept",
+  "name": "resolve-session-worktree",
   "input": {
-    "harness": "claude",
-    "harness_session_id": "x y/z\u00e9-1234",
+    "agent": "claude-code",
+    "date": "2026-11-23",
     "cwd": "/work/agent-hub",
     "env": {},
     "git": {
       "is_repo": true,
-      "top_level": "/work/agent-hub",
+      "top_level": "/work/feat-login",
       "origin_url": "git@github.com:agync/agent-hub.git",
       "branch": "main",
-      "detached": false
+      "detached": false,
+      "linked_worktree": true
     },
     "files": {},
     "known_projects": [
@@ -21,8 +22,8 @@
   "expected": {
     "project_id": "agent-hub",
     "project_source": "origin",
-    "session_name": "claude-xyz-1234",
-    "session_source": "harness_session",
+    "session_name": "feat-login",
+    "session_source": "worktree",
     "context_line": null
   }
 }

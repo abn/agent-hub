@@ -1,0 +1,29 @@
+{
+  "name": "subagent-id-keeps-letters-and-digits-only",
+  "input": {
+    "project_id": "homelab",
+    "parent": "feat-x",
+    "agent_type": "Explore",
+    "agent_id": "a-f_9c57-a04aa308f01",
+    "mapped": null,
+    "replies": [
+      {
+        "ok": {
+          "session_id": "s1",
+          "project_id": "homelab",
+          "status": "active",
+          "outcome": "created"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "calls": [
+      {
+        "session_name": "feat-x/explore-af9c57a0",
+        "exclusive": true
+      }
+    ],
+    "child": "feat-x/explore-af9c57a0"
+  }
+}

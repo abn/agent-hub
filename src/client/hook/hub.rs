@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 
 use super::input::Harness;
 use super::render::Item;
+use crate::client::credential::{self, ConfigView, Env, ResolveInput, State};
 use crate::client::{Failure, call_on, connect, projects};
 use crate::config::{self, ClientConfig, ParsedConfigFile};
 
@@ -21,33 +22,50 @@ const PEEK_SLACK: Duration = Duration::from_secs(10);
 /// How long closing a connection may take.
 pub const CLOSE_BUDGET: Duration = Duration::from_secs(2);
 
-/// The connection settings of one hook run.
+/// The connection settings of one hook run, as the credential resolver chose
+/// them.
 #[derive(Debug, Clone)]
 pub struct Settings {
     pub url: String,
     pub token: Option<String>,
-    /// Sent as `X-Agent-Id`.
-    pub agent_name: String,
-    /// The name the harness's own MCP connection declares, when the hook can
-    /// know it: the Claude plugin option, and `antigravity` for the Antigravity
-    /// plugin. The hooks and the model's tools should act as one agent.
-    pub reported_name: Option<String>,
+    /// The member the resolver selected, when it selected one.
+    pub member: Option<String>,
+    /// Sent as `X-Agent-Id`: the canonical name of the harness, so the hooks
+    /// and the harness's own MCP connection are one agent.
+    pub agent: String,
+    /// What the hook does next: connect, connect without a token, or say why
+    /// not.
+    pub state: State,
+    /// Context lines from the resolver, such as a project file naming another
+    /// hub than the plugin's.
+    pub notices: Vec<String>,
 }
 
 impl Settings {
-    /// One line for the session block when the hooks run under another agent
-    /// name than the harness's MCP connection, so a session the hook starts and
-    /// one the model starts are not mistaken for the same.
-    pub fn name_note(&self) -> Option<String> {
-        let reported = self.reported_name.as_deref()?;
-        (reported != self.agent_name).then(|| {
-            format!(
-                "Note: the hooks run as agent name {}, this harness's MCP connection as {reported}.",
-                self.agent_name
-            )
-        })
+    /// The line the session block carries instead of any hub work, for a
+    /// resolver state that rules out connecting. `None` when the hook may
+    /// connect.
+    pub fn refusal(&self) -> Option<String> {
+        match self.state {
+            State::SeveralMembers => Some(format!(
+                "Several members for {}; set member in .agent-hub.toml or HUB_MEMBER.",
+                self.url
+            )),
+            State::NeedsTrust => Some(format!(
+                "This project asks to use member {} on {}. Allow it with agent-hub trust or under [trust] in config.toml.",
+                self.member.as_deref().unwrap_or("(none)"),
+                self.url
+            )),
+            State::Tokenless => Some(NOT_A_MEMBER.to_string()),
+            State::Ok | State::NoHub => None,
+        }
     }
 }
+
+/// The line for a caller the hub does not know yet.
+pub const NOT_A_MEMBER: &str = "Not a member of this hub yet: call enrol.";
+/// The line for a hub that does not answer.
+pub const OFFLINE: &str = "Hub unreachable; working without it.";
 
 fn present(value: Option<String>) -> Option<String> {
     value
@@ -88,44 +106,67 @@ fn config_files(env: &dyn Fn(&str) -> Option<String>) -> (Vec<ParsedConfigFile>,
     (files, errors)
 }
 
-/// Resolve the settings: for Claude the plugin options, which the plugin's own
-/// MCP entry uses, then the `HUB_*` environment, then each `config.toml` in
-/// turn. The first source that has a URL wins, with only its own token, so a
-/// project-scoped option cannot collect the token of a hub configured
-/// elsewhere. The agent name follows the same order for Claude. Antigravity's
-/// MCP entry fixes its name, so the hook's is `HUB_AGENT_ID` or `antigravity`,
-/// and never the name in a config file.
+/// Resolve the settings through the one credential resolver, over the
+/// environment, the project file at the git top level above `cwd` and each
+/// `config.toml`. For Claude the plugin's `hub_url` option pins the URL, as it
+/// does for the plugin's own MCP entry, so a hook and the connection it sits
+/// beside reach one hub. The agent is the harness's canonical name.
 pub fn resolve_settings(
     harness: Harness,
     env: &dyn Fn(&str) -> Option<String>,
+    cwd: &str,
 ) -> Result<Settings, String> {
     let get = |key: &str| present(env(key));
-    let plugin = |key: &str| {
-        (harness == Harness::Claude)
-            .then(|| get(&format!("CLAUDE_PLUGIN_OPTION_{key}")))
-            .flatten()
-    };
     let (files, errors) = config_files(env);
-    let from_file = |key: &str| {
-        files
-            .iter()
-            .find_map(|file| present(file.client.get(key).cloned()))
-    };
 
-    let mut sources = vec![
-        (plugin("HUB_URL"), plugin("HUB_TOKEN")),
-        (get("HUB_URL"), get("HUB_TOKEN")),
-    ];
-    sources.extend(files.iter().map(|file| {
-        (
-            present(file.client.get("url").cloned()),
-            present(file.client.get("token").cloned()),
-        )
-    }));
-    let Some((url, token)) = sources
-        .into_iter()
-        .find_map(|(url, token)| url.map(|url| (url, token)))
-    else {
+    let mut view = ConfigView::default();
+    for file in &files {
+        view.client.url = view.client.url.or_else(|| file.view.client.url.clone());
+        view.client.member = view
+            .client
+            .member
+            .or_else(|| file.view.client.member.clone());
+        view.credentials
+            .extend(file.view.credentials.iter().cloned());
+        view.trust
+            .pairings
+            .extend(file.view.trust.pairings.iter().cloned());
+    }
+
+    let root = (!cwd.is_empty())
+        .then(|| credential::project_root(std::path::Path::new(cwd)))
+        .flatten();
+    let (project_file, mut notices) = match root.as_deref() {
+        Some(root) => credential::read_project_file(root).map_err(|err| err.to_string())?,
+        None => (None, Vec::new()),
+    };
+    let pinned_url = (harness == Harness::Claude)
+        .then(|| get("CLAUDE_PLUGIN_OPTION_HUB_URL"))
+        .flatten();
+
+    let credentials = view.credentials.clone();
+    let resolved = credential::resolve(&ResolveInput {
+        env: Env {
+            hub_url: get("HUB_URL"),
+            hub_token: get("HUB_TOKEN"),
+            hub_member: get("HUB_MEMBER"),
+            hub_config: get("HUB_CONFIG"),
+        },
+        pinned_url,
+        project_file,
+        project_root: root.map(|root| root.to_string_lossy().into_owned()),
+        config: view,
+    });
+    notices.extend(resolved.notices);
+    if harness == Harness::Claude
+        && let Some(url) = resolved.url.as_deref()
+        && resolved.state == State::Ok
+        && let Some(line) = super::helper::mismatch(&credentials, url, resolved.member.as_deref())
+    {
+        notices.push(line);
+    }
+
+    let Some(url) = resolved.url else {
         let broken = errors
             .first()
             .map(|err| format!(" ({err})"))
@@ -134,25 +175,13 @@ pub fn resolve_settings(
             "no hub URL configured; set HUB_URL or write [client] url to config.toml{broken}"
         ));
     };
-
-    let (agent_name, reported_name) = match harness {
-        Harness::Claude => (
-            plugin("AGENT_NAME")
-                .or_else(|| get("HUB_AGENT_ID"))
-                .or_else(|| from_file("agent_id"))
-                .unwrap_or_else(|| harness.name().to_string()),
-            plugin("AGENT_NAME"),
-        ),
-        Harness::Antigravity => (
-            get("HUB_AGENT_ID").unwrap_or_else(|| harness.name().to_string()),
-            Some(harness.name().to_string()),
-        ),
-    };
     Ok(Settings {
         url: url.trim_end_matches('/').to_string(),
-        token,
-        agent_name,
-        reported_name,
+        token: resolved.token,
+        member: resolved.member,
+        agent: harness.agent().to_string(),
+        state: resolved.state,
+        notices,
     })
 }
 
@@ -197,25 +226,20 @@ impl Hub {
         within(self.deadline, budget)
     }
 
-    /// The agent name the hub is told, when the hub would accept it beside the
-    /// token.
     /// The settings this hub was opened with.
     pub fn settings(&self) -> &Settings {
         &self.settings
-    }
-
-    fn declared(&self) -> Option<&str> {
-        let name = self.settings.agent_name.as_str();
-        (self.settings.token.is_none() || crate::principal::is_declared_name(name)).then_some(name)
     }
 
     fn config(&self, budget: Duration) -> ClientConfig {
         ClientConfig {
             url: Some(self.settings.url.clone()),
             token: self.settings.token.clone(),
-            agent_id: self.declared().map(str::to_string),
+            member: self.settings.member.clone(),
+            agent_id: Some(self.settings.agent.clone()),
             project: None,
             timeout: budget,
+            state: self.settings.state,
             ..ClientConfig::default()
         }
     }
@@ -247,13 +271,11 @@ impl Hub {
                 query.append_pair("after", after);
             }
         }
-        let agent = self.declared().map(str::to_string);
+        let agent = self.settings.agent.clone();
         let (_, text) = projects::call(&config, url.as_str(), move |url, client| {
-            let request = client.get(url);
-            match &agent {
-                Some(agent) => request.header(crate::principal::AGENT_ID_HEADER, agent),
-                None => request,
-            }
+            client
+                .get(url)
+                .header(crate::principal::AGENT_ID_HEADER, &agent)
         })
         .await?;
         let body = projects::json_body(&text)?;
@@ -376,4 +398,14 @@ pub fn dedupe(items: Vec<Item>) -> Vec<Item> {
         .into_iter()
         .filter(|item| seen.insert(item.id.clone()))
         .collect()
+}
+
+/// The `details.reason` the hub gave a failure, when it gave one.
+pub fn reason(failure: &Failure) -> Option<&str> {
+    match failure {
+        Failure::Tool(error) | Failure::Denied(error) => error
+            .pointer("/error/details/reason")
+            .and_then(Value::as_str),
+        _ => None,
+    }
 }

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -31,6 +31,7 @@ const until = async (check, ms = 3000) => {
 // The slice of the OpenCode v2 plugin context the plugin touches.
 function fakeCtx(options = {}) {
   const hooks = {};
+  const toolHooks = {};
   const feed = [];
   const waiters = [];
   const ctx = {
@@ -43,9 +44,16 @@ function fakeCtx(options = {}) {
     promptCalls: 0,
     promptHold: null,
     sessions: {},
+    transforms: 0,
     mcp: {
       async transform(callback) {
+        ctx.transforms += 1;
         callback({ get: (name) => ctx.mcps[name], set: (name, config) => (ctx.mcps[name] = config) });
+      },
+    },
+    tool: {
+      async hook(name, callback) {
+        toolHooks[name] = callback;
       },
     },
     session: {
@@ -90,6 +98,7 @@ function fakeCtx(options = {}) {
       },
     },
     hooks,
+    toolHooks,
     emit(event) {
       feed.push(event);
       waiters.splice(0).forEach((resolve) => resolve());
@@ -104,6 +113,7 @@ async function boot({ ctxOptions, env = {}, sse = false, blockedState = false, p
   scratch = mkdtempSync(join(scratchRoot, "opencode-plugin-"));
   const ctx = fakeCtx(ctxOptions ?? {});
   prepare?.(ctx);
+  if (typeof env === "function") env = env();
   if (blockedState) {
     writeFileSync(join(scratch, "blocker"), "a file, not a directory");
     env = { ...env, XDG_STATE_HOME: join(scratch, "blocker") };
@@ -128,9 +138,9 @@ async function boot({ ctxOptions, env = {}, sse = false, blockedState = false, p
   return ctx;
 }
 
-const created = (sessionID, parentID) => ({
+const created = (sessionID, parentID, agent) => ({
   type: "session.created",
-  data: { sessionID, parentID, location: { directory: scratch } },
+  data: { sessionID, parentID, agent, location: { directory: scratch } },
 });
 const event = (type, sessionID) => ({ type, data: { sessionID } });
 const item = (id, direct) => ({ id, kind: direct ? "answer" : "signal", title: `t ${id}`, project_id: "proj", direct });
@@ -152,12 +162,12 @@ describe("plugin shape", () => {
 });
 
 describe("the plugin against a fake hub", () => {
-  it("registers the remote MCP server with the token and agent name", async () => {
+  it("registers the remote MCP server with the token and the agent name, whatever an option says", async () => {
     const ctx = await boot({ ctxOptions: { agentName: "oc-work" } });
     expect(ctx.mcps["agent-hub"]).toEqual({
       type: "remote",
       url: `${fake.url}/mcp`,
-      headers: { "X-Agent-Id": "oc-work", Authorization: "Bearer tok" },
+      headers: { "X-Agent-Id": "opencode", Authorization: "Bearer tok" },
     });
   });
 
@@ -172,27 +182,6 @@ describe("the plugin against a fake hub", () => {
     ctx.emit(created("ses_root"));
     await until(() => ctx.entries.length === 1);
     expect(fake.requests.length).toBeGreaterThan(0);
-    for (const request of fake.requests) expect(request.headers.authorization).toBeUndefined();
-  });
-
-  it("sends no Authorization when the token file is outside the config directory", async () => {
-    fake = await startFakeHub();
-    mkdirSync(scratchRoot, { recursive: true });
-    scratch = mkdtempSync(join(scratchRoot, "opencode-plugin-"));
-    const stolen = join(scratch, "id_key");
-    writeFileSync(stolen, "secret-key");
-    const ctx = fakeCtx({ url: fake.url, tokenFile: stolen });
-    const env = { HUB_PROJECT: "proj", HUB_SESSION: "work", XDG_STATE_HOME: scratch, HOME: scratch, HUB_CONFIG: join(scratch, "none.toml") };
-    const warn = console.warn;
-    console.warn = () => {};
-    try {
-      dispose = await createPlugin({ env }).setup(ctx);
-    } finally {
-      console.warn = warn;
-    }
-    expect(ctx.mcps["agent-hub"].headers).toEqual({ "X-Agent-Id": "opencode" });
-    ctx.emit(created("ses_root"));
-    await until(() => ctx.entries.length === 1);
     for (const request of fake.requests) expect(request.headers.authorization).toBeUndefined();
   });
 
@@ -214,8 +203,8 @@ describe("the plugin against a fake hub", () => {
     expect(entry.sessionID).toBe("ses_root");
     expect(entry.key).toBe("agent-hub");
     expect(entry.value).toContain("<agent-hub>");
-    expect(entry.value).toContain("project proj | session work (s_01TEST) | you are tester/opencode");
-    expect(entry.value).toContain('session_start(project_id: "proj", session_name: "work")');
+    expect(entry.value).toContain("project proj | session work (s_01TEST) | you are tester \u00b7 opencode");
+    expect(entry.value).toContain('Pass session: {"project_id": "proj", "name": "work"} on hub calls (the plugin adds it).');
     expect(entry.value).toContain("KB index:\n# Index");
     expect(fake.calls.map((c) => c.name)).toEqual(
       expect.arrayContaining(["whoami", "session_brief", "session_start", "brain_get", "notify_subscribe"]),
@@ -247,17 +236,57 @@ describe("the plugin against a fake hub", () => {
     expect(ctx.entries[1].value).toBe(ctx.entries[0].value);
   });
 
-  it("gives a child session the subagent instruction and no bundle", async () => {
+  it("gives a child session a hub session of its own under the parent's, and tells it so", async () => {
     const ctx = await boot();
     ctx.emit(created("ses_root"));
     await until(() => ctx.entries.length === 1);
-    const calls = fake.calls.length;
-    ctx.emit(created("ses_child", "ses_root"));
+    ctx.emit(created("ses_df68c1b96", "ses_root", "general"));
     await until(() => ctx.entries.length === 2);
-    expect(ctx.entries[1].sessionID).toBe("ses_child");
-    expect(ctx.entries[1].value).toContain("Do not call session_start");
-    expect(ctx.entries[1].value).toContain("s_01TEST");
-    expect(fake.calls.length).toBe(calls);
+    expect(ctx.entries[1].sessionID).toBe("ses_df68c1b96");
+    expect(ctx.entries[1].value).toBe(
+      'You work in hub session work/general-sesdf68c (project proj). Hub calls carry it; pass session: {"project_id": "proj", "name": "work/general-sesdf68c"} if you call a hub tool directly.',
+    );
+    expect(fake.calls.filter((c) => c.name === "session_start").at(-1).args).toEqual({
+      project_id: "proj",
+      session_name: "work/general-sesdf68c",
+      exclusive: true,
+    });
+    expect(fake.calls.filter((c) => c.name === "session_brief")).toHaveLength(1);
+  });
+
+  it("starts a child it mapped before under its own name, not a fresh one, even after a restart", async () => {
+    const ctx = await boot({
+      prepare: () => {
+        const dir = join(scratch, "state", "agent-hub", "hooks", "opencode");
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "ses_df68c1b96.json"), JSON.stringify({ child: { name: "work/general-earlier" } }));
+      },
+    });
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    ctx.emit(created("ses_df68c1b96", "ses_root", "general"));
+    await until(() => ctx.entries.length === 2);
+    expect(fake.calls.filter((c) => c.name === "session_start").at(-1).args).toEqual({
+      project_id: "proj",
+      session_name: "work/general-earlier",
+      exclusive: false,
+    });
+    expect(ctx.entries[1].value).toContain("work/general-earlier");
+  });
+
+  it("steps to the next name when the hub says the child's name is taken", async () => {
+    const ctx = await boot();
+    fake.sessionNames.add("work/general-sesdf68c");
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    ctx.emit(created("ses_df68c1b96", "ses_root", "general"));
+    await until(() => ctx.entries.length === 2);
+    expect(ctx.entries[1].value).toContain("work/general-sesdf68c-2");
+    const starts = fake.calls.filter((c) => c.name === "session_start").slice(-2);
+    expect(starts.map((c) => [c.args.session_name, c.args.exclusive])).toEqual([
+      ["work/general-sesdf68c", true],
+      ["work/general-sesdf68c-2", true],
+    ]);
   });
 
   it("appends the keep instruction on compaction and restores the entry after", async () => {
@@ -294,7 +323,7 @@ describe("the plugin against a fake hub", () => {
       await settled(ctx);
       const first = call(ctx);
       expect(first).toHaveLength(1);
-      expect(first[0]).toContain("project proj | session work (s_01TEST) | you are tester/opencode");
+      expect(first[0]).toContain("project proj | session work (s_01TEST) | you are tester \u00b7 opencode");
       expect(first[0]).toContain("KB index:\n# Index");
       expect(call(ctx)).toEqual([]);
     });
@@ -332,11 +361,11 @@ describe("the plugin against a fake hub", () => {
       const ctx = await boot({ prepare: without });
       ctx.emit(created("ses_root"));
       await settled(ctx);
-      ctx.emit(created("ses_child", "ses_root"));
+      ctx.emit(created("ses_child", "ses_root", "general"));
       await new Promise((r) => setTimeout(r, 50));
       const texts = call(ctx, "ses_child");
       expect(texts).toHaveLength(1);
-      expect(texts[0]).toContain("Do not call session_start");
+      expect(texts[0]).toContain("You work in hub session work/general-sesch");
       expect(call(ctx, "ses_child")).toEqual([]);
     });
 
@@ -346,7 +375,7 @@ describe("the plugin against a fake hub", () => {
       const hook = { sessionID: "ses_new", system: [] };
       await ctx.hooks.context(hook);
       expect(hook.system).toHaveLength(1);
-      expect(hook.system[0].text).toContain("project proj | session work (s_01TEST) | you are tester/opencode");
+      expect(hook.system[0].text).toContain("project proj | session work (s_01TEST) | you are tester \u00b7 opencode");
     });
 
     it("treats a session adopted on a context call as busy, so an item waits for the context hook", async () => {
@@ -391,20 +420,12 @@ describe("the plugin against a fake hub", () => {
     });
   });
 
-  it("uses one agent name for the MCP entry and for the plugin's own hub calls", async () => {
-    const ctx = await boot({ ctxOptions: { agentName: "oc-work" } });
-    ctx.emit(created("ses_root"));
-    await until(() => ctx.entries.length === 1);
-    expect(ctx.mcps["agent-hub"].headers["X-Agent-Id"]).toBe("oc-work");
-    expect(fake.requests.length).toBeGreaterThan(0);
-    for (const request of fake.requests) expect(request.headers["x-agent-id"]).toBe("oc-work");
-  });
-
-  it("uses the default agent name for both when none is set", async () => {
+  it("names itself opencode on the MCP entry and on every call of its own", async () => {
     const ctx = await boot();
     ctx.emit(created("ses_root"));
     await until(() => ctx.entries.length === 1);
     expect(ctx.mcps["agent-hub"].headers["X-Agent-Id"]).toBe("opencode");
+    expect(fake.requests.length).toBeGreaterThan(0);
     for (const request of fake.requests) expect(request.headers["x-agent-id"]).toBe("opencode");
   });
 
@@ -488,13 +509,90 @@ describe("the plugin against a fake hub", () => {
     expect(ctx.entries[0].sessionID).toBe("ses_old");
   });
 
-  it("ends the hub session when a root session is deleted", async () => {
+  it("leaves the hub session, and never ends it, when a root session is deleted", async () => {
     const ctx = await boot();
     ctx.emit(created("ses_root"));
     await until(() => ctx.entries.length === 1);
     ctx.emit(event("session.deleted", "ses_root"));
-    await until(() => fake.count("session_end") === 1);
-    expect(fake.calls.find((c) => c.name === "session_end").args).toEqual({ session_id: "s_01TEST" });
+    await until(() => fake.count("session_leave") === 1);
+    expect(fake.calls.find((c) => c.name === "session_leave").args).toEqual({ session: { project_id: "proj", name: "work" } });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fake.count("session_end")).toBe(0);
+  });
+
+  it("leaves a child's own session when the child is deleted, and the parent's stays", async () => {
+    const ctx = await boot();
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    ctx.emit(created("ses_df68c1b96", "ses_root", "general"));
+    await until(() => ctx.entries.length === 2);
+    ctx.emit(event("session.deleted", "ses_df68c1b96"));
+    await until(() => fake.count("session_leave") === 1);
+    expect(fake.left).toEqual([{ project_id: "proj", name: "work/general-sesdf68c" }]);
+  });
+
+  it("keeps a leave the hub did not take and retries it on a later event, clearing the child's mapping only then", async () => {
+    let clock = 1_000_000;
+    const ctx = await boot({ plugin: { now: () => clock } });
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    ctx.emit(created("ses_df68c1b96", "ses_root", "general"));
+    await until(() => ctx.entries.length === 2);
+    const file = join(scratch, "state", "agent-hub", "hooks", "opencode");
+    expect(JSON.parse(readFileSync(join(file, "ses_df68c1b96.json"), "utf8")).child.name).toBe("work/general-sesdf68c");
+
+    fake.failTools.session_leave = 1;
+    ctx.emit(event("session.deleted", "ses_df68c1b96"));
+    await until(() => fake.count("session_leave") === 1);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(fake.left).toEqual([]);
+    const kept = JSON.parse(readFileSync(join(file, "leaves.json"), "utf8"));
+    expect(kept.pending).toEqual([
+      { project_id: "proj", name: "work/general-sesdf68c", key: "ses_df68c1b96", attempts: 1, tried_at: clock },
+    ]);
+    expect(JSON.stringify(kept)).not.toContain("tok");
+    expect(JSON.parse(readFileSync(join(file, "ses_df68c1b96.json"), "utf8")).child.name).toBe("work/general-sesdf68c");
+
+    // Too soon: another event does not call again.
+    ctx.emit(event("session.execution.started", "ses_root"));
+    await new Promise((r) => setTimeout(r, 60));
+    expect(fake.count("session_leave")).toBe(1);
+
+    clock += 6000;
+    ctx.emit(event("session.execution.started", "ses_root"));
+    await until(() => fake.left.length === 1);
+    expect(fake.left).toEqual([{ project_id: "proj", name: "work/general-sesdf68c" }]);
+    await until(() => JSON.parse(readFileSync(join(file, "leaves.json"), "utf8")).pending.length === 0);
+    expect(JSON.parse(readFileSync(join(file, "ses_df68c1b96.json"), "utf8")).child).toBeNull();
+  });
+
+  it("gives up on a leave after a bounded number of attempts", async () => {
+    let clock = 1_000_000;
+    const ctx = await boot({ plugin: { now: () => clock } });
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    fake.failTools.session_leave = 100;
+    ctx.emit(event("session.deleted", "ses_root"));
+    await until(() => fake.count("session_leave") === 1);
+    for (let n = 2; n <= 8; n += 1) {
+      clock += 6000;
+      await new Promise((r) => setTimeout(r, 40));
+      ctx.emit(event("session.execution.started", "ses_other"));
+      await new Promise((r) => setTimeout(r, 40));
+    }
+    expect(fake.count("session_leave")).toBe(5);
+  });
+
+  it("leaves nothing for a child that never got a session of its own", async () => {
+    const ctx = await boot();
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    fake.failTools.session_start = 1;
+    ctx.emit(created("ses_child", "ses_root", "general"));
+    await until(() => fake.count("session_start") === 2);
+    ctx.emit(event("session.deleted", "ses_child"));
+    await new Promise((r) => setTimeout(r, 80));
+    expect(fake.count("session_leave")).toBe(0);
   });
 
   it("stops its loop and closes its MCP session on dispose", async () => {
@@ -577,14 +675,14 @@ describe("the plugin against a fake hub", () => {
     expect(ctx.prompts).toHaveLength(1);
   });
 
-  it("drops a session deleted during its start and still ends the hub session", async () => {
+  it("drops a session deleted during its start and still leaves the hub session", async () => {
     const ctx = await boot();
     fake.delayTools.session_start = 200;
     ctx.emit(created("ses_root"));
     await until(() => fake.count("session_start") === 1);
     ctx.emit(event("session.deleted", "ses_root"));
-    await until(() => fake.count("session_end") === 1);
-    expect(fake.calls.find((c) => c.name === "session_end").args).toEqual({ session_id: "s_01TEST" });
+    await until(() => fake.count("session_leave") === 1);
+    expect(fake.calls.find((c) => c.name === "session_leave").args).toEqual({ session: { project_id: "proj", name: "work" } });
     await new Promise((r) => setTimeout(r, 100));
     expect(ctx.entries).toEqual([]);
     expect(fake.peeks.filter((p) => p.session === "s_01TEST")).toEqual([]);
@@ -601,9 +699,8 @@ describe("the plugin against a fake hub", () => {
     await until(() => fake.peeks.some((p) => p.session === "s_A"));
     const mark = fake.peeks.length;
     ctx.emit(event("session.deleted", "ses_a"));
-    await until(() => fake.count("session_end") === 1);
+    await until(() => fake.count("session_leave") === 1);
     await until(() => fake.peeks.slice(mark).some((p) => p.session === "s_B"));
-    expect(fake.calls.find((c) => c.name === "session_end").args).toEqual({ session_id: "s_A" });
   });
 
   it("retries a failed start on later activity, at most once a minute", async () => {
@@ -699,13 +796,13 @@ describe("the plugin against a fake hub", () => {
     expect(again.system).toEqual([]);
   });
 
-  it("settles a session_end before it closes the MCP session on dispose", async () => {
+  it("settles a session_leave before it closes the MCP session on dispose", async () => {
     const ctx = await boot();
     ctx.emit(created("ses_root"));
     await until(() => ctx.entries.length === 1);
-    fake.delayTools.session_end = 150;
+    fake.delayTools.session_leave = 150;
     ctx.emit(event("session.deleted", "ses_root"));
-    await until(() => fake.count("session_end") === 1);
+    await until(() => fake.count("session_leave") === 1);
     await dispose();
     dispose = undefined;
     const last = fake.requests.at(-1);
@@ -723,5 +820,216 @@ describe("the plugin against a fake hub", () => {
     dispose = undefined;
     const lastDelete = fake.requests.map((r) => r.method).lastIndexOf("DELETE");
     expect(lastDelete === -1 || lastDelete === fake.requests.length - 1).toBe(true);
+  });
+});
+
+describe("hub calls the model makes", () => {
+  // What the host fires for an MCP tool: the call on `<server>_<tool>`, and a
+  // codemode `execute` wrapper whose input is code.
+  const call = (ctx, sessionID, tool, input) => {
+    const event = { tool, sessionID, agent: "build", messageID: "msg_1", id: "call_1", input };
+    return Promise.resolve(ctx.toolHooks["execute.before"](event)).then(() => event);
+  };
+
+  it("adds the session to a call that names none", async () => {
+    const ctx = await boot();
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    const event = await call(ctx, "ses_root", "agent-hub_feed_read", { project_id: "proj" });
+    expect(event.input).toEqual({ project_id: "proj", session: { project_id: "proj", name: "work" } });
+  });
+
+  it("leaves the codemode wrapper, a call that names a session and a session_start alone", async () => {
+    const ctx = await boot();
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    expect((await call(ctx, "ses_root", "execute", { code: "return await tools.agent_hub.whoami({})" })).input).toEqual({
+      code: "return await tools.agent_hub.whoami({})",
+    });
+    const named = { project_id: "proj", session: { name: "other", project_id: "proj" } };
+    expect((await call(ctx, "ses_root", "agent-hub_feed_read", named)).input).toEqual(named);
+    const start = { project_id: "proj", session_name: "work" };
+    expect((await call(ctx, "ses_root", "agent-hub_session_start", start)).input).toEqual(start);
+    expect((await call(ctx, "ses_root", "other_server_tool", { a: 1 })).input).toEqual({ a: 1 });
+  });
+
+  it("gives a subagent's call its own child session, and an unstarted session none", async () => {
+    const ctx = await boot();
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    ctx.emit(created("ses_df68c1b96", "ses_root", "general"));
+    await until(() => ctx.entries.length === 2);
+    expect((await call(ctx, "ses_df68c1b96", "agent-hub_whoami", {})).input.session).toEqual({
+      project_id: "proj",
+      name: "work/general-sesdf68c",
+    });
+    expect((await call(ctx, "ses_root", "agent-hub_whoami", {})).input.session).toEqual({ project_id: "proj", name: "work" });
+    expect((await call(ctx, "ses_unknown", "agent-hub_whoami", {})).input).toEqual({});
+  });
+
+  it("puts no session on a subagent's call whose own start failed, never the parent's, and gives it its child once a start succeeds", async () => {
+    let clock = 1_000_000;
+    const ctx = await boot({ plugin: { now: () => clock } });
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    fake.failTools.session_start = 1;
+    ctx.emit(created("ses_child", "ses_root", "general"));
+    await until(() => fake.count("session_start") === 2);
+    expect((await call(ctx, "ses_child", "agent-hub_whoami", {})).input).toEqual({});
+    expect((await call(ctx, "ses_root", "agent-hub_whoami", {})).input.session).toEqual({ project_id: "proj", name: "work" });
+
+    clock += 61_000;
+    expect((await call(ctx, "ses_child", "agent-hub_whoami", {})).input.session).toEqual({
+      project_id: "proj",
+      name: "work/general-seschild",
+    });
+  });
+
+  it("starts the hub's own calls from a plugin with the hook API missing without failing", async () => {
+    const ctx = await boot({ prepare: (c) => delete c.tool });
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    expect(ctx.toolHooks).toEqual({});
+  });
+});
+
+// Storing a credential syncs the file and its directory, which a busy disk makes slow.
+describe("enrolment and the states before a member exists", { timeout: 30_000 }, () => {
+  const sessionWith = async (ctx) => {
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+  };
+  const dirs = () => () => ({ HUB_CONFIG: join(scratch, "config.toml"), HUB_TOKEN: undefined });
+  const pendingBody = (over = {}) => ({
+    status: "pending",
+    member: "laptop",
+    token: "pending-token",
+    status_url: `${fake.url}/api/v1/enrol/status`,
+    ...over,
+  });
+  const enrol = (ctx, body) =>
+    ctx.toolHooks["execute.after"]({ tool: "agent-hub_enrol", sessionID: "ses_root", input: {}, output: { structuredContent: body } });
+
+  it("says a member waits for approval instead of starting a session", async () => {
+    const ctx = await boot({ env: { HUB_TOKEN: "pending-token" } });
+    fake.whoami = { state: "pending", member: "laptop", hub_url: fake.url };
+    await sessionWith(ctx);
+    expect(ctx.entries[0].value).toBe("<agent-hub>\nWaiting for approval as laptop.\n</agent-hub>");
+    expect(fake.count("session_start")).toBe(0);
+  });
+
+  it("says a caller the hub does not know is not a member yet", async () => {
+    const ctx = await boot();
+    fake.whoami = { state: "anonymous", hub_url: fake.url, enrol: true };
+    await sessionWith(ctx);
+    expect(ctx.entries[0].value).toBe("<agent-hub>\nNot a member of this hub yet: call enrol.\n</agent-hub>");
+  });
+
+  it("makes no hub call when several members hold credentials and nothing picks one", async () => {
+    mkdirSync(scratchRoot, { recursive: true });
+    fake = await startFakeHub();
+    scratch = mkdtempSync(join(scratchRoot, "opencode-plugin-"));
+    const config = join(scratch, "config.toml");
+    const entry = (member) => `[[credential]]\nurl = "${fake.url}"\nmember = "${member}"\ntoken = "t-${member}"\n`;
+    writeFileSync(config, `${entry("a")}\n${entry("b")}`);
+    const ctx = fakeCtx();
+    dispose = await createPlugin({ env: { HUB_CONFIG: config, HUB_URL: fake.url, XDG_STATE_HOME: scratch, HOME: scratch } }).setup(ctx);
+    expect(ctx.mcps["agent-hub"].headers).toEqual({ "X-Agent-Id": "opencode" });
+    ctx.emit(created("ses_root"));
+    await until(() => ctx.entries.length === 1);
+    expect(ctx.entries[0].value).toBe(`<agent-hub>\nSeveral members for ${fake.url}; set member in .agent-hub.toml or HUB_MEMBER.\n</agent-hub>`);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("stores the pending token the moment enrol returns it, and keeps the status url", async () => {
+    const ctx = await boot({ env: dirs() });
+    await enrol(ctx, pendingBody());
+    const text = readFileSync(join(scratch, "config.toml"), "utf8");
+    expect(text).toContain(`url = "${fake.url}"`);
+    expect(text).toContain('member = "laptop"');
+    expect(text).toContain('token = "pending-token"');
+    expect(statSync(join(scratch, "config.toml")).mode & 0o777).toBe(0o600);
+    const state = JSON.parse(readFileSync(join(scratch, "state", "agent-hub", "hooks", "opencode", "enrol.json"), "utf8"));
+    expect(state.pending).toEqual({ url: fake.url, member: "laptop", status_url: `${fake.url}/api/v1/enrol/status` });
+    expect(JSON.stringify(state)).not.toContain("pending-token");
+  });
+
+  it("reads the enrol result from a text part as well as a structured one", async () => {
+    const ctx = await boot({ env: dirs() });
+    await ctx.toolHooks["execute.after"]({
+      tool: "agent-hub_enrol",
+      sessionID: "ses_root",
+      input: {},
+      output: { content: [{ type: "text", text: JSON.stringify(pendingBody()) }] },
+    });
+    expect(readFileSync(join(scratch, "config.toml"), "utf8")).toContain('token = "pending-token"');
+  });
+
+  it("ignores a result that is not a pending enrolment, and a call to another tool", async () => {
+    const ctx = await boot({ env: dirs() });
+    await enrol(ctx, { status: "approved" });
+    await ctx.toolHooks["execute.after"]({ tool: "agent-hub_whoami", sessionID: "ses_root", input: {}, output: pendingBody() });
+    expect(existsSync(join(scratch, "config.toml"))).toBe(false);
+  });
+
+  it("follows the status on a prompt, renames the stored member to the approved name and reconnects with the token", async () => {
+    const ctx = await boot({ env: dirs(), plugin: { now: () => 5_000_000 } });
+    await sessionWith(ctx);
+    await enrol(ctx, pendingBody());
+    expect(ctx.mcps["agent-hub"].headers).toEqual({ "X-Agent-Id": "opencode" });
+    expect(ctx.transforms).toBe(1);
+    fake.enrolStatus = { status: "pending", member: "laptop" };
+    await ctx.hooks.prompt({ sessionID: "ses_root" });
+    expect(fake.statusRequests).toHaveLength(1);
+    expect(fake.statusRequests[0].search).toBe("?wait=0");
+    expect(fake.statusRequests[0].headers.authorization).toBe("Bearer pending-token");
+    expect(ctx.transforms).toBe(1);
+    fake.enrolStatus = { status: "approved", member: "laptop-2", share: null };
+    await ctx.hooks.prompt({ sessionID: "ses_root" });
+    // within the gap: not asked again
+    expect(fake.statusRequests).toHaveLength(1);
+  });
+
+  it("asks again once the gap has passed, and registers the MCP entry with the token on approval", async () => {
+    let clock = 5_000_000;
+    const ctx = await boot({ env: dirs(), plugin: { now: () => clock } });
+    await sessionWith(ctx);
+    await enrol(ctx, pendingBody());
+    fake.enrolStatus = { status: "approved", member: "laptop-2", share: null };
+    clock += 31_000;
+    await ctx.hooks.prompt({ sessionID: "ses_root" });
+    expect(fake.statusRequests).toHaveLength(1);
+    const text = readFileSync(join(scratch, "config.toml"), "utf8");
+    expect(text).toContain('member = "laptop-2"');
+    expect(text).not.toContain('member = "laptop"\n');
+    expect(ctx.transforms).toBe(2);
+    expect(ctx.mcps["agent-hub"].headers).toEqual({ "X-Agent-Id": "opencode", Authorization: "Bearer pending-token" });
+    clock += 31_000;
+    await ctx.hooks.prompt({ sessionID: "ses_root" });
+    expect(fake.statusRequests).toHaveLength(1);
+  });
+
+  it("stops following a refused enrolment", async () => {
+    let clock = 5_000_000;
+    const ctx = await boot({ env: dirs(), plugin: { now: () => clock } });
+    await sessionWith(ctx);
+    await enrol(ctx, pendingBody());
+    fake.enrolStatus = null;
+    clock += 31_000;
+    await ctx.hooks.prompt({ sessionID: "ses_root" });
+    clock += 31_000;
+    await ctx.hooks.prompt({ sessionID: "ses_root" });
+    expect(fake.statusRequests).toHaveLength(1);
+    expect(ctx.transforms).toBe(1);
+  });
+
+  it("never sends the pending token to a status url on another host", async () => {
+    let clock = 5_000_000;
+    const ctx = await boot({ env: dirs(), plugin: { now: () => clock } });
+    await sessionWith(ctx);
+    await enrol(ctx, pendingBody({ status_url: "http://elsewhere.invalid/api/v1/enrol/status" }));
+    clock += 31_000;
+    await ctx.hooks.prompt({ sessionID: "ses_root" });
+    expect(fake.statusRequests).toEqual([]);
   });
 });

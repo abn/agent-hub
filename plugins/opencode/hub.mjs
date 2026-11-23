@@ -15,11 +15,19 @@ const packageVersion = () => {
 
 export const CLIENT_INFO = { name: "agent-hub-opencode", version: packageVersion() };
 
+// The agent every request names itself as. The hub reads it from X-Agent-Id
+// beside the handshake's own client name.
+export const AGENT = "opencode";
+
 export class HubError extends Error {
-  constructor(message, status) {
+  // `details` is the hub's own `error.details`, whose `reason` says which
+  // refusal this is.
+  constructor(message, status, details) {
     super(message);
     this.name = "HubError";
     this.status = status;
+    this.details = details ?? null;
+    this.reason = details?.reason ?? null;
   }
 }
 
@@ -74,13 +82,13 @@ export const DEFAULT_TIMEOUTS = { hook: 5000, startup: 10_000, peekSlack: 10_000
 
 const normalizeAll = (items) => (items ?? []).map(normalizeItem);
 
-export function createHub({ url, token, agentName, fetch: fetchImpl = globalThis.fetch, timeouts = {} }) {
+export function createHub({ url, token: initialToken, fetch: fetchImpl = globalThis.fetch, timeouts = {} }) {
   const limits = { ...DEFAULT_TIMEOUTS, ...timeouts };
   const base = url.replace(/\/+$/u, "");
+  let token = initialToken ?? null;
   const headers = () => {
-    const h = {};
+    const h = { "X-Agent-Id": AGENT };
     if (token) h.Authorization = `Bearer ${token}`;
-    if (agentName) h["X-Agent-Id"] = agentName;
     return h;
   };
 
@@ -221,7 +229,9 @@ export function createHub({ url, token, agentName, fetch: fetchImpl = globalThis
     }
     if (!res.ok) throw new HubError(`MCP ${method} answered ${res.status}`, res.status);
     const reply = await readReply(res, id);
-    if (reply.error) throw new HubError(`MCP ${method} failed: ${reply.error.message}`, res.status);
+    if (reply.error) {
+      throw new HubError(`MCP ${method} failed: ${reply.error.message}`, res.status, reply.error.data?.error?.details);
+    }
     return reply.result ?? {};
   }
 
@@ -230,7 +240,13 @@ export function createHub({ url, token, agentName, fetch: fetchImpl = globalThis
     const result = await rpc("tools/call", { name, arguments: args }, { signal: limited(deadline, signal) });
     const payload = toolPayload(result);
     if (trailers) trailers.push(...normalizeAll(payload.notifications?.pending));
-    if (result.isError) throw new HubError(`${name} failed: ${payload.text ?? payload.message ?? JSON.stringify(payload)}`);
+    if (result.isError) {
+      throw new HubError(
+        `${name} failed: ${payload.text ?? payload.error?.message ?? payload.message ?? JSON.stringify(payload)}`,
+        undefined,
+        payload.error?.details,
+      );
+    }
     return payload;
   }
 
@@ -240,6 +256,16 @@ export function createHub({ url, token, agentName, fetch: fetchImpl = globalThis
     if (hubSessionId) args.session = { session_id: hubSessionId };
     const body = await callTool("notify_wait", args, { signal, deadline, trailers });
     return normalizeAll(body.notifications?.pending);
+  }
+
+  // A token that arrives later, from an enrolment or a rename: the next call
+  // opens an MCP session under it.
+  function setToken(next) {
+    if (next === token) return;
+    token = next;
+    sessionId = null;
+    protocolVersion = null;
+    ready = null;
   }
 
   async function close() {
@@ -261,7 +287,7 @@ export function createHub({ url, token, agentName, fetch: fetchImpl = globalThis
     }
   }
 
-  return { rest, peek, projects, callTool, drain, close, timeouts: limits };
+  return { rest, peek, projects, callTool, drain, close, setToken, timeouts: limits };
 }
 
 export function normalizeItem(item) {

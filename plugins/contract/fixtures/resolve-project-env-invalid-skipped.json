@@ -1,8 +1,8 @@
 {
   "name": "resolve-project-env-invalid-skipped",
   "input": {
-    "harness": "claude",
-    "harness_session_id": "3f9a1c27-6b1d-4e0a-9c55-0a1b2c3d4e5f",
+    "agent": "claude-code",
+    "date": "2026-11-23",
     "cwd": "/work/agent-hub",
     "env": {
       "HUB_PROJECT": "my project!"
@@ -12,7 +12,8 @@
       "top_level": "/work/agent-hub",
       "origin_url": "git@github.com:agync/agent-hub.git",
       "branch": "main",
-      "detached": false
+      "detached": false,
+      "linked_worktree": false
     },
     "files": {},
     "known_projects": [
@@ -23,8 +24,8 @@
   "expected": {
     "project_id": "agent-hub",
     "project_source": "origin",
-    "session_name": "claude-3f9a1c27",
-    "session_source": "harness_session",
+    "session_name": "claude-code-2026-11-23",
+    "session_source": "date",
     "context_line": "ignored HUB_PROJECT \"my project!\": not [A-Za-z0-9_-]{1,64}"
   }
 }

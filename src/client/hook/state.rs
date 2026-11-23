@@ -13,6 +13,7 @@
 //! holds the lock itself, and a watcher that finds its locked file no longer
 //! the one at the path does not run, so the lock always lives on one inode.
 
+use std::collections::BTreeMap;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -21,6 +22,43 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::input::Harness;
+
+/// A subagent's hub session, found by the harness's id for the subagent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Child {
+    /// The session name, `<parent>/<child>`.
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
+/// A `session_leave` the hub has not taken yet. It holds no token: a retry
+/// resolves the hub and the member again from `cwd`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Leave {
+    pub project_id: String,
+    pub name: String,
+    /// Where the hook that wanted the leave ran, which a retry resolves from.
+    pub cwd: String,
+    /// The harness session the child was mapped under, for a subagent's leave.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness_session_id: Option<String>,
+    /// The harness's id for the subagent, for a subagent's leave.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub attempts: u32,
+    /// Epoch milliseconds of the last attempt.
+    #[serde(default)]
+    pub tried_ms: u64,
+}
+
+/// The leaves of one harness that are still owed, across its sessions.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Leaves {
+    #[serde(default)]
+    pub pending: Vec<Leave>,
+}
 
 /// What one harness session remembers between hook runs.
 #[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -31,8 +69,19 @@ pub struct State {
     pub session_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// The member the hub says this session acts as.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub actor: Option<String>,
+    pub member: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// The subagents that have started and not stopped, by the harness's
+    /// `agent_id`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub children: BTreeMap<String, Child>,
+    /// The last line a hook printed about the connection, so a state that does
+    /// not change is said once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
     #[serde(default)]
     pub prompts: u64,
     /// Epoch milliseconds of the last peek a prompt reserved.
@@ -125,6 +174,11 @@ impl Store {
     /// The state as last written, or empty. A write is a rename, so a read sees
     /// a whole file and needs no lock.
     pub fn read(&self) -> State {
+        self.read_as()
+    }
+
+    /// The file as last written, read as `T`, or empty.
+    pub fn read_as<T: serde::de::DeserializeOwned + Default>(&self) -> T {
         std::fs::read_to_string(&self.path)
             .ok()
             .and_then(|text| serde_json::from_str(&text).ok())
@@ -171,8 +225,16 @@ impl Store {
     /// Change the state and write it back. A write that fails is dropped: the
     /// state caches pacing times, and the hook works without it.
     pub fn update(&self, change: impl FnOnce(&mut State)) -> State {
+        self.update_as(change)
+    }
+
+    /// [`Store::update`] for a file that holds a `T`.
+    pub fn update_as<T: serde::Serialize + serde::de::DeserializeOwned + Default>(
+        &self,
+        change: impl FnOnce(&mut T),
+    ) -> T {
         let held = self.lock_state();
-        let mut state = self.read();
+        let mut state = self.read_as::<T>();
         change(&mut state);
         if held.is_some() {
             self.write(&state);
@@ -213,7 +275,7 @@ impl Store {
         true
     }
 
-    fn write(&self, state: &State) {
+    fn write(&self, state: &impl Serialize) {
         let Some(dir) = self.path.parent() else {
             return;
         };
@@ -246,37 +308,6 @@ impl Store {
         std::fs::remove_file(&self.path).ok();
         std::fs::remove_file(&self.lock).ok();
         true
-    }
-
-    /// Whether another state file of this harness names the hub session
-    /// `session_id` and was written within `within`: another live instance
-    /// sharing the session. This store's own file is not counted. A file older
-    /// than `within` is a crashed instance's leftover and does not keep a
-    /// session open.
-    pub fn shared_with_another(&self, session_id: &str, within: Duration) -> bool {
-        let Some(dir) = self.path.parent() else {
-            return false;
-        };
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return false;
-        };
-        entries.filter_map(Result::ok).any(|entry| {
-            let path = entry.path();
-            if path == self.path || path.extension().is_none_or(|ext| ext != "json") {
-                return false;
-            }
-            let recent = entry
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .ok()
-                .and_then(|written| written.elapsed().ok())
-                .is_some_and(|age| age <= within);
-            recent
-                && std::fs::read_to_string(&path)
-                    .ok()
-                    .and_then(|text| serde_json::from_str::<State>(&text).ok())
-                    .is_some_and(|state| state.session_id.as_deref() == Some(session_id))
-        })
     }
 
     /// Delete the watcher lock file when no watcher holds it. The lock is taken

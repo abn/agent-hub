@@ -5,7 +5,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-use super::hub::{CLOSE_BUDGET, Conn, Hub, STARTUP_BUDGET, dedupe};
+use super::hub::{CLOSE_BUDGET, Conn, Hub, NOT_A_MEMBER, STARTUP_BUDGET, dedupe};
+use super::input::Harness;
 use super::render::{Anchor, ContextInput, Item, ago, context_block, notice_line, sanitize};
 use super::resolve::{ResolveInput, Resolved, gather_git, read_top_level_file, resolve_context};
 use crate::client::Failure;
@@ -20,18 +21,22 @@ pub struct Started {
     pub project_id: String,
     pub session_name: String,
     pub session_id: Option<String>,
-    pub actor: String,
+    pub member: String,
+    pub agent: String,
+}
+
+/// What a bundle run came to: a session, or the one line that says why the
+/// hub cannot give one.
+#[derive(Debug)]
+pub enum Bundle {
+    Session(Started),
+    Notice(String),
 }
 
 /// What one bundle run needs to know about its caller.
 pub struct Request<'a> {
     pub hub: &'a Hub,
-    pub harness_name: &'a str,
-    pub agent_name: &'a str,
-    /// A line for the block when the hooks and the harness's MCP connection
-    /// run under different agent names.
-    pub name_note: Option<String>,
-    pub harness_session_id: &'a str,
+    pub harness: Harness,
     pub cwd: &'a str,
     pub env: &'a dyn Fn(&str) -> Option<String>,
     pub now_secs: i64,
@@ -42,7 +47,9 @@ pub struct Request<'a> {
 
 #[derive(Default)]
 struct Gathered {
-    actor: Option<String>,
+    member: Option<String>,
+    agent: Option<String>,
+    notice: Option<String>,
     resolved: Option<Resolved>,
     brief: Option<Value>,
     started: Option<Value>,
@@ -164,25 +171,42 @@ async fn gather(request: &Request<'_>, conn: &mut Conn, gathered: &mut Gathered)
         request.cwd,
         (Instant::now() + GIT_BUDGET).min(request.deadline),
     );
-    let who = conn.call("whoami", json!({})).await.ok();
-    // Who the hub sees: the member, and the agent it writes as.
-    let actor = match who
-        .as_ref()
-        .map(|who| (text(who, "member"), text(who, "agent")))
-    {
-        Some((Some(member), Some(agent))) => format!("{member}/{agent}"),
-        _ => who
-            .as_ref()
-            .and_then(|who| text(who, "actor"))
-            .unwrap_or(request.agent_name)
-            .to_string(),
+    let settings = request.hub.settings();
+    let who = match conn.call("whoami", json!({})).await {
+        Ok(who) => who,
+        // A hub that cannot be reached or refuses the token has nothing more
+        // to say to this run.
+        Err(failure @ (Failure::Denied(_) | Failure::Unavailable(_))) => {
+            gathered.failure = Some(failure);
+            return;
+        }
+        Err(_) => json!({}),
     };
-    let personal = who
-        .as_ref()
-        .and_then(|who| text(who, "personal_project"))
-        .unwrap_or(&actor)
+    match text(&who, "state") {
+        Some("pending") => {
+            let member = text(&who, "member")
+                .or(settings.member.as_deref())
+                .unwrap_or_default();
+            gathered.notice = Some(format!("Waiting for approval as {member}."));
+            return;
+        }
+        Some("anonymous") => {
+            gathered.notice = Some(NOT_A_MEMBER.to_string());
+            return;
+        }
+        _ => {}
+    }
+    let agent = text(&who, "agent").unwrap_or(&settings.agent).to_string();
+    let member = text(&who, "member")
+        .or_else(|| text(&who, "actor"))
+        .or(settings.member.as_deref())
+        .unwrap_or("local")
         .to_string();
-    gathered.actor = Some(actor);
+    let personal = text(&who, "personal_project")
+        .unwrap_or(&member)
+        .to_string();
+    gathered.member = Some(member);
+    gathered.agent = Some(agent.clone());
 
     let mut env = std::collections::HashMap::new();
     for key in ["HUB_PROJECT", "HUB_SESSION"] {
@@ -191,8 +215,8 @@ async fn gather(request: &Request<'_>, conn: &mut Conn, gathered: &mut Gathered)
         }
     }
     let mut input = ResolveInput {
-        harness: request.harness_name.to_string(),
-        harness_session_id: request.harness_session_id.to_string(),
+        agent,
+        date: date(request.now_secs),
         env,
         files: read_top_level_file(git.top_level.as_deref().filter(|_| git.is_repo)),
         git,
@@ -257,11 +281,23 @@ async fn gather(request: &Request<'_>, conn: &mut Conn, gathered: &mut Gathered)
     }
 }
 
+/// Today, in UTC, as `YYYY-MM-DD`.
+fn date(now_secs: i64) -> String {
+    let day = time::OffsetDateTime::from_unix_timestamp(now_secs)
+        .map_or(time::Date::MIN, time::OffsetDateTime::date);
+    format!(
+        "{:04}-{:02}-{:02}",
+        day.year(),
+        u8::from(day.month()),
+        day.day()
+    )
+}
+
 /// Run the bundle and render the block.
 ///
 /// A call that fails costs its own part of the block. Only a hub that cannot be
 /// reached, or a session that cannot be started, fails the whole bundle.
-pub async fn start(request: &Request<'_>) -> Result<Started, Failure> {
+pub async fn start(request: &Request<'_>) -> Result<Bundle, Failure> {
     let mut conn = request.hub.open(STARTUP_BUDGET).await?;
     let mut gathered = Gathered::default();
     let gather_until = request
@@ -278,6 +314,10 @@ pub async fn start(request: &Request<'_>) -> Result<Started, Failure> {
     pending.append(&mut gathered.pending);
     let pending = dedupe(pending);
 
+    if let Some(line) = gathered.notice.take() {
+        return Ok(Bundle::Notice(line));
+    }
+
     let (Some(resolved), Some(started)) = (gathered.resolved.as_ref(), gathered.started.as_ref())
     else {
         return Err(gathered.failure.unwrap_or_else(|| {
@@ -289,10 +329,12 @@ pub async fn start(request: &Request<'_>) -> Result<Started, Failure> {
             Failure::Unavailable(reason.to_string())
         }));
     };
-    let actor = gathered
-        .actor
+    let settings = request.hub.settings();
+    let member = gathered.member.clone().unwrap_or_default();
+    let agent = gathered
+        .agent
         .clone()
-        .unwrap_or_else(|| request.agent_name.to_string());
+        .unwrap_or_else(|| settings.agent.clone());
     let session_id = text(started, "session_id").map(str::to_string);
     let handoff = text(started, "handoff")
         .map(split_lines)
@@ -301,11 +343,14 @@ pub async fn start(request: &Request<'_>) -> Result<Started, Failure> {
         project_id: resolved.project_id.clone(),
         session_name: resolved.session_name.clone(),
         session_id: session_id.clone(),
-        actor: actor.clone(),
-        context_lines: resolved
-            .context_lines()
-            .into_iter()
-            .chain(request.name_note.clone())
+        member: member.clone(),
+        agent: agent.clone(),
+        plugin_adds_session: request.harness == Harness::Claude,
+        context_lines: settings
+            .notices
+            .iter()
+            .cloned()
+            .chain(resolved.context_lines())
             .collect(),
         brief: brief_lines(gathered.brief.as_ref()),
         anchor: anchor_view(started.get("anchor"), request.now_secs),
@@ -317,25 +362,24 @@ pub async fn start(request: &Request<'_>) -> Result<Started, Failure> {
             .unwrap_or_default(),
         pending: pending.iter().map(notice_line).collect(),
     });
-    Ok(Started {
+    Ok(Bundle::Session(Started {
         block: block.text,
         project_id: resolved.project_id.clone(),
         session_name: resolved.session_name.clone(),
         session_id,
-        actor,
-    })
+        member,
+        agent,
+    }))
 }
 
-/// The instruction a subagent gets in place of a session of its own.
-pub fn subagent_text(session_id: Option<&str>) -> String {
-    match session_id.map(sanitize) {
-        Some(id) => format!(
-            "You share the parent's hub connection and session {id}. Do not call session_start. \
-             Write with `session: {{\"session_id\": \"{id}\"}}`."
-        ),
-        None => "You share the parent's hub connection and session. Do not call session_start."
-            .to_string(),
-    }
+/// What a subagent is told about its own hub session.
+pub fn subagent_text(project_id: &str, session_name: &str) -> String {
+    let (project, name) = (sanitize(project_id), sanitize(session_name));
+    format!(
+        "You work in hub session {name} (project {project}). Hub calls carry it; pass \
+         session: {{\"project_id\": \"{project}\", \"name\": \"{name}\"}} if you call a hub \
+         tool directly."
+    )
 }
 
 /// What a compaction has to keep.

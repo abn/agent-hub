@@ -1,189 +1,151 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
-import { configPaths, parseClientToml, resolveConfig } from "../config.mjs";
+import { describe, expect, it } from "vitest";
+import { configPaths, credentialPath, readProjectFile, refusal, resolveConfig } from "../config.mjs";
 
-const realpath = (path) => path;
 const files = (map) => (path) => {
   if (path in map) return map[path];
   throw new Error("ENOENT");
 };
 
-describe("client toml", () => {
-  it("reads url and token from the client table only", () => {
-    const text = [
-      "[hub]",
-      'admin_token = "nope"',
-      "url = 'ignored'",
-      "",
-      "[client]",
-      'url = "http://hub.lan:8080/" # the hub',
-      "token = 'abc\"def'",
-      'agent_id = "x"',
-    ].join("\n");
-    expect(parseClientToml(text)).toEqual({ url: "http://hub.lan:8080/", token: 'abc"def' });
+const home = "/srv/u";
+const user = "/srv/u/.config/agent-hub/config.toml";
+const quiet = () => {};
+
+const store = (...entries) =>
+  entries.map(([url, member, token]) => `[[credential]]\nurl = "${url}"\nmember = "${member}"\ntoken = "${token}"\n`).join("\n");
+
+describe("config paths", () => {
+  it("names the user files and then the system file, or only HUB_CONFIG", () => {
+    expect(configPaths({}, home)).toEqual([user, "/srv/u/.agent-hub/config.toml", "/etc/agent-hub/config.toml"]);
+    expect(configPaths({ XDG_CONFIG_HOME: "/x" }, home)[0]).toBe("/x/agent-hub/config.toml");
+    expect(configPaths({ HUB_CONFIG: "/one.toml" }, home)).toEqual(["/one.toml"]);
   });
 
-  it("unescapes basic strings", () => {
-    expect(parseClientToml('[client]\ntoken = "a\\"b\\\\c"').token).toBe('a"b\\c');
+  it("writes credentials to HUB_CONFIG, else the user file in use, else the first candidate", () => {
+    expect(credentialPath({ HUB_CONFIG: "/one.toml" }, { home })).toBe("/one.toml");
+    expect(credentialPath({}, { home, readFile: files({}) })).toBe(user);
+    expect(credentialPath({}, { home, readFile: files({ "/srv/u/.agent-hub/config.toml": "" }) })).toBe("/srv/u/.agent-hub/config.toml");
   });
 });
 
 describe("resolveConfig", () => {
-  const home = "/srv/u";
-  const toml = (url, token) => `[client]\nurl = "${url}"\ntoken = "${token}"\n`;
+  it("lets the environment name the hub, with its own token", () => {
+    const readFile = files({ [user]: `[client]\nurl = "http://file"\n${store(["http://file", "laptop", "file-token"])}` });
+    const got = resolveConfig({ env: { HUB_URL: "http://env/", HUB_TOKEN: "env-token" }, readFile, home });
+    expect(got).toMatchObject({ url: "http://env", token: "env-token", state: "ok", source: { url: "env", token: "env" } });
+  });
 
-  it("prefers the environment, then the file, then plugin options", () => {
+  it("takes the url, member and token of the stored credential the client table names", () => {
     const readFile = files({
-      "/srv/u/.config/agent-hub/config.toml": toml("http://file", "file-token"),
-      "/srv/u/.config/agent-hub/token": "opt-token\n",
+      [user]: `[client]\nurl = "http://file"\nmember = "laptop"\n${store(["http://file", "laptop", "t-1"], ["http://file", "desktop", "t-2"])}`,
     });
-    const options = { url: "http://opt", tokenFile: "/srv/u/.config/agent-hub/token", agentName: "oc2" };
-    const quiet = () => {};
-    expect(
-      resolveConfig({ options, env: { HUB_URL: "http://env/", HUB_TOKEN: "env-token" }, readFile, realpath, home, warn: quiet }),
-    ).toEqual({ url: "http://env", token: "env-token", agentName: "oc2" });
-    expect(resolveConfig({ options, env: {}, readFile, realpath, home, warn: quiet })).toEqual({
+    expect(resolveConfig({ env: {}, readFile, home })).toMatchObject({
       url: "http://file",
-      token: "file-token",
-      agentName: "oc2",
-    });
-    expect(resolveConfig({ options, env: {}, readFile: files({ "/srv/u/.config/agent-hub/token": "opt-token\n" }), realpath, home })).toEqual({
-      url: "http://opt",
-      token: "opt-token",
-      agentName: "oc2",
+      member: "laptop",
+      token: "t-1",
+      state: "ok",
     });
   });
 
-  it("ignores a project url when a user-level url exists, and warns once if it differs", () => {
-    const readFile = files({ "/srv/u/.config/agent-hub/config.toml": toml("http://file", "file-token") });
+  it("reads a legacy client token as the credential of a hub with no member chosen", () => {
+    const readFile = files({ [user]: '[client]\nurl = "http://file"\ntoken = "legacy"\n' });
+    expect(resolveConfig({ env: {}, readFile, home })).toMatchObject({ url: "http://file", member: null, token: "legacy", state: "ok" });
+  });
+
+  it("asks for a choice when several members hold credentials and nothing picks one", () => {
+    const readFile = files({ [user]: store(["http://file", "laptop", "t-1"], ["http://file", "desktop", "t-2"]) });
+    const got = resolveConfig({ env: {}, readFile, home });
+    expect(got).toMatchObject({ url: "http://file", state: "several_members", token: null });
+    expect(refusal(got)).toBe("Several members for http://file; set member in .agent-hub.toml or HUB_MEMBER.");
+    expect(resolveConfig({ env: { HUB_MEMBER: "desktop" }, readFile, home })).toMatchObject({ member: "desktop", token: "t-2", state: "ok" });
+  });
+
+  it("holds a token back when the project file picks a pairing the config does not trust", () => {
+    const readFile = files({
+      [user]: store(["http://file", "laptop", "t-1"], ["http://file", "secret", "t-3"]),
+      "/work/repo/.agent-hub.toml": 'member = "secret"\nurl = "http://file"\n',
+    });
+    const got = resolveConfig({ env: {}, readFile, home, topLevel: "/work/repo" });
+    expect(got).toMatchObject({ member: "secret", token: null, state: "needs_trust" });
+    expect(refusal(got)).toBe(
+      "This project asks to use member secret on http://file. Allow it with agent-hub trust or under [trust] in config.toml.",
+    );
+    const trusted = files({
+      [user]: `${store(["http://file", "secret", "t-3"])}\n[trust]\npairings = [ { path = "/work/repo", url = "http://file", member = "secret" } ]\n`,
+      "/work/repo/.agent-hub.toml": 'member = "secret"\nurl = "http://file"\n',
+    });
+    expect(resolveConfig({ env: {}, readFile: trusted, home, topLevel: "/work/repo" })).toMatchObject({ token: "t-3", state: "ok" });
+  });
+
+  it("connects without a token to a hub it holds none for", () => {
+    const got = resolveConfig({ env: { HUB_URL: "http://new" }, readFile: files({}), home });
+    expect(got).toMatchObject({ url: "http://new", token: null, state: "tokenless" });
+    expect(refusal(got)).toBeNull();
+  });
+
+  it("uses the plugin option url only when nothing else names a hub, and warns when it is not used", () => {
+    const readFile = files({ [user]: '[client]\nurl = "http://file"\ntoken = "file-token"\n' });
     const warnings = [];
     const warn = (line) => warnings.push(line);
-    const fromFile = resolveConfig({ options: { url: "http://evil" }, env: {}, readFile, home, warn });
-    expect(fromFile).toMatchObject({ url: "http://file", token: "file-token" });
-    const fromEnv = resolveConfig({ options: { url: "http://evil" }, env: { HUB_URL: "http://env", HUB_TOKEN: "e" }, readFile, home, warn });
-    expect(fromEnv).toMatchObject({ url: "http://env", token: "e" });
+    expect(resolveConfig({ options: { url: "http://evil" }, env: {}, readFile, home, warn })).toMatchObject({ url: "http://file", token: "file-token" });
+    expect(resolveConfig({ options: { url: "http://evil" }, env: { HUB_URL: "http://env", HUB_TOKEN: "e" }, readFile, home, warn })).toMatchObject({
+      url: "http://env",
+      token: "e",
+    });
     expect(warnings).toHaveLength(2);
     expect(warnings[0]).toContain("http://evil");
     resolveConfig({ options: { url: "http://file/" }, env: {}, readFile, home, warn });
     expect(warnings).toHaveLength(2);
-  });
-
-  it("sends no token to a url from a layer that has none", () => {
-    const readFile = files({});
-    const env = { HUB_TOKEN: "env-token" };
-    expect(resolveConfig({ options: { url: "http://project" }, env, readFile, home })).toEqual({
+    expect(resolveConfig({ options: { url: "http://project" }, env: { HUB_TOKEN: "env-token" }, readFile: files({}), home })).toMatchObject({
       url: "http://project",
       token: null,
-      agentName: "opencode",
+      state: "tokenless",
     });
-    const withFile = files({ "/srv/u/.config/agent-hub/config.toml": toml("http://file", "file-token") });
-    expect(resolveConfig({ options: {}, env: { ...env, HUB_URL: "http://env" }, readFile: withFile, home }).token).toBe("env-token");
-    expect(resolveConfig({ options: {}, env: { HUB_URL: "http://env" }, readFile: withFile, home }).token).toBeNull();
-    expect(resolveConfig({ options: {}, env: { HUB_TOKEN: "env-token" }, readFile: withFile, home })).toMatchObject({
-      url: "http://file",
-      token: "file-token",
-    });
-  });
-
-  it("treats empty values as unset and defaults the agent name", () => {
-    const readFile = files({ "/srv/u/.config/agent-hub/config.toml": toml("http://file", "t") });
-    const got = resolveConfig({ options: { url: " ", agentName: "" }, env: { HUB_URL: "", HUB_TOKEN: "" }, readFile, home });
-    expect(got).toEqual({ url: "http://file", token: "t", agentName: "opencode" });
-  });
-
-  it("falls back across the files the binary reads", () => {
-    const readFile = files({ "/srv/u/.agent-hub/config.toml": toml("http://legacy", "legacy") });
-    expect(resolveConfig({ env: {}, readFile, home })).toMatchObject({ url: "http://legacy", token: "legacy" });
-  });
-
-  it("lets HUB_CONFIG replace the layers", () => {
-    expect(configPaths({ HUB_CONFIG: "/x/c.toml" }, home)).toEqual(["/x/c.toml"]);
   });
 
   it("reports no url when nothing is configured", () => {
-    expect(resolveConfig({ env: {}, readFile: files({}), home }).url).toBeNull();
+    expect(resolveConfig({ env: {}, readFile: files({}), home })).toMatchObject({ url: null, state: "no_hub" });
   });
 
-  it("takes the url and the token from the same file", () => {
-    const readFile = files({
-      "/srv/u/.config/agent-hub/config.toml": '[client]\ntoken = "user-token"\n',
-      "/srv/u/.agent-hub/config.toml": toml("http://legacy", "legacy-token"),
-      "/etc/agent-hub/config.toml": toml("http://system", "system-token"),
-    });
-    expect(resolveConfig({ env: {}, readFile, home })).toMatchObject({ url: "http://legacy", token: "legacy-token" });
+  it("does not read the options a project config could carry as a token source", () => {
+    const got = resolveConfig({ options: { url: "http://project", tokenFile: "/etc/passwd", agentName: "x" }, env: {}, readFile: files({}), home });
+    expect(got.token).toBeNull();
+    expect(got).not.toHaveProperty("agentName");
   });
 
-  it("sends no token when the first file with a url has none", () => {
+  it("falls back across the files the binary reads, the user's first and then the system's", () => {
+    const readFile = files({ "/etc/agent-hub/config.toml": '[client]\nurl = "http://system"\ntoken = "sys"\n' });
+    expect(resolveConfig({ env: {}, readFile, home })).toMatchObject({ url: "http://system", token: "sys" });
+  });
+
+  it("lets HUB_CONFIG replace the layers", () => {
     const readFile = files({
-      "/srv/u/.config/agent-hub/config.toml": '[client]\nurl = "http://user"\n',
-      "/srv/u/.agent-hub/config.toml": toml("http://legacy", "legacy-token"),
+      "/one.toml": '[client]\nurl = "http://one"\ntoken = "t"\n',
+      [user]: '[client]\nurl = "http://file"\n',
     });
-    expect(resolveConfig({ env: {}, readFile, home })).toMatchObject({ url: "http://user", token: null });
+    expect(resolveConfig({ env: { HUB_CONFIG: "/one.toml" }, readFile, home })).toMatchObject({ url: "http://one", token: "t" });
   });
 });
 
-describe("tokenFile", () => {
-  const scratchRoot = fileURLToPath(new URL("../../../target/tmp/", import.meta.url));
-  let scratch;
-  afterEach(() => {
-    if (scratch) rmSync(scratch, { recursive: true, force: true });
-    scratch = undefined;
+describe("the project file", () => {
+  it("reads project, url and member from before the first table", () => {
+    const readFile = files({ "/w/.agent-hub.toml": 'project = "p"\nurl = "http://h"\nmember = "m"\n[other]\nproject = "no"\n' });
+    expect(readProjectFile("/w", readFile)).toEqual({ file: { project: "p", url: "http://h", member: "m" }, notices: [] });
   });
 
-  function layout() {
-    mkdirSync(scratchRoot, { recursive: true });
-    scratch = mkdtempSync(join(scratchRoot, "opencode-config-"));
-    const home = join(scratch, "home");
-    const dir = join(home, ".config", "agent-hub");
-    mkdirSync(dir, { recursive: true });
-    mkdirSync(join(scratch, "elsewhere"));
-    writeFileSync(join(dir, "token"), "good-token\n");
-    writeFileSync(join(scratch, "elsewhere", "id_key"), "secret-key\n");
-    return { home, dir };
-  }
-
-  const resolve = (home, tokenFile, warnings = []) =>
-    resolveConfig({ options: { url: "http://project", tokenFile }, env: { HOME: home, HUB_CONFIG: join(scratch, "none.toml") }, home, warn: (l) => warnings.push(l) });
-
-  it("reads a token file inside the agent-hub config directory", () => {
-    const { home, dir } = layout();
-    expect(resolve(home, join(dir, "token")).token).toBe("good-token");
+  it("refuses a token, since the file is shared", () => {
+    const readFile = files({ "/w/.agent-hub.toml": 'token = "x"\n' });
+    expect(readProjectFile("/w", readFile)).toEqual({ file: null, notices: [".agent-hub.toml must not hold a token; it is shared"] });
   });
 
-  it("honours XDG_CONFIG_HOME for the trusted directory", () => {
-    const { home } = layout();
-    const xdg = join(scratch, "xdg");
-    mkdirSync(join(xdg, "agent-hub"), { recursive: true });
-    writeFileSync(join(xdg, "agent-hub", "token"), "xdg-token");
-    const got = resolveConfig({
-      options: { url: "http://project", tokenFile: join(xdg, "agent-hub", "token") },
-      env: { HOME: home, XDG_CONFIG_HOME: xdg, HUB_CONFIG: join(scratch, "none.toml") },
-      home,
+  it("says a legacy .agent-hub file is no longer read", () => {
+    const readFile = files({ "/w/.agent-hub": "old-pin\nmore\n" });
+    expect(readProjectFile("/w", readFile)).toEqual({
+      file: null,
+      notices: ['found .agent-hub; this release reads .agent-hub.toml: project = "old-pin"'],
     });
-    expect(got.token).toBe("xdg-token");
   });
 
-  it("refuses a token file outside it, sends no token and warns once", () => {
-    const { home } = layout();
-    const warnings = [];
-    const got = resolve(home, join(scratch, "elsewhere", "id_key"), warnings);
-    expect(got).toMatchObject({ url: "http://project", token: null });
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).not.toContain("secret-key");
-  });
-
-  it("refuses a symlink inside the directory that points outside it", () => {
-    const { home, dir } = layout();
-    symlinkSync(join(scratch, "elsewhere", "id_key"), join(dir, "link"));
-    const warnings = [];
-    expect(resolve(home, join(dir, "link"), warnings).token).toBeNull();
-    expect(warnings).toHaveLength(1);
-  });
-
-  it("refuses a path that climbs out with dot segments", () => {
-    const { home, dir } = layout();
-    expect(resolve(home, join(dir, "..", "..", "..", "elsewhere", "id_key")).token).toBeNull();
+  it("has nothing outside a repository", () => {
+    expect(readProjectFile(null)).toEqual({ file: null, notices: [] });
   });
 });

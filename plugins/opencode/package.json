@@ -24,6 +24,7 @@
     "plugin.mjs",
     "hub.mjs",
     "bundle.mjs",
+    "child.mjs",
     "resolve.mjs",
     "format.mjs",
     "config.mjs",

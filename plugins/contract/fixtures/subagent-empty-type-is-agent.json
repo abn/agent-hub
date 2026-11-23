@@ -1,0 +1,29 @@
+{
+  "name": "subagent-empty-type-is-agent",
+  "input": {
+    "project_id": "homelab",
+    "parent": "feat-x",
+    "agent_type": null,
+    "agent_id": "af9c57a04aa308f01",
+    "mapped": null,
+    "replies": [
+      {
+        "ok": {
+          "session_id": "s1",
+          "project_id": "homelab",
+          "status": "active",
+          "outcome": "created"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "calls": [
+      {
+        "session_name": "feat-x/agent-af9c57a0",
+        "exclusive": true
+      }
+    ],
+    "child": "feat-x/agent-af9c57a0"
+  }
+}

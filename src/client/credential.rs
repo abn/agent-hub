@@ -67,6 +67,10 @@ pub struct Credential {
     #[serde(default)]
     pub member: Option<String>,
     pub token: String,
+    /// `default = true`: the credential Claude Code's header helper sends for
+    /// this hub when it holds several for it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub default: bool,
 }
 
 /// One `[trust] pairings` entry. A pairing with no member matches only a
@@ -807,6 +811,7 @@ pub fn parse_config(text: &str) -> Result<ConfigView> {
                         url: String::new(),
                         member: None,
                         token: String::new(),
+                        default: false,
                     });
                     current = Some(view.credentials.len() - 1);
                 }
@@ -847,6 +852,9 @@ pub fn parse_config(text: &str) -> Result<ConfigView> {
                         "url" => credential.url = string_of(&value),
                         "member" => credential.member = Some(string_of(&value)),
                         "token" => credential.token = string_of(&value),
+                        "default" => {
+                            credential.default = matches!(&value, Val::Raw(text) if text == "true");
+                        }
                         _ => {}
                     }
                 }
@@ -863,6 +871,7 @@ pub fn parse_config(text: &str) -> Result<ConfigView> {
                 url: url.to_string(),
                 member: None,
                 token: token.to_string(),
+                default: false,
             },
         );
     }

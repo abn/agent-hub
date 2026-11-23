@@ -26,6 +26,9 @@ the only credential it holds. The token is printed only with --reveal.
 is present only when a token was resolved, and the command exits 0 either way,
 so a harness that runs it as a header helper always gets valid JSON. With no
 --url it reads the hub from CLAUDE_CODE_MCP_SERVER_URL, without a trailing /mcp.
+For a hub named either way it sends the only credential config.toml holds for it,
+else the one marked default = true, else no Authorization: the project's file
+and the environment do not choose, since a header helper runs outside the project.
 ";
 
 /// What `agent-hub trust` takes on its command line.
@@ -98,6 +101,12 @@ pub fn run_token(args: &[String]) -> u8 {
     }
 
     let pinned = url.or_else(|| headers.then(claude_server_url).flatten());
+    if headers
+        && member.is_none()
+        && let Some(url) = pinned.as_deref()
+    {
+        return print_helper_headers(url, agent.as_deref());
+    }
     let chosen_member = member.clone();
     let lookup = move |key: &str| match key {
         "HUB_MEMBER" if chosen_member.is_some() => chosen_member.clone(),
@@ -157,6 +166,36 @@ pub fn run_token(args: &[String]) -> u8 {
     for notice in &config.notices {
         eprintln!("agent-hub token: {notice}");
     }
+    0
+}
+
+/// The headers Claude Code's header helper gets for the hub at `url`. The
+/// helper runs from the plugin's directory, with no project and no plugin
+/// options, so it chooses from `config.toml` alone: the only credential for the
+/// hub, else the one marked `default = true`, else none. The environment and
+/// the project's file do not choose, so the hooks, which do read them, say when
+/// their member differs.
+fn print_helper_headers(url: &str, agent: Option<&str>) -> u8 {
+    let mut out = Map::new();
+    match crate::config::load_layered_configs(&real_env) {
+        Ok(files) => {
+            let credentials: Vec<_> = files
+                .iter()
+                .flat_map(|file| file.view.credentials.iter().cloned())
+                .collect();
+            if let Some(chosen) = super::hook::helper::choice(&credentials, url) {
+                out.insert(
+                    "Authorization".to_string(),
+                    json!(format!("Bearer {}", chosen.token)),
+                );
+            }
+        }
+        Err(err) => eprintln!("agent-hub token: {err}"),
+    }
+    if let Some(agent) = agent.map(str::trim).filter(|a| !a.is_empty()) {
+        out.insert("X-Agent-Id".to_string(), json!(agent));
+    }
+    println!("{}", Value::Object(out));
     0
 }
 

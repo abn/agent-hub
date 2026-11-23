@@ -1,0 +1,18 @@
+{
+  "name": "antigravity-pre-tool-use-no-op",
+  "input": {
+    "harness": "antigravity",
+    "event": "pre-tool-use",
+    "output": {
+      "context": "ignored",
+      "compaction_instructions": null,
+      "updated_input": {
+        "a": 1
+      }
+    }
+  },
+  "expected": {
+    "stdout_json": {},
+    "exit_code": 0
+  }
+}

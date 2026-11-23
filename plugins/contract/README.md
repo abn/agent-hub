@@ -10,21 +10,27 @@ without `.json`. All lengths count Unicode scalar values. The prefix picks the f
 
 ## resolve-*
 
-Input: `harness`, `harness_session_id`, `cwd`, `env` (only the `HUB_*` keys that
-matter), `git` (`is_repo`, `top_level`, `origin_url`, `branch`, `detached`),
-`files` (absolute path to file text, for `.agent-hub`), `known_projects` (ids of
-projects that exist) and `personal_project`. Outside a repository `git.top_level`
-is `null` and `files` is never consulted.
+Input: `agent` (the canonical agent name), `date` (`YYYY-MM-DD`), `cwd`, `env`
+(only the `HUB_*` keys that matter), `git` (`is_repo`, `top_level`,
+`origin_url`, `branch`, `detached`, `linked_worktree`), `files` (absolute path
+to file text, for `.agent-hub.toml` and a legacy `.agent-hub`),
+`known_projects` (ids of projects that exist) and `personal_project`. Outside a
+repository `git.top_level` is `null` and `files` is never consulted.
 
 Expected: `project_id`, `project_source` (`env`, `file`, `origin`, `dir`,
-`personal`), `session_name`, `session_source` (`env`, `branch`,
-`harness_session`) and `context_line` (a string, or `null`; several lines are
-joined with a newline).
+`personal`), `session_name`, `session_source` (`env`, `branch`, `worktree`,
+`date`) and `context_line` (a string, or `null`; several lines are joined with
+a newline).
 
-When the session name falls to the harness session, it is
-`<harness>-<short id>`: the first 8 characters of `harness_session_id` once
-characters outside `[A-Za-z0-9_-]` are removed, or the first 8 hex characters of
-the SHA-256 of the whole id (UTF-8 bytes) when fewer than 8 remain.
+The project is `HUB_PROJECT`, then the `project` key of `.agent-hub.toml` (a
+quoted string before the first table; `url` and `member` do not pin a project),
+then the origin's repository name or the top level's directory name when the hub
+has a project of that name, then the personal space. A legacy `.agent-hub` file
+is never read for a project; its first line is quoted in a context line.
+
+The session is `HUB_SESSION`, then the branch (not `main` or `master`, not
+detached), then the directory name of a linked worktree, then
+`<agent>-<date>`, which is the name the hub suggests.
 
 ## notice-*
 
@@ -44,9 +50,10 @@ false).
 
 ## context-*
 
-Input: `project_id`, `session_name`, `session_id` (or `null`), `actor`,
-`context_lines` (optional, default empty; the resolution lines, placed after the
-header line), `brief`,
+Input: `project_id`, `session_name`, `session_id` (or `null`), `member`,
+`agent`, `plugin_adds_session` (optional, default true), `context_lines`
+(optional, default empty; the resolution lines, placed after the header line),
+`brief`,
 `anchor` (`{phase, age, lines}` or `null`), `handoff`, `kb_index` and `pending`
 (notice lines). Lists are lines before any cap.
 
@@ -56,16 +63,52 @@ line) is flattened and has the tag rewritten, as in `notice-*`, before it is cut
 Expected: `text`, the whole `<agent-hub>` block without a trailing newline, and
 `truncated`, whether the cap removed lines.
 
+The header line reads `you are <member> · <agent>`. The bind line is `Pass
+session: {"project_id": ..., "name": ...} on hub calls (the plugin adds it).`,
+or `... on every hub call.` when `plugin_adds_session` is false.
+
 ## claude-* and antigravity-*
 
-Input: `harness`, `event` and `output` (`{context, compaction_instructions}`,
-either may be `null`).
+Input: `harness`, `event` and `output` (`{context, compaction_instructions,
+updated_input}`, each may be `null` or absent).
 
 A context string is compared as given: the full block for a first Antigravity
 prompt, the session pointer for a later one.
 
 Expected: `exit_code` and one of `stdout_json` (the parsed JSON the hook prints)
 or `stdout_text` (plain stdout, compared after removing one trailing newline).
+
+## pretool-*
+
+Input: `state` (what the hook remembers: `project_id`, `session_name` and the
+`children` of the harness session, by `agent_id`) and `stdin`, a Claude
+`PreToolUse` payload as the harness wrote it. Expected: `stdout_json`, the hook's
+output, and `exit_code`.
+
+A call that names no session gets one: the child session of a mapped subagent,
+else the harness session's when the call is the main thread's. A subagent's call
+with no confirmed child mapping is left alone, never put under the parent's: the
+hub then records the member and the agent only. A call that names a session, a
+`session_start` and a call before any session started are left alone, which
+prints `{}`. The output
+holds `updatedInput` only and never a `permissionDecision`.
+
+## subagent-*
+
+Input: `project_id`, `parent` (the harness session's name), `agent_type`,
+`agent_id`, `mapped` (the child name the hook already holds for this
+`agent_id`, or `null`) and `replies`, the hub's answers to each `session_start`
+in order: `{"ok": result}` or `{"error": the hub's error object}`.
+
+Expected: `calls`, the `session_start` calls made, each
+`{session_name, exclusive}`, and `child`, the name the subagent ended up with, or
+`null` when it has none.
+
+A new child is `<parent>/<type>-<id8>`: the type slugged and cut to 24, and the
+first 8 letters and digits of the id. It is started exclusively. On a
+`session_name_taken` reply the next name is tried, `-2` to `-9` and then the type
+with the whole id slugged; any other refusal stops. A mapped child starts again
+under its own name with `exclusive` false.
 
 ## Adding a case
 
