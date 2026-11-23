@@ -293,6 +293,8 @@ take_lock() {
 
 record_error() {
   chain_ready create || return 1
+  # The same reason keeps its seen marker, so a hook says it once per session.
+  [ "$(cat "$dir/launcher-error" 2>/dev/null)" != "$1" ] || return 0
   printf '%s\n' "$1" >"$dir/launcher-error"
   rm -f "$dir/launcher-error.seen"
 }
