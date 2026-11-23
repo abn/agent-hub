@@ -2,7 +2,7 @@
 //! recreated slugs, and grant/confidentiality races.
 
 use agent_hub::policy::{self, Access};
-use agent_hub::principal::Principal;
+use agent_hub::principal::{CredentialState, Principal};
 use agent_hub::store::artifacts::{self, NewArtifact};
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::{identity, projects, sessions};
@@ -257,12 +257,8 @@ async fn policy_revocation_racing_event_write_is_rejected_at_write_barrier() {
         .await
         .expect("add grant");
 
-    let principal = Principal {
-        actor: "agent:agent-secret".to_string(),
-        agent_id: Some("agent-secret".to_string()),
-        is_admin: false,
-        is_pending: false,
-    };
+    let mut principal = Principal::for_member("agent-secret", "", CredentialState::Active);
+    principal.actor = "agent:agent-secret".to_string();
 
     // Step 1: authorize succeeds
     policy::authorize(&state.db, &principal, "conf-proj", Access::Write)

@@ -21,6 +21,8 @@ use crate::store::events;
 use crate::store::inbox::{self, InboxItem};
 use crate::store::questions::{self, NewQuestion};
 
+use super::brain::with_session;
+use super::session_arg::{Mode, SessionArg};
 use super::{HubServer, to_error_data};
 
 #[tool_router(router = inbox_router, vis = "pub")]
@@ -54,7 +56,16 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
-        let session_id = self.session_in(&principal, &params.project_id).await;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&params.project_id),
+                Mode::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
         let posted = questions::post_outcome(
             &self.state.db,
             &self.state.config.inbox_caps,
@@ -67,7 +78,7 @@ impl HubServer {
                 context: params.context.as_deref(),
                 options: params.options.as_deref(),
                 idempotency_key: params.idempotency_key.as_deref(),
-                session_id: session_id.as_deref(),
+                session_id: resolved.session_id(),
                 deadline,
             },
         )
@@ -86,11 +97,14 @@ impl HubServer {
         // question id, the event id, and the thread id are the same value.
         let thread_id = event_id.clone();
         let question_id = event_id.clone();
-        Ok(CallToolResult::structured(json!({
-            "event_id": event_id,
-            "question_id": question_id,
-            "thread_id": thread_id,
-        })))
+        Ok(CallToolResult::structured(with_session(
+            json!({
+                "event_id": event_id,
+                "question_id": question_id,
+                "thread_id": thread_id,
+            }),
+            &resolved,
+        )))
     }
 
     #[tool(
@@ -121,11 +135,21 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&question.project_id),
+                Mode::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
         self.state.settle_before_read().await;
         let event_id = questions::answer(
             &self.state.db,
             self.state.config.events_per_project.per_project,
-            &principal.actor,
+            &principal.writer(resolved.session_id()),
             &params.question_id,
             &params.body,
             params.idempotency_key.as_deref(),
@@ -134,7 +158,10 @@ impl HubServer {
         .map_err(to_error_data)?;
 
         self.state.notify();
-        Ok(CallToolResult::structured(json!({ "event_id": event_id })))
+        Ok(CallToolResult::structured(with_session(
+            json!({ "event_id": event_id }),
+            &resolved,
+        )))
     }
 
     #[tool(
@@ -155,6 +182,15 @@ impl HubServer {
             ))));
         }
         let principal = self.principal(&context);
+        self.resolve_session(
+            &context,
+            &principal,
+            params.session.as_ref(),
+            params.project_id.as_deref(),
+            Mode::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
         let visible = policy::visibility(&self.state.db, &principal)
             .await
             .map_err(to_error_data)?;
@@ -194,6 +230,15 @@ impl HubServer {
         Parameters(params): Parameters<InboxWaitParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        self.resolve_session(
+            &context,
+            &principal,
+            params.session.as_ref(),
+            params.project_id.as_deref(),
+            Mode::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
         let visible = policy::visibility(&self.state.db, &principal)
             .await
             .map_err(to_error_data)?;
@@ -311,6 +356,9 @@ struct QuestionPostParams {
     /// ignored.
     #[serde(default)]
     on_expiry: Option<String>,
+    /// The session this question is asked in.
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `answer_post`.
@@ -322,6 +370,8 @@ struct AnswerPostParams {
     /// returns the first answer instead of posting a duplicate.
     #[serde(default)]
     idempotency_key: Option<String>,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `inbox_read`.
@@ -341,6 +391,8 @@ struct InboxReadParams {
     /// Page size: 50 by default, 500 at most, at least 1.
     #[serde(default)]
     limit: Option<i64>,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `inbox_wait`.
@@ -354,4 +406,6 @@ struct InboxWaitParams {
     /// The cursor from the previous call's `next_since`.
     #[serde(default)]
     since: Option<String>,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }

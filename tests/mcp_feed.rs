@@ -30,7 +30,7 @@ fn serve(data_dir: &Path) -> (HubProcess, u16) {
 fn signal_append_round_trips_over_stdio() {
     let data_dir = TempDir::new("roundtrip");
     common::seed::seed_project(data_dir.path(), "p1");
-    let mut server = McpServer::mcp(data_dir.path(), &[("HUB_AGENT_ID", "stdio-agent")]);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let appended = server.call_tool(
@@ -57,7 +57,7 @@ fn signal_append_round_trips_over_stdio() {
     assert_eq!(events[0]["kind"], "signal");
     assert_eq!(events[0]["payload"]["n"], 1);
     assert_eq!(
-        events[0]["actor"], "stdio-agent",
+        events[0]["actor"], "local",
         "the actor is server-set, not taken from arguments"
     );
     assert_eq!(result["next_since"], event_id);
@@ -67,7 +67,7 @@ fn signal_append_round_trips_over_stdio() {
 fn signal_append_refuses_hub_owned_kinds() {
     let data_dir = TempDir::new("hub-kinds");
     common::seed::seed_project(data_dir.path(), "p1");
-    let mut server = McpServer::mcp(data_dir.path(), &[("HUB_AGENT_ID", "stdio-agent")]);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     for kind in ["system", "session", "artifact", "question", "answer"] {
@@ -107,7 +107,7 @@ fn signal_append_validates_thread_id() {
     let data_dir = TempDir::new("thread-validate");
     common::seed::seed_project(data_dir.path(), "p1");
     common::seed::seed_project(data_dir.path(), "p2");
-    let mut server = McpServer::mcp(data_dir.path(), &[("HUB_AGENT_ID", "stdio-agent")]);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let root_res = server.call_tool(
@@ -178,7 +178,7 @@ fn signal_append_validates_thread_id() {
 fn idempotency_key_yields_one_event() {
     let data_dir = TempDir::new("idempotency");
     common::seed::seed_project(data_dir.path(), "p1");
-    let mut server = McpServer::mcp(data_dir.path(), &[("HUB_AGENT_ID", "stdio-agent")]);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let arguments = json!({
@@ -207,7 +207,7 @@ fn idempotency_key_yields_one_event() {
 fn payload_over_cap_returns_payload_too_large() {
     let data_dir = TempDir::new("overcap");
     common::seed::seed_project(data_dir.path(), "p1");
-    let mut server = McpServer::mcp(data_dir.path(), &[("HUB_AGENT_ID", "stdio-agent")]);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let oversized = "a".repeat(300 * 1024);
@@ -227,7 +227,7 @@ fn payload_over_cap_returns_payload_too_large() {
 }
 
 #[test]
-fn streamable_http_requires_a_bearer_token() {
+fn streamable_http_refuses_tools_without_a_valid_bearer_token() {
     let data_dir = TempDir::new("http");
     common::seed::seed_project(data_dir.path(), "http");
     let (_child, port) = serve(data_dir.path());
@@ -244,11 +244,54 @@ fn streamable_http_requires_a_bearer_token() {
     })
     .to_string();
 
-    let denied = http_post(port, &initialize, None, None);
+    let unknown = http_post(port, &initialize, Some("not-a-token"), None);
     assert_eq!(
-        denied.status, 401,
-        "a request without a token is rejected: {}",
-        denied.raw
+        unknown.status, 401,
+        "a request with an unknown token is rejected: {}",
+        unknown.raw
+    );
+    assert!(
+        unknown.raw.contains("token_unknown"),
+        "the refusal names its reason: {}",
+        unknown.raw
+    );
+
+    let anonymous = http_post(port, &initialize, None, None);
+    assert_eq!(
+        anonymous.status, 200,
+        "a request without a token opens as an anonymous caller: {}",
+        anonymous.raw
+    );
+    let anonymous_session = anonymous
+        .header("mcp-session-id")
+        .expect("initialize assigns a session id");
+    http_post(
+        port,
+        &json!({"jsonrpc": "2.0", "method": "notifications/initialized"}).to_string(),
+        None,
+        Some(&anonymous_session),
+    );
+    let refused = http_post(
+        port,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "signal_append",
+                "arguments": {"project_id": "http", "kind": "signal", "summary": "no token"},
+            },
+        })
+        .to_string(),
+        None,
+        Some(&anonymous_session),
+    );
+    let error = &refused.message()["error"]["data"]["error"];
+    assert_eq!(error["code"], "unauthenticated", "{}", refused.raw);
+    assert_eq!(
+        error["details"]["reason"], "token_missing",
+        "{}",
+        refused.raw
     );
 
     let initialized = http_post(port, &initialize, Some(ADMIN_TOKEN), None);

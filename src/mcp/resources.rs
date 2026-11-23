@@ -275,7 +275,7 @@ impl HubServer {
         path: &str,
     ) -> Result<ReadResourceResult> {
         let project_id = self
-            .knowledge_project(principal, Some(project_id), Access::Read)
+            .knowledge_project(principal, Some(project_id), None, Access::Read)
             .await?;
         let absent = || knowledge::no_page(path);
         let kb = self

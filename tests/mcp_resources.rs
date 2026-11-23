@@ -236,7 +236,7 @@ fn a_confidential_project_is_hidden_until_the_agent_holds_a_grant() {
     let granted = wire::rest(
         hub.port,
         "POST",
-        &format!("/api/v1/agents/{AGENT}/grants"),
+        &format!("/api/v1/members/{AGENT}/grants"),
         Some(ADMIN_TOKEN),
         Some(r#"{"project_id":"vault"}"#),
     );

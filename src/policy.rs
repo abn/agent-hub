@@ -39,13 +39,15 @@ impl Visibility {
     }
 }
 
-/// Reject a caller that may not reach a project.
+/// Reject a caller that may not reach a project. A caller whose credential is
+/// not active reaches none.
 pub async fn authorize(
     db: &Database,
     principal: &Principal,
     project_id: &str,
     access: Access,
 ) -> Result<()> {
+    principal.require_active()?;
     if principal.is_admin() {
         return Ok(());
     }
@@ -101,6 +103,7 @@ pub(crate) async fn authorize_in_tx(
     project_id: &str,
     access: Access,
 ) -> Result<()> {
+    principal.require_active()?;
     let mut rows = tx
         .query(
             "SELECT id, owner_member, confidential, status FROM projects WHERE id = ?1",
@@ -208,6 +211,7 @@ pub fn conceal(principal: &Principal, error: Error) -> Error {
 /// an agent sees every non-confidential project plus any confidential project
 /// it has been granted.
 pub async fn visibility(db: &Database, principal: &Principal) -> Result<Visibility> {
+    principal.require_active()?;
     if principal.is_admin() {
         return Ok(Visibility::All);
     }

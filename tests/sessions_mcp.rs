@@ -1,10 +1,12 @@
-//! Session ownership and pickup over MCP, with two real agents.
+//! Shared sessions over MCP, with real members.
 //!
-//! Each test starts one hub on loopback and drives it as two authenticated
-//! agents, which is the only way to prove that a session belongs to its owner:
-//! the stdio transport is the human admin and never sees the ownership rules.
+//! Each test starts one hub on loopback and drives it as authenticated members,
+//! which is the only way to prove that a session is shared by name and that
+//! its participants are told apart: the stdio transport is the local
+//! administrator and is one participant only.
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use agent_hub::store::{identity, projects};
 use serde_json::{Value, json};
@@ -19,12 +21,16 @@ use common::wire::{mcp_post, rest};
 const ADMIN_TOKEN: &str = "sessions-mcp-admin";
 const PROJECT: &str = "homelab";
 
-/// One agent's authenticated MCP connection.
+/// One member's authenticated MCP connection.
+///
+/// It follows the session of its last successful `session_start`, adding it to
+/// a call that names none, as a plugin's hook does.
 #[derive(Clone)]
 struct Agent {
     port: u16,
     token: String,
     session: String,
+    following: Arc<Mutex<Option<Value>>>,
 }
 
 impl Agent {
@@ -65,7 +71,57 @@ impl Agent {
         (code, message)
     }
 
+    /// Call a tool and return the error code and `details` of its refusal.
+    fn refusal_details(&self, name: &str, arguments: Value) -> (String, Value) {
+        let response = self.raw(name, arguments);
+        let error = response
+            .get("error")
+            .cloned()
+            .unwrap_or_else(|| panic!("{name} was expected to fail: {response}"));
+        let code = error
+            .pointer("/data/error/code")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let details = error
+            .pointer("/data/error/details")
+            .cloned()
+            .unwrap_or(Value::Null);
+        (code, details)
+    }
+
     fn raw(&self, name: &str, arguments: Value) -> Value {
+        let mut arguments = arguments;
+        let following = self.following.lock().expect("following").clone();
+        if let (Some(following), Some(object)) = (following, arguments.as_object_mut()) {
+            object.entry("session").or_insert(following);
+        }
+        let message = self.raw_exact(name, arguments.clone());
+        match name {
+            "session_start" => {
+                if let Some(id) = message
+                    .pointer("/result/structuredContent/session_id")
+                    .and_then(Value::as_str)
+                {
+                    *self.following.lock().expect("following") = Some(json!({"session_id": id}));
+                }
+            }
+            "session_end" if message.get("error").is_none() => {
+                let ended = arguments
+                    .pointer("/session/session_id")
+                    .or_else(|| arguments.get("session_id"));
+                let mut following = self.following.lock().expect("following");
+                if ended == following.as_ref().and_then(|f| f.get("session_id")) {
+                    *following = None;
+                }
+            }
+            _ => {}
+        }
+        message
+    }
+
+    /// Send exactly these arguments, following no session.
+    fn raw_exact(&self, name: &str, arguments: Value) -> Value {
         let body = json!({
             "jsonrpc": "2.0",
             "id": 2,
@@ -101,6 +157,7 @@ fn connect(port: u16, token: &str) -> Agent {
         port,
         token: token.to_string(),
         session,
+        following: Arc::new(Mutex::new(None)),
     }
 }
 
@@ -212,7 +269,7 @@ fn text(value: &Value, key: &str) -> String {
 }
 
 #[tokio::test]
-async fn two_agents_under_one_name_keep_separate_brains() {
+async fn two_members_starting_one_name_share_one_session_and_brain() {
     let fleet = Fleet::new("two-agents", &["agent-one", "agent-two"]).await;
 
     let one = fleet.agent(0).call(
@@ -223,25 +280,47 @@ async fn two_agents_under_one_name_keep_separate_brains() {
         "session_start",
         json!({"project_id": PROJECT, "session_name": "nightly"}),
     );
-    assert_ne!(
+    assert_eq!(
         text(&one, "session_id"),
         text(&two, "session_id"),
-        "one name under two agents is two sessions"
+        "one name in one project is one session"
     );
-    assert_eq!(text(&one, "agent"), "agent-one");
-    assert_eq!(text(&two, "agent"), "agent-two");
+    assert_eq!(text(&one, "member"), "agent-one");
+    assert_eq!(text(&two, "member"), "agent-two");
+    assert_eq!(one["outcome"], "created");
+    assert_eq!(two["outcome"], "resumed");
+    assert_eq!(two["joined"], true, "the second caller joins: {two}");
 
     fleet.agent(0).call(
         "brain_put",
         json!({"store": "session", "path": "/kv/plan", "content": "mine"}),
     );
-    let (code, _) = fleet
+    let read = fleet
         .agent(1)
-        .refusal("brain_get", json!({"path": "/kv/plan"}));
+        .call("brain_get", json!({"path": "/kv/plan"}));
     assert_eq!(
-        code, "not_found",
-        "the other agent's brain holds nothing of the first's"
+        read["content"], "mine",
+        "the second participant sees the first's brain"
     );
+
+    // A value another participant wrote last needs the version it was read at.
+    let (code, details) = fleet.agent(1).refusal_details(
+        "brain_put",
+        json!({"store": "session", "path": "/kv/plan", "content": "theirs"}),
+    );
+    assert_eq!(code, "conflict");
+    assert_eq!(details["reason"], "stale_base", "{details}");
+    assert_eq!(details["version"], read["version"], "{details}");
+    let wrote = fleet.agent(1).call(
+        "brain_put",
+        json!({
+            "store": "session",
+            "path": "/kv/plan",
+            "content": "theirs",
+            "if_version": read["version"],
+        }),
+    );
+    assert_eq!(wrote["ok"], true, "a write on the version it read lands");
 
     // The result carries what an agent needs to reach its brain, and no
     // filesystem path.
@@ -260,8 +339,8 @@ async fn two_agents_under_one_name_keep_separate_brains() {
 }
 
 #[tokio::test]
-async fn an_ended_session_is_adopted_by_the_next_agent() {
-    let fleet = Fleet::new("adopt", &["agent-one", "agent-two"]).await;
+async fn an_ended_session_is_reopened_by_the_next_member_that_starts_it() {
+    let fleet = Fleet::new("reopen", &["agent-one", "agent-two"]).await;
 
     let started = fleet.agent(0).call(
         "session_start",
@@ -279,22 +358,19 @@ async fn an_ended_session_is_adopted_by_the_next_agent() {
 
     let picked = fleet.agent(1).call(
         "session_start",
-        json!({
-            "project_id": PROJECT,
-            "session_name": "pickup",
-            "from": {"agent": "agent-one", "name": "migration"},
-        }),
+        json!({"project_id": PROJECT, "session_name": "migration"}),
     );
     assert_eq!(
         text(&picked, "session_id"),
         session_id,
-        "an adopted session keeps its id and its brain"
+        "the name reopens the same session, brain and all"
     );
-    let pickup = picked.get("pickup").expect("pickup").clone();
-    assert_eq!(pickup["mode"], "adopt");
-    assert_eq!(pickup["from_agent"], "agent-one");
-    assert_eq!(pickup["handoff"], "left the migration half applied");
-    assert_eq!(text(&picked, "agent"), "agent-two");
+    assert_eq!(picked["outcome"], "reopened");
+    assert_eq!(picked["resumed"], true);
+    assert_eq!(picked["status"], "active");
+    assert_eq!(picked["pickup"], Value::Null, "a reopen is not a fork");
+    assert_eq!(picked["handoff"], "left the migration half applied");
+    assert_eq!(text(&picked, "member"), "agent-two");
 
     let value = fleet
         .agent(1)
@@ -308,31 +384,32 @@ async fn an_ended_session_is_adopted_by_the_next_agent() {
     let entry = sessions
         .iter()
         .find(|entry| entry["session_id"] == session_id.as_str())
-        .expect("the adopted session is listed");
-    assert_eq!(entry["agent"], "agent-two");
+        .expect("the reopened session is listed");
     assert_eq!(entry["status"], "active");
-    assert_eq!(entry["session_name"], "pickup");
-    assert_eq!(entry["adopted_from"], session_id.as_str());
-
-    let feed = fleet
-        .agent(1)
-        .call("feed_read", json!({"project_id": PROJECT}));
-    let adopted = feed["events"]
+    assert_eq!(entry["session_name"], "migration");
+    assert!(
+        entry.get("agent").is_none(),
+        "a session has no owner: {entry}"
+    );
+    assert!(
+        entry.get("adopted_from").is_none(),
+        "nothing is adopted: {entry}"
+    );
+    assert_eq!(entry["started_by"]["member"], "agent-one");
+    let members: Vec<&str> = entry["participants"]
         .as_array()
-        .expect("events")
+        .expect("participants")
         .iter()
-        .filter(|event| {
-            event["summary"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("picked up")
-        })
-        .count();
-    assert_eq!(adopted, 1, "one adoption, one event: {feed}");
+        .filter_map(|participant| participant["member"].as_str())
+        .collect();
+    assert!(
+        members.contains(&"agent-one") && members.contains(&"agent-two"),
+        "both members are participants: {entry}"
+    );
 }
 
 #[tokio::test]
-async fn a_connection_that_lost_its_session_stops_writing_to_it() {
+async fn a_write_to_a_session_the_human_ended_is_refused_until_it_is_reopened() {
     let fleet = Fleet::new("stale-writer", &["agent-one", "agent-two"]).await;
 
     let started = fleet.agent(0).call(
@@ -345,8 +422,7 @@ async fn a_connection_that_lost_its_session_stops_writing_to_it() {
         json!({"store": "session", "path": "/kv/step", "content": "one"}),
     );
 
-    // The human ends it from the PWA, so the first agent's connection still
-    // believes the session is its own, and the next agent picks the work up.
+    // The human ends it from the PWA, so the first agent still names it.
     let (status, body) = admin(
         fleet.port,
         "POST",
@@ -354,56 +430,43 @@ async fn a_connection_that_lost_its_session_stops_writing_to_it() {
         None,
     );
     assert_eq!(status, 200, "{body}");
-    let picked = fleet.agent(1).call(
-        "session_start",
-        json!({
-            "project_id": PROJECT,
-            "session_name": "taken-over",
-            "from": {"session_id": session_id},
-        }),
-    );
-    assert_eq!(picked["pickup"]["mode"], "adopt", "{picked}");
 
-    // One brain, one writer. The connection that lost the session is told who
-    // has it now and what to do, instead of writing on beside the new owner.
-    let (code, message) = fleet.agent(0).refusal(
+    let (code, details) = fleet.agent(0).refusal_details(
+        "brain_put",
+        json!({"store": "session", "path": "/kv/step", "content": "late"}),
+    );
+    assert_eq!(code, "conflict");
+    assert_eq!(details["reason"], "session_ended", "{details}");
+
+    // Starting the name reopens it for whoever asks, and writing resumes.
+    let reopened = fleet.agent(1).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "long-run"}),
+    );
+    assert_eq!(text(&reopened, "session_id"), session_id);
+    assert_eq!(reopened["outcome"], "reopened");
+    let wrote = fleet.agent(0).call(
+        "brain_put",
+        json!({"store": "session", "path": "/kv/step", "content": "two"}),
+    );
+    assert_eq!(
+        wrote["ok"], true,
+        "the first participant's own key needs no base"
+    );
+
+    // The second participant did not write the key last, so it names the
+    // version it read.
+    let (code, details) = fleet.agent(1).refusal_details(
         "brain_put",
         json!({"store": "session", "path": "/kv/step", "content": "clobbered"}),
     );
-    assert_eq!(code, "conflict", "{message}");
-    assert!(
-        message.contains("agent-two") && message.contains("session_start"),
-        "the refusal names the new owner and the way forward: {message}"
-    );
+    assert_eq!(code, "conflict");
+    assert_eq!(details["reason"], "stale_base", "{details}");
+    assert_eq!(details["version"], wrote["version"], "{details}");
     let kept = fleet
         .agent(1)
         .call("brain_get", json!({"path": "/kv/step"}));
-    assert_eq!(
-        kept["content"], "one",
-        "the new owner's brain was not written"
-    );
-
-    // The same holds when the human reassigns a session that is still active.
-    let other = fleet.agent(1).call(
-        "session_start",
-        json!({"project_id": PROJECT, "session_name": "second"}),
-    );
-    let other_id = text(&other, "session_id");
-    let (status, body) = admin(
-        fleet.port,
-        "POST",
-        &format!("/api/v1/sessions/{other_id}/reassign"),
-        Some(r#"{"agent":"agent-one"}"#),
-    );
-    assert_eq!(status, 200, "{body}");
-    let (code, _) = fleet.agent(1).refusal(
-        "brain_put",
-        json!({"store": "session", "path": "/kv/x", "content": "late"}),
-    );
-    assert_eq!(
-        code, "conflict",
-        "a reassigned session is no longer written by its old owner"
-    );
+    assert_eq!(kept["content"], "two", "the refused write changed nothing");
 }
 
 #[tokio::test]
@@ -427,8 +490,8 @@ async fn ending_a_session_that_never_wrote_creates_no_brain() {
 }
 
 #[tokio::test]
-async fn only_one_of_two_adopters_takes_an_ended_session() {
-    let fleet = Fleet::new("adopt-race", &["agent-one", "agent-two", "agent-three"]).await;
+async fn two_members_starting_an_ended_name_at_once_reopen_it_once() {
+    let fleet = Fleet::new("reopen-race", &["agent-one", "agent-two", "agent-three"]).await;
 
     let started = fleet.agent(0).call(
         "session_start",
@@ -439,87 +502,49 @@ async fn only_one_of_two_adopters_takes_an_ended_session() {
         .agent(0)
         .call("session_end", json!({"session_id": session_id}));
 
-    // Two agents reach for one ended session at the same time.
+    // Two members reach for one ended name at the same time.
     let (second, third) = (fleet.agent(1).clone(), fleet.agent(2).clone());
-    let source = json!({"agent": "agent-one", "name": "handover"});
-    let arguments = json!({
-        "project_id": PROJECT,
-        "session_name": "handover",
-        "from": source,
-    });
+    let arguments = json!({"project_id": PROJECT, "session_name": "handover"});
     let one_args = arguments.clone();
     let other_args = arguments.clone();
     let first = std::thread::spawn(move || second.raw("session_start", one_args));
     let other = std::thread::spawn(move || third.raw("session_start", other_args));
     let results = [
-        first.join().expect("first adopter"),
-        other.join().expect("second adopter"),
+        first.join().expect("first starter"),
+        other.join().expect("second starter"),
     ];
 
-    // Exactly one of them takes the session itself. The other is told what
-    // happened one of two ways, and neither is a second adoption: it is
-    // refused, or, if it arrives after the first committed, the session it
-    // asked for is running and it gets a fork of its own.
-    let adopters: Vec<_> = results
+    // Both end up in the one session. Exactly one of them reopened it.
+    let started: Vec<&Value> = results
         .iter()
-        .filter_map(|response| response.pointer("/result/structuredContent"))
-        .filter(|result| result["pickup"]["mode"] == "adopt")
+        .map(|response| {
+            response
+                .pointer("/result/structuredContent")
+                .unwrap_or_else(|| panic!("a start succeeds: {response}"))
+        })
         .collect();
-    assert_eq!(
-        adopters.len(),
-        1,
-        "one adoption of one ended session: {results:?}"
-    );
-    assert_eq!(
-        adopters[0]["session_id"],
-        session_id.as_str(),
-        "the adopter holds the source session"
-    );
-    for result in &results {
-        if let Some(error) = result.get("error") {
-            assert!(
-                error.to_string().contains("owner="),
-                "a refusal names the current owner: {error}"
-            );
-        } else if let Some(other) = result.pointer("/result/structuredContent")
-            && other["pickup"]["mode"] != "adopt"
-        {
-            assert_eq!(other["pickup"]["mode"], "fork");
-            assert_ne!(
-                other["session_id"],
-                session_id.as_str(),
-                "the loser never gets the session it did not adopt"
-            );
-        }
+    for result in &started {
+        assert_eq!(result["session_id"], session_id.as_str());
+        assert_eq!(result["status"], "active");
+        assert_eq!(result["joined"], true, "{result}");
     }
+    let reopened = started
+        .iter()
+        .filter(|result| result["outcome"] == "reopened")
+        .count();
+    assert_eq!(reopened, 1, "one reopen of one ended session: {results:?}");
 
     let listed = fleet
         .agent(0)
         .call("session_list", json!({"project_id": PROJECT}));
-    let owners: Vec<String> = listed["sessions"]
+    let rows: Vec<&Value> = listed["sessions"]
         .as_array()
         .expect("sessions")
         .iter()
         .filter(|entry| entry["session_id"] == session_id.as_str())
-        .map(|entry| entry["agent"].as_str().unwrap_or_default().to_string())
         .collect();
-    assert_eq!(owners.len(), 1, "the session has one row and one owner");
-
-    let feed = fleet
-        .agent(0)
-        .call("feed_read", json!({"project_id": PROJECT}));
-    let adoptions = feed["events"]
-        .as_array()
-        .expect("events")
-        .iter()
-        .filter(|event| {
-            event["summary"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("picked up")
-        })
-        .count();
-    assert_eq!(adoptions, 1, "one adoption, one event");
+    assert_eq!(rows.len(), 1, "the name has one row");
+    assert_eq!(rows[0]["status"], "active");
 }
 
 #[tokio::test]
@@ -541,23 +566,19 @@ async fn a_running_session_is_forked_and_left_alone() {
         json!({
             "project_id": PROJECT,
             "session_name": "branch",
-            "from": {"agent": "agent-one", "name": "live"},
+            "from": {"name": "live", "project_id": PROJECT},
         }),
     );
     let fork_id = text(&forked, "session_id");
     assert_ne!(fork_id, source_id, "a fork is a new session");
+    assert_eq!(forked["outcome"], "created");
     assert_eq!(forked["pickup"]["mode"], "fork");
-    // A fork looks like an adoption unless it says otherwise, and a caller that
-    // asked for finished work has to know the original is still being worked.
+    // A caller that asked for a copy has to know the original is still being
+    // worked.
     let pickup = &forked["pickup"];
     assert_eq!(pickup["source_active"], true, "{pickup}");
-    assert!(
-        pickup["note"]
-            .as_str()
-            .is_some_and(|note| note.contains("copy") && note.contains("agent-one")),
-        "the result says this is a copy and who holds the original: {pickup}"
-    );
-    assert_eq!(forked["pickup"]["from_session_id"], source_id.as_str());
+    assert_eq!(pickup["from_session_id"], source_id.as_str());
+    assert_eq!(pickup["from_session_name"], "live");
     assert_eq!(
         fleet
             .agent(1)
@@ -566,8 +587,8 @@ async fn a_running_session_is_forked_and_left_alone() {
         "the fork starts from the source's state"
     );
 
-    // The source is untouched: still active, still its owner's, and its later
-    // writes stay out of the fork.
+    // The source is untouched: still active, and its later writes stay out of
+    // the fork.
     fleet.agent(0).call(
         "brain_put",
         json!({"store": "session", "path": "/kv/step", "content": "after the fork"}),
@@ -581,7 +602,7 @@ async fn a_running_session_is_forked_and_left_alone() {
     );
     let (code, _) = fleet.agent(1).refusal(
         "brain_get",
-        json!({"path": "/kv/step", "session": {"agent": "agent-two", "name": "missing"}}),
+        json!({"path": "/kv/step", "session": {"name": "missing", "project_id": PROJECT}}),
     );
     assert_eq!(code, "not_found");
 
@@ -593,15 +614,15 @@ async fn a_running_session_is_forked_and_left_alone() {
         .iter()
         .find(|entry| entry["session_id"] == source_id.as_str())
         .expect("the source is listed");
-    assert_eq!(source["agent"], "agent-one");
     assert_eq!(source["status"], "active");
     assert_eq!(source["session_name"], "live");
+    assert_eq!(source["started_by"]["member"], "agent-one");
     let fork = sessions
         .iter()
         .find(|entry| entry["session_id"] == fork_id.as_str())
         .expect("the fork is listed");
     assert_eq!(fork["forked_from"], source_id.as_str());
-    assert_eq!(fork["agent"], "agent-two");
+    assert_eq!(fork["started_by"]["member"], "agent-two");
 
     // The fork's entries are searchable under the fork, and the source keeps
     // its own rows.
@@ -624,7 +645,7 @@ async fn a_running_session_is_forked_and_left_alone() {
 }
 
 #[tokio::test]
-async fn a_pickup_into_a_name_the_caller_holds_is_refused() {
+async fn a_fork_into_a_name_that_exists_is_refused() {
     let fleet = Fleet::new("collision", &["agent-one", "agent-two"]).await;
 
     let held = fleet.agent(1).call(
@@ -640,22 +661,15 @@ async fn a_pickup_into_a_name_the_caller_holds_is_refused() {
         .agent(0)
         .call("session_end", json!({"session_id": source_id}));
 
-    let (code, message) = fleet.agent(1).refusal(
+    let (code, _) = fleet.agent(1).refusal(
         "session_start",
         json!({
             "project_id": PROJECT,
             "session_name": "busy",
-            "from": {"agent": "agent-one", "name": "done"},
+            "from": {"name": "done", "project_id": PROJECT},
         }),
     );
-    assert_eq!(code, "conflict");
-    assert!(
-        message.contains(&format!(
-            "existing_session_id={}",
-            text(&held, "session_id")
-        )),
-        "the refusal names the session already holding the name: {message}"
-    );
+    assert_eq!(code, "conflict", "a fork needs a name nothing holds");
 
     let listed = fleet
         .agent(1)
@@ -665,28 +679,114 @@ async fn a_pickup_into_a_name_the_caller_holds_is_refused() {
         .iter()
         .find(|entry| entry["session_id"] == source_id.as_str())
         .expect("the source is listed");
-    assert_eq!(source["agent"], "agent-one", "nothing moved");
-    assert_eq!(source["status"], "ended");
+    assert_eq!(source["status"], "ended", "nothing moved");
+    let busy = sessions
+        .iter()
+        .find(|entry| entry["session_id"] == text(&held, "session_id").as_str())
+        .expect("the held name is listed");
+    assert!(
+        busy["forked_from"].is_null(),
+        "the held session is as it was"
+    );
 }
 
 #[tokio::test]
-async fn only_the_owner_ends_a_session() {
-    let fleet = Fleet::new("end-owner", &["agent-one", "agent-two"]).await;
+async fn an_exclusive_start_refuses_a_name_that_exists() {
+    let fleet = Fleet::new("exclusive", &["agent-one", "agent-two"]).await;
+
+    let held = fleet.agent(1).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "busy"}),
+    );
+
+    let (code, details) = fleet.agent(0).refusal_details(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "busy", "exclusive": true}),
+    );
+    assert_eq!(code, "conflict");
+    assert_eq!(details["reason"], "session_name_taken", "{details}");
+    assert_eq!(details["session_id"], held["session_id"], "{details}");
+
+    let fresh = fleet.agent(0).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "free", "exclusive": true}),
+    );
+    assert_eq!(fresh["outcome"], "created", "a new name starts: {fresh}");
+}
+
+#[tokio::test]
+async fn any_participant_ends_a_session_for_everyone_and_its_children_with_it() {
+    let fleet = Fleet::new("end-any", &["agent-one", "agent-two"]).await;
 
     let started = fleet.agent(0).call(
         "session_start",
         json!({"project_id": PROJECT, "session_name": "mine"}),
     );
     let session_id = text(&started, "session_id");
-
-    let (code, message) = fleet
-        .agent(1)
-        .refusal("session_end", json!({"session_id": session_id}));
-    assert_eq!(code, "forbidden");
-    assert!(
-        message.contains("owner=agent-one"),
-        "the refusal names the owner: {message}"
+    let child = fleet.agent(0).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "mine/task"}),
     );
+    let child_id = text(&child, "session_id");
+    fleet.agent(1).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "mine"}),
+    );
+
+    let ended = fleet.agent(1).call(
+        "session_end",
+        json!({"session": {"session_id": session_id}, "handoff": "done for today"}),
+    );
+    assert_eq!(ended["ok"], true);
+    let ids: Vec<&str> = ended["ended"]
+        .as_array()
+        .expect("ended ids")
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(
+        ids.contains(&session_id.as_str()) && ids.contains(&child_id.as_str()),
+        "the session and its live child end together: {ended}"
+    );
+
+    let listed = fleet
+        .agent(0)
+        .call("session_list", json!({"project_id": PROJECT}));
+    for id in [&session_id, &child_id] {
+        let entry = listed["sessions"]
+            .as_array()
+            .expect("sessions")
+            .iter()
+            .find(|entry| entry["session_id"] == id.as_str())
+            .unwrap_or_else(|| panic!("{id} is listed: {listed}"));
+        assert_eq!(entry["status"], "ended");
+    }
+
+    let (code, details) = fleet.agent(0).refusal_details(
+        "brain_put",
+        json!({"store": "session", "path": "/kv/late", "content": "x",
+               "session": {"session_id": session_id}}),
+    );
+    assert_eq!(code, "conflict");
+    assert_eq!(details["reason"], "session_ended", "{details}");
+}
+
+#[tokio::test]
+async fn leaving_a_session_ends_nothing_and_the_next_call_rejoins() {
+    let fleet = Fleet::new("leave", &["agent-one", "agent-two"]).await;
+
+    let started = fleet.agent(0).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "shared"}),
+    );
+    let session_id = text(&started, "session_id");
+    fleet.agent(1).call(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "shared"}),
+    );
+
+    let left = fleet.agent(1).call("session_leave", json!({}));
+    assert_eq!(left["ok"], true, "{left}");
 
     let listed = fleet
         .agent(0)
@@ -698,11 +798,43 @@ async fn only_the_owner_ends_a_session() {
         .find(|entry| entry["session_id"] == session_id.as_str())
         .expect("the session is listed")
         .clone();
-    assert_eq!(entry["status"], "active", "a refused end changes nothing");
+    assert_eq!(entry["status"], "active", "leaving ends nothing: {entry}");
+    let leaver = entry["participants"]
+        .as_array()
+        .expect("participants")
+        .iter()
+        .find(|participant| participant["member"] == "agent-two")
+        .expect("the leaver stays on the roll");
+    assert!(
+        !leaver["left_at"].is_null(),
+        "its departure is recorded: {entry}"
+    );
+
+    // The next call that names the session joins it again.
+    fleet
+        .agent(1)
+        .call("brain_list", json!({"session": {"session_id": session_id}}));
+    let listed = fleet
+        .agent(0)
+        .call("session_list", json!({"project_id": PROJECT}));
+    let rejoined = listed["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .find(|entry| entry["session_id"] == session_id.as_str())
+        .and_then(|entry| {
+            entry["participants"]
+                .as_array()?
+                .iter()
+                .find(|participant| participant["member"] == "agent-two")
+                .cloned()
+        })
+        .expect("the participant is listed");
+    assert!(rejoined["left_at"].is_null(), "it is back in: {rejoined}");
 }
 
 #[tokio::test]
-async fn a_pruned_session_is_not_picked_up() {
+async fn a_pruned_session_cannot_be_forked_from() {
     let fleet = Fleet::new("pruned-source", &["agent-one", "agent-two"]).await;
 
     let started = fleet.agent(0).call(
@@ -715,23 +847,19 @@ async fn a_pruned_session_is_not_picked_up() {
         .call("session_end", json!({"session_id": session_id}));
     prune(fleet.port, &session_id);
 
-    let (code, message) = fleet.agent(1).refusal(
+    let (code, _) = fleet.agent(1).refusal(
         "session_start",
         json!({
             "project_id": PROJECT,
-            "session_name": "pickup",
+            "session_name": "branch",
             "from": {"session_id": session_id},
         }),
     );
-    assert_eq!(code, "conflict");
-    assert!(
-        message.contains(&format!("session_id={session_id}")),
-        "the refusal names the pruned session: {message}"
-    );
+    assert_eq!(code, "not_found", "a pruned session is gone to a reader");
 }
 
 #[tokio::test]
-async fn a_pickup_from_another_project_is_refused() {
+async fn a_fork_names_its_source_in_the_project_being_started() {
     let fleet = Fleet::new("cross-project", &["agent-one", "agent-two"]).await;
     let other = "workshop";
     create_project(fleet.port, other);
@@ -745,18 +873,41 @@ async fn a_pickup_from_another_project_is_refused() {
         .agent(0)
         .call("session_end", json!({"session_id": source_id}));
 
-    let (code, message) = fleet.agent(1).refusal(
+    // A bare name is looked up in the project being started, where nothing
+    // holds it.
+    let (code, _) = fleet.agent(1).refusal(
         "session_start",
         json!({
             "project_id": PROJECT,
-            "session_name": "pickup",
+            "session_name": "branch",
+            "from": {"name": "elsewhere"},
+        }),
+    );
+    assert_eq!(code, "not_found");
+
+    // A source in another project is refused outright, and no session is made.
+    let response = fleet.agent(1).raw(
+        "session_start",
+        json!({
+            "project_id": PROJECT,
+            "session_name": "branch",
             "from": {"session_id": source_id},
         }),
     );
-    assert_eq!(code, "invalid_argument");
     assert!(
-        message.contains(&format!("from_project_id={other}")),
-        "the refusal names the project the source is in: {message}"
+        response.get("error").is_some(),
+        "a fork does not cross projects: {response}"
+    );
+    let listed = fleet
+        .agent(1)
+        .call("session_list", json!({"project_id": PROJECT}));
+    assert!(
+        listed["sessions"]
+            .as_array()
+            .expect("sessions")
+            .iter()
+            .all(|entry| entry["session_name"] != "branch"),
+        "no session was made: {listed}"
     );
 }
 
@@ -764,33 +915,30 @@ async fn a_pickup_from_another_project_is_refused() {
 async fn a_session_reference_names_one_session() {
     let fleet = Fleet::new("bad-reference", &["agent-one"]).await;
 
+    let (code, details) = fleet.agent(0).refusal_details(
+        "session_start",
+        json!({"project_id": PROJECT, "session_name": "branch", "from": {}}),
+    );
+    assert_eq!(code, "invalid_argument");
+    assert_eq!(details["reason"], "session_invalid", "{details}");
+
     for reference in [
-        json!({}),
-        json!({"session_id": "01J", "agent": "agent-one"}),
+        json!({"session_id": "01J"}),
+        json!({"name": "never-existed", "project_id": PROJECT}),
     ] {
         let (code, _) = fleet.agent(0).refusal(
             "session_start",
             json!({
                 "project_id": PROJECT,
-                "session_name": "pickup",
+                "session_name": "branch",
                 "from": reference,
             }),
         );
-        assert_eq!(code, "invalid_argument");
+        assert_eq!(
+            code, "not_found",
+            "a source that resolves to nothing is plainly missing"
+        );
     }
-
-    let (code, _) = fleet.agent(0).refusal(
-        "session_start",
-        json!({
-            "project_id": PROJECT,
-            "session_name": "pickup",
-            "from": {"agent": "agent-one", "name": "never-existed"},
-        }),
-    );
-    assert_eq!(
-        code, "not_found",
-        "a name that resolves to nothing inside a writable project is plainly missing"
-    );
 }
 
 #[tokio::test]
@@ -829,16 +977,13 @@ async fn a_listing_summarises_a_long_handoff_note() {
         "and says the note goes on"
     );
 
-    // The note itself is kept whole for whoever picks the session up.
+    // The note itself is kept whole for whoever starts the name again.
     let picked = fleet.agent(0).call(
         "session_start",
-        json!({
-            "project_id": PROJECT,
-            "session_name": "verbose",
-            "from": {"agent": "agent-one", "name": "verbose"},
-        }),
+        json!({"project_id": PROJECT, "session_name": "verbose"}),
     );
-    assert_eq!(picked["pickup"], Value::Null, "the owner simply resumes");
+    assert_eq!(picked["pickup"], Value::Null, "a reopen is not a fork");
+    assert_eq!(picked["handoff"], note.as_str(), "the whole note is kept");
     let ended = fleet
         .agent(0)
         .call("session_list", json!({"project_id": PROJECT, "limit": 1}));
@@ -863,7 +1008,7 @@ async fn session_start_reports_the_recovery_path_and_the_handoff() {
         "a fresh session has no predecessor note: {started}"
     );
 
-    // The owner ends with a note, then resumes the same named session.
+    // A participant ends with a note, then starts the same name again.
     let session_id = text(&started, "session_id");
     fleet.agent(0).call(
         "session_end",
@@ -904,11 +1049,11 @@ async fn a_confined_agent_lists_only_the_sessions_it_may_read() {
         .refusal("session_list", json!({"project_id": PROJECT}));
     assert_eq!(
         code, "forbidden",
-        "naming a project it may not read is refused"
+        "a confidential project without a grant reads as one the caller may not reach"
     );
 }
 
-/// One session's recorded last activity, as its owner's listing reports it.
+/// One session's recorded last activity, as a listing reports it.
 fn last_activity(agent: &Agent, session_id: &str) -> String {
     let listed = agent.call("session_list", json!({"project_id": PROJECT}));
     listed
@@ -934,10 +1079,12 @@ async fn an_agent_that_only_posts_signals_still_counts_as_working() {
     let at_start = last_activity(agent, &session_id);
 
     // A triage agent that never writes a brain is still at work, so the tool
-    // it does use has to move the timestamp the active count reads.
+    // it does use in its session has to move the timestamp the active count
+    // reads.
     agent.call(
         "signal_append",
-        json!({"project_id": PROJECT, "kind": "signal", "summary": "watched something"}),
+        json!({"project_id": PROJECT, "kind": "signal", "summary": "watched something",
+               "session": {"session_id": session_id}}),
     );
     let after_signal = last_activity(agent, &session_id);
     assert!(
@@ -983,7 +1130,7 @@ async fn a_session_ended_over_mcp_is_offered_for_pruning_at_once() {
 }
 
 #[tokio::test]
-async fn an_owner_anchors_the_session_and_start_returns_it() {
+async fn a_participant_anchors_the_session_and_start_returns_it() {
     let fleet = Fleet::new("anchor-write", &["agent-one"]).await;
     let agent = fleet.agent(0);
     let started = agent.call(
@@ -1089,38 +1236,41 @@ async fn session_resume_returns_the_latest_anchor_and_later_events_only() {
 }
 
 #[tokio::test]
-async fn another_agent_cannot_anchor_a_session() {
-    let fleet = Fleet::new("anchor-owner", &["agent-one", "agent-two"]).await;
+async fn another_participant_anchors_the_same_session() {
+    let fleet = Fleet::new("anchor-shared", &["agent-one", "agent-two"]).await;
     let started = fleet.agent(0).call(
         "session_start",
         json!({"project_id": PROJECT, "session_name": "mine"}),
     );
     let session_id = text(&started, "session_id");
 
-    let (code, message) = fleet.agent(1).refusal(
+    let anchored = fleet.agent(1).call(
         "session_anchor",
         json!({
-            "phase": "steal",
-            "summary": "not mine to write",
-            "next_steps": ["stop"],
+            "phase": "handover",
+            "summary": "written by the second participant",
+            "next_steps": ["carry on"],
             "session": {"session_id": session_id},
         }),
     );
-    assert_eq!(code, "forbidden");
-    assert!(
-        message.contains("owner=agent-one"),
-        "the refusal names the owner: {message}"
-    );
+    assert_eq!(anchored["anchor"]["owner"], "agent-two", "{anchored}");
 
-    // Nothing was written: the session keeps its own feed.
     let feed = fleet.agent(0).call(
         "feed_read",
         json!({"project_id": PROJECT, "kinds": ["anchor"]}),
     );
+    let events = feed["events"].as_array().expect("events");
     assert_eq!(
-        feed["events"].as_array().expect("events").len(),
-        0,
-        "a refused anchor leaves no event: {feed}"
+        events.len(),
+        1,
+        "the anchor is on the shared session: {feed}"
+    );
+    assert_eq!(events[0]["summary"], "written by the second participant");
+
+    let resumed = fleet.agent(0).call("session_resume", json!({}));
+    assert_eq!(
+        resumed["anchor"]["phase"], "handover",
+        "the first participant resumes from it: {resumed}"
     );
 }
 

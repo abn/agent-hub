@@ -101,17 +101,26 @@ async fn one_process_serves_the_api_pwa_mcp_and_sweeper() {
     let (status, _) = request(port, "GET", "/api/v1/projects", None, "");
     assert_eq!(status, 401);
 
-    let (status, _) = mcp_initialize(port, "");
-    assert_eq!(status, 401, "MCP is gated on the same listener");
+    let (status, refused) = mcp_initialize(port, "a-token-the-hub-never-issued");
+    assert_eq!(status, 401, "MCP is gated on the same listener: {refused}");
+    assert!(
+        refused.contains("token_unknown"),
+        "the refusal names its reason: {refused}"
+    );
+    let (status, anonymous) = mcp_initialize(port, "");
+    assert_eq!(
+        status, 200,
+        "a caller with no token reaches the enrol surface only: {anonymous}"
+    );
     let (status, admin_body) = mcp_initialize(port, ADMIN_TOKEN);
     assert_eq!(status, 200, "admin reaches MCP: {admin_body}");
     assert!(admin_body.contains("serverInfo"));
     let (status, agent_body) = mcp_initialize(port, &agent_token);
     assert_eq!(status, 200, "an agent token reaches MCP: {agent_body}");
-    let (status, _) = request(port, "GET", "/api/v1/agents", Some(&agent_token), "");
+    let (status, _) = request(port, "GET", "/api/v1/members", Some(&agent_token), "");
     assert_eq!(
         status, 401,
-        "an agent token is rejected on REST admin control surface"
+        "a member token is rejected on the REST admin control surface"
     );
 
     // The sweeper runs in this process: the aged tombstone commits and the

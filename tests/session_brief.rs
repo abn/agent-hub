@@ -58,6 +58,15 @@ impl Agent {
         self.call("session_brief", json!({"project_id": PROJECT}))
     }
 
+    /// The brief of a call that names the session it belongs to, so that
+    /// session is not the "previous" one.
+    fn brief_in(&self, session_id: &str) -> Value {
+        self.call(
+            "session_brief",
+            json!({"project_id": PROJECT, "session": {"session_id": session_id}}),
+        )
+    }
+
     fn signal(&self, summary: &str) -> String {
         self.call(
             "signal_append",
@@ -212,7 +221,11 @@ async fn an_agent_with_no_prior_session_gets_the_newest_events_and_nothing_else(
     }
 
     let brief = fleet.agent(0).brief();
-    assert_eq!(brief["agent"], "newcomer");
+    assert_eq!(brief["member"], "newcomer");
+    assert_eq!(
+        brief["agent"], "session-brief",
+        "the agent is the client's own name, not the member: {brief}"
+    );
     assert_eq!(brief["since"]["basis"], "none", "{brief}");
     assert!(brief["since"]["event_id"].is_null(), "{brief}");
     assert!(brief["previous_session"].is_null(), "{brief}");
@@ -539,13 +552,20 @@ async fn the_previous_session_brings_its_handoff_and_bounds_the_events() {
     assert!(shown.contains(&after), "{brief}");
     assert!(!shown.contains(&before), "{brief}");
 
-    // After starting a new session, the brief still names the one before it.
+    // A call that names the session it belongs to still sees the one before
+    // it as the previous session.
     let next = fleet.agent(0);
-    next.call(
+    let daytime = next.call(
         "session_start",
         json!({"project_id": PROJECT, "session_name": "daytime"}),
+    )["session_id"]
+        .as_str()
+        .expect("an id")
+        .to_string();
+    assert_eq!(
+        next.brief_in(&daytime)["previous_session"]["session_id"],
+        nightly
     );
-    assert_eq!(next.brief()["previous_session"]["session_id"], nightly);
 }
 
 #[tokio::test]

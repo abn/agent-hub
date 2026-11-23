@@ -17,17 +17,17 @@ pub fn bearer_token(headers: &HeaderMap) -> Option<String> {
     }
 }
 
-/// Resolve the agent behind a REST call, with any name it declares.
+/// Resolve the member behind a REST call, with the agent it names.
 ///
-/// The REST routes an agent token reaches record the same sub-identity the
-/// MCP endpoint does ([`crate::principal::Auth::resolve_agent_as`]).
+/// The REST routes a member token reaches record the same agent the MCP
+/// endpoint does ([`crate::principal::Auth::resolve_member_as`]).
 pub async fn agent_principal(
     state: &AppState,
     headers: &HeaderMap,
 ) -> std::result::Result<Principal, Problem> {
     state
         .auth
-        .resolve_agent_as(&state.db, bearer_token(headers).as_deref(), headers)
+        .resolve_member_as(&state.db, bearer_token(headers).as_deref(), headers)
         .await
         .map_err(|err| Problem::from_error(&err))
 }

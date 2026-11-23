@@ -16,6 +16,9 @@ use crate::error::Error;
 use crate::policy::{self, Access};
 use crate::store::artifacts::{self, EnvelopeUpdate, LiveOptions, NewArtifact, UpdateOptions};
 
+use super::brain::with_session;
+use super::feed::author_filter;
+use super::session_arg::{Mode, SessionArg};
 use super::{HubServer, to_error_data};
 
 /// The request headers for a tool call, or an empty set on a transport with no
@@ -45,7 +48,20 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
-        let session_id = self.session_in(&principal, &params.project_id).await;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&params.project_id),
+                Mode::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
+        let session_id = resolved.session_id().map(str::to_string);
+        // The write holds its session's gate shared, so ending or pruning the
+        // session waits for it and a write that lost the race is refused.
+        let _gate = self.hold_gate(session_id.as_deref()).await;
         let artifact = artifacts::publish_for_principal_capped(
             &self.state.db,
             &self.state.data_dir,
@@ -68,10 +84,13 @@ impl HubServer {
         .map_err(to_error_data)?;
 
         self.state.notify();
-        Ok(CallToolResult::structured(json!({
-            "artifact_id": artifact.id,
-            "version": artifact.version,
-        })))
+        Ok(CallToolResult::structured(with_session(
+            json!({
+                "artifact_id": artifact.id,
+                "version": artifact.version,
+            }),
+            &resolved,
+        )))
     }
 
     #[tool(description = "Publish a new version of an existing artifact.")]
@@ -87,13 +106,24 @@ impl HubServer {
         policy::authorize(&self.state.db, &principal, &project_id, Access::Write)
             .await
             .map_err(to_error_data)?;
-        let session_id = self.session_in(&principal, &project_id).await;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&project_id),
+                Mode::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
+        let session_id = resolved.session_id().map(str::to_string);
+        let _gate = self.hold_gate(session_id.as_deref()).await;
         let artifact = artifacts::update_for_principal_capped(
             &self.state.db,
             &self.state.data_dir,
             Some(&principal),
             self.state.config.events_per_project.per_project,
-            &principal.actor,
+            &principal.writer(session_id.as_deref()),
             &params.artifact_id,
             params.content.as_bytes(),
             match params.envelope {
@@ -116,9 +146,10 @@ impl HubServer {
         // Tell a viewer of this artifact that its live version has sealed, so
         // the band clears and the document settles without a reload.
         self.state.notify_live(&artifact.id, artifact.version, 0);
-        Ok(CallToolResult::structured(
+        Ok(CallToolResult::structured(with_session(
             json!({ "version": artifact.version }),
-        ))
+            &resolved,
+        )))
     }
 
     #[tool(
@@ -136,13 +167,24 @@ impl HubServer {
         policy::authorize(&self.state.db, &principal, &project_id, Access::Write)
             .await
             .map_err(to_error_data)?;
-        let session_id = self.session_in(&principal, &project_id).await;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&project_id),
+                Mode::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
+        let session_id = resolved.session_id().map(str::to_string);
+        let _gate = self.hold_gate(session_id.as_deref()).await;
         let artifact = artifacts::draft_for_principal_capped(
             &self.state.db,
             &self.state.data_dir,
             Some(&principal),
             self.state.config.events_per_project.per_project,
-            &principal.actor,
+            &principal.writer(session_id.as_deref()),
             &params.artifact_id,
             params.content.as_bytes(),
             match params.envelope {
@@ -165,17 +207,20 @@ impl HubServer {
         let show = artifact.live_version.unwrap_or(artifact.version);
         let headers = request_headers(&context);
         let origin = crate::http::origin::request_origin(&self.state.config, &headers);
-        Ok(CallToolResult::structured(json!({
-            "artifact_id": artifact.id,
-            "version": artifact.version,
-            "live_version": artifact.live_version,
-            "live_rev": artifact.live_rev,
-            // The page is the artifact's own, so it needs no credential: an
-            // artifact with no active share is already readable at this
-            // address. The live version is named explicitly because the plain
-            // address keeps serving the last sealed one.
-            "viewer_url": format!("{origin}/artifacts/{}?version={show}", artifact.id),
-        })))
+        Ok(CallToolResult::structured(with_session(
+            json!({
+                "artifact_id": artifact.id,
+                "version": artifact.version,
+                "live_version": artifact.live_version,
+                "live_rev": artifact.live_rev,
+                // The page is the artifact's own, so it needs no credential: an
+                // artifact with no active share is already readable at this
+                // address. The live version is named explicitly because the plain
+                // address keeps serving the last sealed one.
+                "viewer_url": format!("{origin}/artifacts/{}?version={show}", artifact.id),
+            }),
+            &resolved,
+        )))
     }
 
     #[tool(description = "Read an artifact's metadata and its content, optionally at a version.")]
@@ -191,6 +236,15 @@ impl HubServer {
         policy::authorize(&self.state.db, &principal, &project_id, Access::Read)
             .await
             .map_err(to_error_data)?;
+        self.resolve_session(
+            &context,
+            &principal,
+            params.session.as_ref(),
+            Some(&project_id),
+            Mode::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
         let existing = artifacts::metadata(&self.state.db, &params.artifact_id)
             .await
             .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
@@ -246,6 +300,15 @@ impl HubServer {
         policy::authorize(&self.state.db, &principal, &project_id, Access::Read)
             .await
             .map_err(to_error_data)?;
+        self.resolve_session(
+            &context,
+            &principal,
+            params.session.as_ref(),
+            Some(&project_id),
+            Mode::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
         let versions = artifacts::list_versions(&self.state.db, &params.artifact_id)
             .await
             .map_err(to_error_data)?;
@@ -268,6 +331,17 @@ impl HubServer {
         policy::authorize(&self.state.db, &principal, &project_id, Access::Write)
             .await
             .map_err(to_error_data)?;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&project_id),
+                Mode::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
+        let _gate = self.hold_gate(resolved.session_id()).await;
         let target = params.version.unwrap_or(0);
         let target = if target < 1 {
             artifacts::metadata(&self.state.db, &params.artifact_id)
@@ -286,11 +360,14 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
         self.state.notify();
-        Ok(CallToolResult::structured(json!({
-            "artifact_id": params.artifact_id,
-            "version": target,
-            "versions_squashed": removed,
-        })))
+        Ok(CallToolResult::structured(with_session(
+            json!({
+                "artifact_id": params.artifact_id,
+                "version": target,
+                "versions_squashed": removed,
+            }),
+            &resolved,
+        )))
     }
 
     #[tool(description = "Delete an artifact and its history.")]
@@ -306,19 +383,31 @@ impl HubServer {
         policy::authorize(&self.state.db, &principal, &project_id, Access::Write)
             .await
             .map_err(to_error_data)?;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&project_id),
+                Mode::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
+        let _gate = self.hold_gate(resolved.session_id()).await;
         let deleted = artifacts::delete(
             &self.state.db,
             &self.state.data_dir,
-            &principal.actor,
+            &principal.writer(resolved.session_id()),
             &params.artifact_id,
         )
         .await
         .map_err(to_error_data)?;
 
         self.state.notify();
-        Ok(CallToolResult::structured(
+        Ok(CallToolResult::structured(with_session(
             json!({ "artifact_id": deleted.id }),
-        ))
+            &resolved,
+        )))
     }
 
     #[tool(description = "List a project's artifacts, most recently updated first.")]
@@ -331,12 +420,51 @@ impl HubServer {
         policy::authorize(&self.state.db, &principal, &params.project_id, Access::Read)
             .await
             .map_err(to_error_data)?;
-        let session_id = params.session.as_deref().or(params.session_id.as_deref());
-        let listed = artifacts::list_with_session(&self.state.db, &params.project_id, session_id)
-            .await
-            .map_err(to_error_data)?;
+        self.resolve_session(
+            &context,
+            &principal,
+            params.session.as_ref(),
+            Some(&params.project_id),
+            Mode::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
+        let author = author_filter(
+            params.member.as_deref(),
+            params.agent.as_deref(),
+            params.kind.as_deref(),
+        )
+        .map_err(to_error_data)?;
+        let listed = artifacts::list_with_session(
+            &self.state.db,
+            &params.project_id,
+            params.session_id.as_deref(),
+        )
+        .await
+        .map_err(to_error_data)?;
+        let mut listed = serde_json::to_value(&listed)
+            .map_err(|err| to_error_data(Error::Config(err.to_string())))?;
+        if !author.is_empty()
+            && let Some(rows) = listed.as_array_mut()
+        {
+            rows.retain(|row| super::author_matches(row, &author));
+        }
 
         Ok(CallToolResult::structured(json!({ "artifacts": listed })))
+    }
+}
+
+impl HubServer {
+    /// Hold a session's gate shared for a write that touches the files it
+    /// owns, so the session cannot end or be pruned under the write.
+    async fn hold_gate(
+        &self,
+        session_id: Option<&str>,
+    ) -> Option<tokio::sync::OwnedRwLockReadGuard<()>> {
+        match session_id {
+            Some(id) => Some(self.state.session_gates.shared(id).await),
+            None => None,
+        }
     }
 }
 
@@ -376,6 +504,9 @@ struct ArtifactPublishParams {
     /// Optional idempotency key, so a retried publish returns the original.
     #[serde(default)]
     idempotency_key: Option<String>,
+    /// The session this write belongs to.
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `artifact_update`.
@@ -402,6 +533,8 @@ struct ArtifactUpdateParams {
     /// Optional idempotency key, so a retried update returns the original.
     #[serde(default)]
     idempotency_key: Option<String>,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Read a field that may be absent or explicitly null into a nested option, so
@@ -428,6 +561,8 @@ struct ArtifactDraftParams {
     /// Take the live pointer from another session instead of conflicting.
     #[serde(default)]
     force: bool,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `artifact_get`.
@@ -436,18 +571,24 @@ struct ArtifactIdParams {
     artifact_id: String,
     #[serde(default)]
     version: Option<i64>,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `artifact_versions`.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ArtifactVersionsParams {
     artifact_id: String,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `artifact_delete`.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ArtifactDeleteParams {
     artifact_id: String,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `artifact_squash`.
@@ -456,17 +597,28 @@ struct ArtifactSquashParams {
     artifact_id: String,
     #[serde(default)]
     version: Option<i64>,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `artifact_list`.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct ArtifactListParams {
     project_id: String,
+    /// The session this call belongs to. It does not filter the list.
     #[serde(default)]
-    session: Option<String>,
-    /// Duplicate spelling kept for compatibility; `session` is the advertised
-    /// field, so this one is accepted but not shown.
+    session: Option<SessionArg>,
+    /// Only artifacts written in this session, by id.
     #[serde(default)]
-    #[schemars(skip)]
     session_id: Option<String>,
+    /// Only artifacts by this member.
+    #[serde(default)]
+    member: Option<String>,
+    /// Only artifacts by this agent, such as `claude-code`.
+    #[serde(default)]
+    agent: Option<String>,
+    /// Only artifacts by this kind of author: `participant`, `human`, `local`
+    /// or `legacy`.
+    #[serde(default)]
+    kind: Option<String>,
 }

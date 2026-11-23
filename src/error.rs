@@ -168,9 +168,6 @@ pub enum Error {
         String,
         Option<serde_json::Map<String, serde_json::Value>>,
     ),
-    /// The connection holds no active session, which a hub restart also causes.
-    #[error("no active session; call session_start first")]
-    NoActiveSession,
     /// The request body or payload exceeds a limit.
     #[error("{0}")]
     PayloadTooLarge(String),
@@ -192,7 +189,7 @@ impl Error {
             Self::Unauthenticated(_) => ErrorCode::Unauthenticated,
             Self::Forbidden(_) => ErrorCode::Forbidden,
             Self::NotFound(_) => ErrorCode::NotFound,
-            Self::Conflict(_) | Self::NoActiveSession => ErrorCode::Conflict,
+            Self::Conflict(_) => ErrorCode::Conflict,
             Self::PayloadTooLarge(_) => ErrorCode::PayloadTooLarge,
             Self::RateLimited(_) => ErrorCode::RateLimited,
             Self::Unavailable(_) | Self::Engine(_) => ErrorCode::Unavailable,
@@ -203,7 +200,6 @@ impl Error {
     /// A machine-readable reason a caller can act on, where the code is too broad.
     pub fn reason(&self) -> Option<&'static str> {
         match self {
-            Self::NoActiveSession => Some("no_active_session"),
             Self::Credential(reason, _) => Some(reason.as_str()),
             Self::Session(reason, _, _) => Some(reason.as_str()),
             _ => None,

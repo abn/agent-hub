@@ -15,10 +15,13 @@ use rmcp::{RoleServer, tool, tool_router};
 use serde::Deserialize;
 use serde_json::json;
 
+use crate::author::{AuthorFilter, AuthorKind};
 use crate::error::Error;
 use crate::policy::{self, Access};
 use crate::store::events::{self, FeedQuery, NewEvent};
 
+use super::brain::with_session;
+use super::session_arg::{Mode, SessionArg};
 use super::{HubServer, to_error_data};
 
 /// The kinds an agent may write through `signal_append`, named in the refusal
@@ -76,7 +79,16 @@ impl HubServer {
         // human, so an agent cannot flood the inbox with ordinary signals. An
         // approval is an open item and is subject to the inbox cap.
         let needs_action = params.kind == "approval" || params.kind == "idea";
-        let session_id = self.session_in(&principal, &params.project_id).await;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&params.project_id),
+                Mode::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
         let event = NewEvent {
             project_id: params.project_id,
             kind: params.kind,
@@ -84,7 +96,7 @@ impl HubServer {
             payload: params.payload,
             needs_action,
             thread_id: params.thread_id,
-            session_id,
+            session_id: resolved.session_id().map(str::to_string),
         };
         let appended = if needs_action {
             events::append_action_for_principal(
@@ -120,7 +132,10 @@ impl HubServer {
             self.state.notify();
         }
         let event_id = appended.id;
-        Ok(CallToolResult::structured(json!({ "event_id": event_id })))
+        Ok(CallToolResult::structured(with_session(
+            json!({ "event_id": event_id }),
+            &resolved,
+        )))
     }
 
     #[tool(
@@ -144,31 +159,49 @@ impl HubServer {
         policy::authorize(&self.state.db, &principal, &params.project_id, Access::Read)
             .await
             .map_err(to_error_data)?;
+        self.resolve_session(
+            &context,
+            &principal,
+            params.session.as_ref(),
+            Some(&params.project_id),
+            Mode::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
+        let author = author_filter(
+            params.member.as_deref(),
+            params.agent.as_deref(),
+            params.kind.as_deref(),
+        )
+        .map_err(to_error_data)?;
 
         // With no `since` and no `before`, this is a forward poll from the
         // caller's stored cursor. A missing cursor means the agent has never
         // read this feed, so the poll starts from nothing and the first page
-        // records where it got to.
+        // records where it got to. The human has no cursor to keep.
+        let key = principal.participant();
+        let stored = match &key {
+            Some(key) => events::feed_cursor(&self.state.db, &params.project_id, key)
+                .await
+                .map_err(to_error_data)?,
+            None => None,
+        };
         let since = match (&params.since, &params.before) {
             (Some(since), _) => Some(since.clone()),
-            (None, None) => {
-                events::agent_cursor(&self.state.db, &params.project_id, &principal.actor)
-                    .await
-                    .map_err(to_error_data)?
-            }
+            (None, None) => stored.clone(),
             (None, Some(_)) => None,
         };
 
-        let session_id = params.session;
         let mut query = FeedQuery {
             since,
             before: params.before,
             kinds: params.kinds,
-            session_id,
+            session_id: params.session_id,
             // The hub's record of itself belongs to the human. A trusted agent
             // reads every project, which would otherwise hand it the fleet's
             // identity history.
             include_audit: principal.is_admin,
+            author,
             ..FeedQuery::default()
         };
         if let Some(limit) = params.limit {
@@ -176,24 +209,35 @@ impl HubServer {
         }
 
         self.state.settle_before_read().await;
-        let page = events::read_feed(&self.state.db, &params.project_id, &query)
+        let mut page = events::read_feed(&self.state.db, &params.project_id, &query)
             .await
             .map_err(to_error_data)?;
 
-        // A page records progress for the agent that read it, whether the
-        // cursor came from storage or was passed explicitly. An empty forward
-        // poll returns the cursor it was given, so advancing to it is a no-op
-        // and the poll keeps its place. A backward read returns no `next_since`
-        // and moves nothing.
-        if let Some(next_since) = &page.next_since {
-            events::advance_agent_cursor(
+        // A page records progress for the participant that read it, whether
+        // the cursor came from storage or was passed explicitly. An empty
+        // forward poll returns the cursor it was given, so advancing to it is
+        // a no-op and the poll keeps its place. A backward read returns no
+        // `next_since` and moves nothing. The move is a compare-and-set: when
+        // another read of the same cursor got there first, this one reports
+        // nothing new rather than the same page twice.
+        if let (Some(key), Some(next_since)) = (&key, &page.next_since)
+            && stored
+                .as_deref()
+                .is_none_or(|stored| next_since.as_str() > stored)
+        {
+            let moved = events::advance_feed_cursor(
                 &self.state.db,
                 &params.project_id,
-                &principal.actor,
+                key,
+                stored.as_deref(),
                 next_since,
             )
             .await
             .map_err(to_error_data)?;
+            if !moved {
+                page.events.clear();
+                page.next_since = stored.clone();
+            }
         }
 
         Ok(CallToolResult::structured(json!({
@@ -202,6 +246,30 @@ impl HubServer {
             "next_before": page.next_before,
         })))
     }
+}
+
+/// The author filter the `member`, `agent` and `kind` arguments make. The
+/// agent is folded to its canonical slug, as every agent is on write.
+pub(super) fn author_filter(
+    member: Option<&str>,
+    agent: Option<&str>,
+    kind: Option<&str>,
+) -> crate::error::Result<AuthorFilter> {
+    let kind = kind
+        .map(|kind| {
+            AuthorKind::parse(kind).ok_or_else(|| {
+                Error::InvalidArgument(format!(
+                    "kind '{kind}' must be participant, human, local or legacy"
+                ))
+            })
+        })
+        .transpose()?;
+    Ok(AuthorFilter {
+        member: member.map(str::to_string),
+        agent: agent.map(crate::agent_name::canonical),
+        kind,
+        label: None,
+    })
 }
 
 /// Arguments for `signal_append`.
@@ -219,6 +287,9 @@ struct SignalAppendParams {
     /// returns the first call's event instead of appending a duplicate.
     #[serde(default)]
     idempotency_key: Option<String>,
+    /// The session this write belongs to.
+    #[serde(default)]
+    session: Option<SessionArg>,
     /// Approvals only. How long you can wait, in seconds: 60 at least, 2592000
     /// (30 days) at most. If no one has decided by then, the hub decides.
     #[serde(default)]
@@ -233,8 +304,23 @@ struct SignalAppendParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 struct FeedReadParams {
     project_id: String,
+    /// The session this call belongs to. It joins you to the session and
+    /// scopes the notifications on the result; it does not filter the page.
     #[serde(default)]
-    session: Option<String>,
+    session: Option<SessionArg>,
+    /// Only events written in this session, by id.
+    #[serde(default)]
+    session_id: Option<String>,
+    /// Only events by this member.
+    #[serde(default)]
+    member: Option<String>,
+    /// Only events by this agent, such as `claude-code`.
+    #[serde(default)]
+    agent: Option<String>,
+    /// Only events by this kind of author: `participant`, `human`, `local` or
+    /// `legacy`.
+    #[serde(default)]
+    kind: Option<String>,
     /// Exclusive cursor: return events newer than this event id, walking
     /// forward. The returned `next_since` continues from here. When absent,
     /// the read starts from this agent's stored cursor for the project, so it

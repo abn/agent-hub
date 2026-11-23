@@ -1,12 +1,13 @@
-//! The auth seam: the two audiences resolve differently, and neither accepts
-//! an unknown token.
+//! The auth seam: the two audiences resolve differently, an unknown token is
+//! refused with its reason, and no token at all is an anonymous caller.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
+use agent_hub::author::AuthorKind;
 use agent_hub::config::Config;
 use agent_hub::error::ErrorCode;
-use agent_hub::principal::Auth;
+use agent_hub::principal::{Auth, CredentialState};
 use agent_hub::store::migrate;
 use agent_hub::store::open_engine;
 
@@ -54,16 +55,19 @@ fn require_admin_accepts_only_the_admin_token() {
 }
 
 #[test]
-fn local_stdio_is_the_human_admin() {
+fn local_stdio_is_the_local_administrator() {
     // The local transport is a process the operator launched, so it is the
-    // admin; only token transports resolve through the identity store.
+    // local admin, a member of its own; only token transports resolve through
+    // the identity store.
     let local = Auth::from_config(&config()).local();
-    assert!(local.is_admin, "stdio is the operator's local bridge");
-    assert!(local.agent_id.is_none());
+    assert!(local.is_admin(), "stdio is the operator's local bridge");
+    assert_eq!(local.member(), Some("local"));
+    assert_eq!(local.kind(), AuthorKind::Local);
+    assert_eq!(local.actor, "local");
 }
 
 #[tokio::test]
-async fn resolve_agent_accepts_admin_and_rejects_unknown_tokens() {
+async fn resolve_agent_accepts_admin_refuses_unknown_tokens_and_marks_no_token_anonymous() {
     let dir = TempDir::new("identity-spine");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     migrate(&db).await.expect("migrate");
@@ -80,12 +84,15 @@ async fn resolve_agent_accepts_admin_and_rejects_unknown_tokens() {
         .await
         .expect_err("an unknown token must be refused");
     assert_eq!(unknown.code(), ErrorCode::Unauthenticated);
+    assert_eq!(unknown.reason(), Some("token_unknown"));
 
     let absent = auth
         .resolve_agent(&db, None)
         .await
-        .expect_err("a missing token");
-    assert_eq!(absent.code(), ErrorCode::Unauthenticated);
+        .expect("a missing token resolves to an anonymous caller");
+    assert_eq!(absent.credential(), CredentialState::Anonymous);
+    assert!(!absent.is_admin());
+    assert!(absent.member().is_none());
 
     drop(db);
 }

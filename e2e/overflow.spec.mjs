@@ -115,7 +115,12 @@ test("a long brain key is cut inside its row", async ({ hub, page }) => {
   });
   const id = structured(started).session_id || "";
   expect(id, "the check could not start a session").toBeTruthy();
-  await toolCall(hub, agent, "brain_put", { path: `/kv/${key}`, content: "one", store: "session" });
+  await toolCall(hub, agent, "brain_put", {
+    path: `/kv/${key}`,
+    content: "one",
+    store: "session",
+    session: { session_id: id },
+  });
   await page.goto(
     `${hub.baseUrl}/#/projects/${encodeURIComponent(hub.projectId)}/sessions?id=${encodeURIComponent(id)}`,
   );

@@ -1014,12 +1014,10 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         json!({"project_id": "shared", "session_name": "first"}),
     );
     assert_eq!(started.status, 200, "session_start: {}", started.raw);
-    let session_id = started
-        .raw
-        .rsplit_once("\\\"session_id\\\":\\\"")
-        .and_then(|(_, rest)| rest.split_once("\\\""))
-        .map(|(id, _)| id.to_string())
-        .unwrap_or_else(|| panic!("session_start returns a session id: {}", started.raw));
+    let session_id = started.message()["result"]["structuredContent"]["session_id"]
+        .as_str()
+        .unwrap_or_else(|| panic!("session_start returns a session id: {}", started.raw))
+        .to_string();
     let written = call(
         port,
         &one_token,
@@ -1029,9 +1027,27 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
             "path": "/kv/plan",
             "content": "drain the queue before the restart",
             "store": "session",
+            "session": {"session_id": session_id.clone()},
         }),
     );
-    assert_eq!(written.status, 200, "the owner writes: {}", written.raw);
+    assert_eq!(written.status, 200, "a participant writes: {}", written.raw);
+    assert!(
+        written.message().get("error").is_none(),
+        "the write succeeds: {}",
+        written.raw
+    );
+    let unnamed = call(
+        port,
+        &one_token,
+        &one,
+        "brain_put",
+        json!({"path": "/kv/other", "content": "x", "store": "session"}),
+    );
+    assert!(
+        unnamed.raw.contains("session_required"),
+        "a session write that names no session is refused: {}",
+        unnamed.raw
+    );
 
     // The second agent is at work in its own space, so the session it reads is
     // in a project other than the one its own session belongs to.
@@ -1062,12 +1078,12 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         "brain_get",
         json!({
             "path": "/kv/plan",
-            "session": {"agent": "one", "name": "first", "project_id": "shared"},
+            "session": {"name": "first", "project_id": "shared"},
         }),
     );
     assert!(
         by_name.raw.contains("drain the queue"),
-        "an agent and a name name the same session: {}",
+        "a name and a project name the same session: {}",
         by_name.raw
     );
     let listed = call(
@@ -1083,8 +1099,52 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         listed.raw
     );
 
-    // An untrusted agent with no grant on the project is refused, and the
-    // refusal is the same whether the session is there or not.
+    // Any participant of the session may write its brain, but a value another
+    // participant wrote last needs the version the writer read.
+    let rewrite = call(
+        port,
+        &two_token,
+        &two,
+        "brain_put",
+        json!({
+            "path": "/kv/plan",
+            "content": "drain, then restart",
+            "store": "session",
+            "session": {"session_id": session_id.clone()},
+        }),
+    );
+    assert!(
+        rewrite.raw.contains("stale_base"),
+        "a second participant needs the version it read: {}",
+        rewrite.raw
+    );
+    let version = rewrite.message()["error"]["data"]["error"]["details"]["version"].clone();
+    assert!(
+        !version.is_null(),
+        "the conflict names the version: {}",
+        rewrite.raw
+    );
+    let based = call(
+        port,
+        &two_token,
+        &two,
+        "brain_put",
+        json!({
+            "path": "/kv/plan",
+            "content": "drain, then restart",
+            "store": "session",
+            "session": {"session_id": session_id.clone()},
+            "if_version": version,
+        }),
+    );
+    assert!(
+        based.message().get("error").is_none(),
+        "a write on the version it read succeeds: {}",
+        based.raw
+    );
+
+    // An agent with no grant on the project is refused, and the refusal does
+    // not say whether the session is there.
     let strict_session = initialize(port, &strict_token);
     let existing = call(
         port,
@@ -1101,7 +1161,7 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         json!({"path": "/kv/plan", "session": {"session_id": "01JGHOSTGHOSTGHOSTGHOSTGHO"}}),
     );
     assert!(
-        existing.raw.contains("forbidden") && existing.raw.contains("not found or not permitted"),
+        existing.raw.contains("not_found"),
         "an agent without a grant is refused: {}",
         existing.raw
     );
@@ -1110,21 +1170,21 @@ async fn a_session_brain_is_read_by_whoever_may_read_its_project() {
         "the refusal carries none of the content: {}",
         existing.raw
     );
-    // The event stream numbers its own frames, so the comparison is over the
-    // payload the caller reads, which is the whole of what it learns.
-    let payload = |response: &HttpResponse| {
-        response
-            .raw
-            .lines()
-            .find(|line| line.starts_with("data: {\"jsonrpc\""))
-            .map(str::to_string)
-            .unwrap_or_else(|| panic!("a response carries a payload: {}", response.raw))
+    let reason = |response: &HttpResponse| {
+        let message = response.message();
+        (
+            message["error"]["data"]["error"]["code"].clone(),
+            message["error"]["data"]["error"]["details"]["reason"].clone(),
+        )
     };
     assert_eq!(
-        payload(&existing),
-        payload(&ghost),
-        "a session that exists and one that does not answer identically"
+        reason(&existing),
+        reason(&ghost),
+        "a session that exists and one that does not answer alike: {} / {}",
+        existing.raw,
+        ghost.raw
     );
+    assert_eq!(reason(&existing).0, "not_found", "{}", existing.raw);
 
     // A read grant is all it takes: the same agent shape with a grant reads.
     let holder_session = initialize(port, &holder_token);

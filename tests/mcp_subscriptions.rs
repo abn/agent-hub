@@ -446,7 +446,8 @@ fn subscribing_the_same_shape_again_returns_the_same_subscription() {
         json!({"kinds": "signal,finished"}),
         json!({"kinds": "signal,finished", "project_id": "p1", "exclude_self": true}),
         json!({"kinds": "signal,finished", "project_id": "p1", "about_self": true}),
-        json!({"kinds": "signal,finished", "project_id": "p1", "actor": "someone"}),
+        json!({"kinds": "signal,finished", "project_id": "p1", "author": {"member": "someone"}}),
+        json!({"kinds": "signal,finished", "project_id": "p1", "author": {"agent": "someone"}}),
     ] {
         let other = server.call_tool("notify_subscribe", different.clone());
         assert_eq!(structured(&other)["created"], true, "{different}: {other}");
@@ -500,7 +501,7 @@ fn a_subscription_binds_to_the_active_session_and_ending_it_removes_the_row() {
     assert_eq!(structured(&second_bound)["session_id"], second.as_str());
     assert_eq!(listed_ids(&mut server).len(), 3);
 
-    server.call_tool("session_end", json!({"session_id": first}));
+    server.call_tool("session_end", json!({"session": {"session_id": first}}));
     let left = listed_ids(&mut server);
     assert!(
         !left.contains(&first_row),
