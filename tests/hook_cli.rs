@@ -59,7 +59,7 @@ fn session_start_prints_the_block_and_keeps_state_under_the_state_directory() {
         "the header names the project and the session: {block}"
     );
     assert!(
-        block.contains(&format!("| you are {AGENT}/claude")),
+        block.contains(&format!("| you are {AGENT}/claude-code")),
         "the agent is recorded under the harness: {block}"
     );
     assert!(
@@ -620,8 +620,8 @@ fn settings_resolve_env_then_plugin_options_then_the_config_file_and_a_token_sta
             settings.token.as_deref(),
             settings.agent_name.as_str()
         ),
-        ("http://env.example", Some("env-token"), "from-file"),
-        "the environment wins, without a trailing slash"
+        ("http://env.example", Some("env-token"), "claude"),
+        "the environment wins, without a trailing slash, and the file names no agent"
     );
 
     let options = lookup(vec![
@@ -665,7 +665,7 @@ fn settings_resolve_env_then_plugin_options_then_the_config_file_and_a_token_sta
         settings.url, "http://file.example",
         "an empty value is unset"
     );
-    assert_eq!(settings.agent_name, "from-file");
+    assert_eq!(settings.agent_name, "claude");
     let antigravity = resolve_settings(Harness::Antigravity, &empty).expect("settings");
     assert_eq!(antigravity.agent_name, "antigravity");
     assert_eq!(antigravity.reported_name.as_deref(), Some("antigravity"));

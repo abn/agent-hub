@@ -216,6 +216,7 @@ impl Hub {
             agent_id: self.declared().map(str::to_string),
             project: None,
             timeout: budget,
+            ..ClientConfig::default()
         }
     }
 
@@ -310,7 +311,7 @@ impl Hub {
 
 /// One MCP connection and the items its results reported as pending.
 pub struct Conn {
-    service: RunningService<RoleClient, ()>,
+    service: RunningService<RoleClient, crate::client::CliClient>,
     config: ClientConfig,
     deadline: Option<Instant>,
     trailers: Vec<Item>,

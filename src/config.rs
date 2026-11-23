@@ -8,7 +8,16 @@ use crate::error::{Error, Result};
 use crate::limits::{EventCeiling, InboxCaps};
 
 /// Keys the client table carries.
-pub const CLIENT_KEYS: &[&str] = &["url", "token", "agent_id", "project", "timeout"];
+pub const CLIENT_KEYS: &[&str] = &["url", "member", "timeout", "project"];
+
+/// Keys an older release wrote under `[client]`. `token` is a legacy
+/// credential and keeps working as one with no member; `agent_id` is read,
+/// warned about and ignored.
+const LEGACY_CLIENT_KEYS: &[&str] = &["token", "agent_id"];
+
+/// The warning for a `[client] agent_id` line.
+const AGENT_ID_WARNING: &str =
+    "agent_id no longer names the member; the agent comes from the client";
 
 /// Keys the hub table carries.
 pub const HUB_KEYS: &[&str] = &[
@@ -37,18 +46,40 @@ pub const HUB_KEYS: &[&str] = &[
 ];
 
 /// The settings that name the hub a client reaches.
+///
+/// `url`, `member` and `token` are what the credential resolver chose from the
+/// environment, the project file and `config.toml`; nothing else reads a token.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientConfig {
     /// Base URL of a running hub, such as `http://hub.lan:8080`.
     pub url: Option<String>,
-    /// Bearer token the hub resolves to an agent.
+    /// Bearer token the hub resolves to a member.
     pub token: Option<String>,
-    /// Advisory agent label. The hub derives the actor from the token.
+    /// The member the token belongs to, when the resolver knows it.
+    pub member: Option<String>,
+    /// The agent slug `HUB_AGENT_ID` sets explicitly. The agent is otherwise
+    /// the client's own name, which the hub reads from the handshake.
     pub agent_id: Option<String>,
     /// The project the knowledge-base shorthands act on, when no flag names one.
     pub project: Option<String>,
     /// How long one call may take, handshake to answer.
     pub timeout: std::time::Duration,
+    /// Every `[[credential]]` of the config files, and a legacy `[client]
+    /// token` as one with no member.
+    #[cfg(feature = "client")]
+    pub credentials: Vec<crate::client::credential::Credential>,
+    /// The `[trust]` table of the config files.
+    #[cfg(feature = "client")]
+    pub trust: crate::client::credential::Trust,
+    /// What the resolver decided: connect, connect without a token, or why not.
+    #[cfg(feature = "client")]
+    pub state: crate::client::credential::State,
+    /// Where the URL, member and token came from.
+    #[cfg(feature = "client")]
+    pub sources: crate::client::credential::Sources,
+    /// Context lines for the human, such as a project file naming another hub.
+    #[cfg(feature = "client")]
+    pub notices: Vec<String>,
 }
 
 /// The default for `HUB_TIMEOUT`.
@@ -59,9 +90,24 @@ impl Default for ClientConfig {
         Self {
             url: None,
             token: None,
+            member: None,
             agent_id: None,
             project: None,
             timeout: std::time::Duration::from_secs_f64(CLIENT_TIMEOUT_SECS),
+            #[cfg(feature = "client")]
+            credentials: Vec::new(),
+            #[cfg(feature = "client")]
+            trust: crate::client::credential::Trust::default(),
+            #[cfg(feature = "client")]
+            state: crate::client::credential::State::NoHub,
+            #[cfg(feature = "client")]
+            sources: crate::client::credential::Sources {
+                url: crate::client::credential::UrlSource::None,
+                member: crate::client::credential::MemberSource::None,
+                token: crate::client::credential::TokenSource::None,
+            },
+            #[cfg(feature = "client")]
+            notices: Vec::new(),
         }
     }
 }
@@ -74,13 +120,20 @@ impl ClientConfig {
 
     /// Resolve the settings from an environment lookup and layered config files.
     pub fn resolve(env: &dyn Fn(&str) -> Option<String>) -> Result<Self> {
+        Self::resolve_pinned(env, None)
+    }
+
+    /// [`ClientConfig::resolve`] with a URL a flag pins, which beats every
+    /// other source.
+    pub fn resolve_pinned(
+        env: &dyn Fn(&str) -> Option<String>,
+        pinned_url: Option<&str>,
+    ) -> Result<Self> {
         let loaded = load_layered_configs(env)?;
         let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
 
-        let url = Setting::resolved(env, "client", "url", &files, None).value;
-        let token = Setting::resolved(env, "client", "token", &files, None).value;
-        let agent_id = Setting::resolved(env, "client", "agent_id", &files, None).value;
         let project = Setting::resolved(env, "client", "project", &files, None).value;
+        let agent_id = present(env("HUB_AGENT_ID"));
 
         let timeout_str = Setting::resolved(env, "client", "timeout", &files, Some("120")).value;
         let timeout = match timeout_str {
@@ -95,14 +148,93 @@ impl ClientConfig {
             },
         };
 
-        Ok(Self {
-            url,
-            token,
-            agent_id,
+        let mut config = Self {
             project,
+            agent_id,
             timeout: std::time::Duration::from_secs_f64(timeout),
-        })
+            ..Self::default()
+        };
+        #[cfg(feature = "client")]
+        config.apply_credentials(env, &files, pinned_url)?;
+        #[cfg(not(feature = "client"))]
+        {
+            let _ = pinned_url;
+            config.url = Setting::resolved(env, "client", "url", &files, None).value;
+            config.token = Setting::resolved(env, "client", "token", &files, None).value;
+            config.member = Setting::resolved(env, "client", "member", &files, None).value;
+        }
+        Ok(config)
     }
+
+    /// Run the credential resolver over the environment, the project file at
+    /// the git top level and the config files.
+    #[cfg(feature = "client")]
+    fn apply_credentials(
+        &mut self,
+        env: &dyn Fn(&str) -> Option<String>,
+        files: &[&ParsedConfigFile],
+        pinned_url: Option<&str>,
+    ) -> Result<()> {
+        use crate::client::credential::{self, ConfigView, Env, ResolveInput};
+
+        let mut view = ConfigView::default();
+        for file in files {
+            view.client.url = view.client.url.or_else(|| file.view.client.url.clone());
+            view.client.member = view
+                .client
+                .member
+                .or_else(|| file.view.client.member.clone());
+            view.credentials
+                .extend(file.view.credentials.iter().cloned());
+            view.trust
+                .pairings
+                .extend(file.view.trust.pairings.iter().cloned());
+        }
+
+        let start = std::env::current_dir().ok();
+        let root = start.as_deref().and_then(credential::project_root);
+        let (project_file, mut notices) = match root.as_deref() {
+            Some(root) => credential::read_project_file(root)?,
+            None => (None, Vec::new()),
+        };
+
+        let input = ResolveInput {
+            env: Env {
+                hub_url: present(env("HUB_URL")),
+                hub_token: present(env("HUB_TOKEN")),
+                hub_member: present(env("HUB_MEMBER")),
+                hub_config: present(env("HUB_CONFIG")),
+            },
+            pinned_url: pinned_url.map(str::to_string),
+            project_file,
+            project_root: root.map(|root| root.to_string_lossy().into_owned()),
+            config: view.clone(),
+        };
+        let resolved = credential::resolve(&input);
+        notices.extend(resolved.notices);
+        self.url = resolved.url;
+        self.member = resolved.member;
+        self.token = resolved.token;
+        self.state = resolved.state;
+        self.sources = resolved.source;
+        self.notices = notices;
+        self.credentials = view.credentials;
+        self.trust = view.trust;
+        Ok(())
+    }
+}
+
+/// The config file credentials are written to: `HUB_CONFIG`, else the user
+/// file already in use, else the first place a user file would go.
+pub fn credential_path(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let (hub_config, _system, candidates) = resolve_paths(env);
+    hub_config.or_else(|| {
+        candidates
+            .iter()
+            .find(|path| path.is_file())
+            .or_else(|| candidates.first())
+            .cloned()
+    })
 }
 
 /// An empty value is the same as an unset one.
@@ -777,6 +909,9 @@ pub struct ParsedConfigFile {
     pub path: PathBuf,
     pub hub: HashMap<String, String>,
     pub client: HashMap<String, String>,
+    /// The credentials, trust pairings and client defaults the resolver reads.
+    #[cfg(feature = "client")]
+    pub view: crate::client::credential::ConfigView,
 }
 
 /// Load and parse a config file. An unknown key under `[hub]` or `[client]` is
@@ -805,6 +940,8 @@ pub fn load_config_file(path: &Path) -> Result<Option<ParsedConfigFile>> {
         path: path.to_path_buf(),
         hub: HashMap::new(),
         client: HashMap::new(),
+        #[cfg(feature = "client")]
+        view: crate::client::credential::parse_config(&contents)?,
     };
 
     for (key, value) in &table {
@@ -835,17 +972,24 @@ pub fn load_config_file(path: &Path) -> Result<Option<ParsedConfigFile>> {
                 )));
             };
             for (k, v) in subtable {
-                if !CLIENT_KEYS.contains(&k.as_str()) {
+                if !CLIENT_KEYS.contains(&k.as_str()) && !LEGACY_CLIENT_KEYS.contains(&k.as_str()) {
                     return Err(Error::Config(format!(
                         "{}: unknown key '{k}' under '[client]'",
                         path.display()
                     )));
+                }
+                if k == "agent_id" {
+                    eprintln!("agent-hub: {}: {AGENT_ID_WARNING}", path.display());
+                    continue;
                 }
                 let val_str = extract_value(path, "client", k, v)?;
                 if let Some(val) = val_str {
                     parsed.client.insert(k.clone(), val);
                 }
             }
+        } else if key == "credential" || key == "trust" {
+            // The credential store and the trust list: read as text by the
+            // resolver, which is the one reader of both.
         } else if value.is_table() {
             eprintln!("agent-hub: {}: unknown table '[{key}]'", path.display());
         } else {
@@ -857,6 +1001,7 @@ pub fn load_config_file(path: &Path) -> Result<Option<ParsedConfigFile>> {
     {
         use std::os::unix::fs::PermissionsExt;
         let has_token = parsed.client.contains_key("token")
+            || table.contains_key("credential")
             || parsed.hub.contains_key("admin_token")
             || parsed.hub.contains_key("notify_token");
         if let Ok(metadata) = std::fs::metadata(path)
@@ -1325,7 +1470,7 @@ pub fn generate_config_rows(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<
         ("hub", "log_file", "HUB_LOG_FILE", None, false),
         ("client", "url", "HUB_URL", None, false),
         ("client", "token", "HUB_TOKEN", None, true),
-        ("client", "agent_id", "HUB_AGENT_ID", None, false),
+        ("client", "member", "HUB_MEMBER", None, false),
         ("client", "project", "HUB_PROJECT", None, false),
         ("client", "timeout", "HUB_TIMEOUT", Some("120"), false),
     ];
@@ -1524,41 +1669,6 @@ fn check_data_dir(path: &std::path::Path) -> Result<()> {
 pub fn user_config_target(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
     let (hub_config, _system, candidates) = resolve_paths(env);
     hub_config.or_else(|| candidates.into_iter().next())
-}
-
-/// Write or update `[client] token` in `path`, at file mode 0600.
-///
-/// The config file is the config module's to write: the enrolment command
-/// stores the token it is given here, and nothing else opens the file for
-/// writing.
-pub fn write_client_token(path: &Path, token: &str) -> std::io::Result<()> {
-    write_client_pair(path, &[("token", token)])
-}
-
-/// Write or update the `[client]` settings in `path`, at file mode 0600.
-///
-/// Enrolment persists both `url` and `token` through here, so the next command
-/// reaches the hub without the operator setting anything again. Keys are
-/// trimmed, a URL keeps no trailing slash, and every other line in the file is
-/// left exactly as it was.
-pub fn write_client_config(path: &Path, settings: &[(&str, &str)]) -> std::io::Result<()> {
-    write_client_pair(path, settings)
-}
-
-fn write_client_pair(path: &Path, settings: &[(&str, &str)]) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let _lock = lock_config(path)?;
-
-    let existing = if path.exists() {
-        std::fs::read_to_string(path)?
-    } else {
-        String::new()
-    };
-
-    let updated = update_client_toml_settings(&existing, settings);
-    write_private_file(path, &updated)
 }
 
 /// Hold the lock that serialises every read, change and replace of the config
@@ -1845,107 +1955,6 @@ pub fn remove_hub_table(path: &Path) -> std::io::Result<HubRemoval> {
     Ok(HubRemoval::TableRemoved)
 }
 
-/// Replace the token in the `[client]` table, or add the table and the key.
-#[cfg(test)]
-fn update_client_toml(content: &str, token: &str) -> String {
-    update_client_toml_settings(content, &[("token", token)])
-}
-
-/// Replace the named keys in the `[client]` table, or add the table and the
-/// keys.
-///
-/// A key already present is rewritten in place so the file reads the same
-/// order it did; a key that is not present is inserted beside its neighbors. No
-/// key is ever appended twice, and lines outside the `[client]` table are
-/// untouched.
-fn update_client_toml_settings(content: &str, settings: &[(&str, &str)]) -> String {
-    let settings: Vec<(&str, String)> = settings
-        .iter()
-        .map(|(key, value)| {
-            // A URL is the one value where a trailing slash changes what the
-            // next command joins onto, so it is written without one.
-            let clean = if *key == "url" {
-                value.trim().trim_end_matches('/').to_string()
-            } else {
-                value.trim().to_string()
-            };
-            (*key, clean)
-        })
-        .collect();
-
-    let mut lines: Vec<String> = content.lines().map(String::from).collect();
-
-    // The `[client]` table's bounds, read fresh from the current lines so an
-    // insertion in one pass cannot leave a later key looking at a stale range.
-    let client_bounds = |lines: &[String]| -> Option<(usize, usize)> {
-        let mut start = None;
-        let mut end = None;
-        for (i, line) in lines.iter().enumerate() {
-            let trimmed = line.trim();
-            if trimmed.starts_with('[') && trimmed.ends_with(']') {
-                let section_name = trimmed[1..trimmed.len() - 1].trim();
-                if section_name == "client" {
-                    start = Some(i);
-                } else if start.is_some() && end.is_none() {
-                    end = Some(i);
-                }
-            }
-        }
-        start.map(|start| (start, end.unwrap_or(lines.len())))
-    };
-
-    if client_bounds(&lines).is_some() {
-        for (key, value) in &settings {
-            let (c_idx, end_idx) = client_bounds(&lines).expect("the client table exists");
-            let mut key_line_idx = None;
-            for (i, line) in lines.iter().enumerate().take(end_idx).skip(c_idx + 1) {
-                let trimmed = line.trim();
-                if trimmed.split_once('=').map(|(k, _)| k.trim()) == Some(*key) {
-                    key_line_idx = Some(i);
-                    break;
-                }
-            }
-            if let Some(idx) = key_line_idx {
-                lines[idx] = format!("{key} = \"{value}\"");
-            } else {
-                // Insert after the table header and any keys the file already
-                // carried, so a re-run keeps the table contiguous.
-                let insert_at = lines
-                    .iter()
-                    .enumerate()
-                    .take(end_idx)
-                    .skip(c_idx + 1)
-                    .filter(|(_, line)| {
-                        let trimmed = line.trim();
-                        !trimmed.is_empty() && !trimmed.starts_with('#')
-                    })
-                    .map(|(i, _)| i + 1)
-                    .next_back()
-                    .unwrap_or(c_idx + 1);
-                lines.insert(insert_at, format!("{key} = \"{value}\""));
-            }
-        }
-        let mut out = lines.join("\n");
-        if content.ends_with('\n') {
-            out.push('\n');
-        }
-        out
-    } else {
-        let mut out = content.to_string();
-        if !out.is_empty() && !out.ends_with('\n') {
-            out.push('\n');
-        }
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out.push_str("[client]\n");
-        for (key, value) in &settings {
-            out.push_str(&format!("{key} = \"{value}\"\n"));
-        }
-        out
-    }
-}
-
 /// Create a directory and make it readable only by its owner.
 ///
 /// The data directory holds every session brain, knowledge page and artifact
@@ -1993,83 +2002,6 @@ pub fn private_file(path: &Path) -> std::io::Result<()> {
     {
         let _ = path;
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod token_tests {
-    use super::{update_client_toml, update_client_toml_settings};
-
-    #[test]
-    fn toml_insertion_on_empty() {
-        let updated = update_client_toml("", "secret");
-        assert_eq!(updated, "[client]\ntoken = \"secret\"\n");
-    }
-
-    #[test]
-    fn toml_insertion_existing_client_no_token() {
-        let existing = "[client]\nurl = \"http://hub:4000\"\n";
-        let updated = update_client_toml(existing, "secret");
-        assert_eq!(
-            updated,
-            "[client]\nurl = \"http://hub:4000\"\ntoken = \"secret\"\n"
-        );
-    }
-
-    #[test]
-    fn toml_replacement_existing_token() {
-        let existing = "[client]\ntoken = \"old\"\n";
-        let updated = update_client_toml(existing, "secret");
-        assert_eq!(updated, "[client]\ntoken = \"secret\"\n");
-    }
-
-    #[test]
-    fn toml_url_and_token_written_beside_each_other() {
-        let updated =
-            update_client_toml_settings("", &[("url", "http://hub:4000/"), ("token", "secret")]);
-        assert_eq!(
-            updated,
-            "[client]\nurl = \"http://hub:4000\"\ntoken = \"secret\"\n"
-        );
-    }
-
-    #[test]
-    fn toml_url_is_trimmed_and_keeps_other_keys() {
-        let existing =
-            "[client]\nagent_id = \"me\"\nurl = \"http://old/\"\n\n[hub]\nbind = \"127.0.0.1:1\"\n";
-        let updated = update_client_toml_settings(
-            existing,
-            &[("url", "  http://new:9/  "), ("token", " t ")],
-        );
-        assert_eq!(
-            updated,
-            "[client]\nagent_id = \"me\"\nurl = \"http://new:9\"\ntoken = \"t\"\n\n[hub]\nbind = \"127.0.0.1:1\"\n"
-        );
-        assert!(!updated.contains("http://old/"));
-    }
-
-    #[test]
-    fn toml_repeat_write_does_not_duplicate_keys() {
-        let once =
-            update_client_toml_settings("", &[("url", "http://hub:4000"), ("token", "secret")]);
-        let twice =
-            update_client_toml_settings(&once, &[("url", "http://hub:4000"), ("token", "secret")]);
-        assert_eq!(once, twice);
-        assert_eq!(twice.matches("url =").count(), 1);
-        assert_eq!(twice.matches("token =").count(), 1);
-    }
-
-    #[test]
-    fn toml_url_and_token_inserted_inside_an_existing_client_table() {
-        let existing = "[client]\nagent_id = \"me\"\n\n[hub]\nbind = \"127.0.0.1:1\"\n";
-        let updated =
-            update_client_toml_settings(existing, &[("url", "http://hub:9"), ("token", "secret")]);
-        // Both keys land after the key already in the table and before the
-        // next table, so no key leaks into `[hub]`.
-        assert_eq!(
-            updated,
-            "[client]\nagent_id = \"me\"\nurl = \"http://hub:9\"\ntoken = \"secret\"\n\n[hub]\nbind = \"127.0.0.1:1\"\n"
-        );
     }
 }
 
@@ -2127,45 +2059,6 @@ mod private_mode_tests {
         assert_eq!(mode(&file), 0o600, "a broad file is repaired to 0600");
 
         private_file(&dir.join("missing-wal")).expect("a missing sidecar is not an error");
-        std::fs::remove_dir_all(&dir).expect("clean up");
-    }
-
-    #[test]
-    fn client_token_write_is_owner_only_and_leaves_no_temp() {
-        use super::write_client_token;
-        let dir = scratch("token");
-        std::fs::create_dir_all(&dir).expect("create scratch");
-        let file = dir.join("config.toml");
-        std::fs::write(&file, "[client]\nurl = \"http://hub\"\n").expect("seed");
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).expect("loosen");
-
-        write_client_token(&file, "secret-token").expect("write");
-        assert_eq!(
-            mode(&file),
-            0o600,
-            "an existing broad file is replaced at 0600"
-        );
-        let text = std::fs::read_to_string(&file).expect("read");
-        assert!(
-            text.contains("token = \"secret-token\""),
-            "token written: {text}"
-        );
-        assert!(
-            text.contains("url = \"http://hub\""),
-            "the rest of the file is kept: {text}"
-        );
-
-        // The writers' lock file stays beside the config; no temp file does.
-        let temps: Vec<_> = std::fs::read_dir(&dir)
-            .expect("list")
-            .map(|entry| entry.expect("entry").file_name())
-            .filter(|name| name.to_string_lossy().contains(".tmp-"))
-            .collect();
-        assert!(
-            temps.is_empty(),
-            "the temp file is renamed, not left behind: {temps:?}"
-        );
-
         std::fs::remove_dir_all(&dir).expect("clean up");
     }
 }

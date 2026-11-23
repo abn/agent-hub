@@ -165,11 +165,18 @@ async fn gather(request: &Request<'_>, conn: &mut Conn, gathered: &mut Gathered)
         (Instant::now() + GIT_BUDGET).min(request.deadline),
     );
     let who = conn.call("whoami", json!({})).await.ok();
-    let actor = who
+    // Who the hub sees: the member, and the agent it writes as.
+    let actor = match who
         .as_ref()
-        .and_then(|who| text(who, "actor"))
-        .unwrap_or(request.agent_name)
-        .to_string();
+        .map(|who| (text(who, "member"), text(who, "agent")))
+    {
+        Some((Some(member), Some(agent))) => format!("{member}/{agent}"),
+        _ => who
+            .as_ref()
+            .and_then(|who| text(who, "actor"))
+            .unwrap_or(request.agent_name)
+            .to_string(),
+    };
     let personal = who
         .as_ref()
         .and_then(|who| text(who, "personal_project"))

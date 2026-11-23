@@ -6,6 +6,7 @@ use std::time::Duration;
 use axum::http::StatusCode;
 use serde_json::json;
 
+use super::credential::{self, WriteOptions, normalise_url};
 use super::{Failure, error_object};
 use crate::config::ClientConfig;
 
@@ -14,7 +15,7 @@ use crate::config::ClientConfig;
 pub struct EnrolOptions {
     pub display_name: Option<String>,
     pub why: Option<String>,
-    pub id: Option<String>,
+    pub member: Option<String>,
     pub url: Option<String>,
     pub force: bool,
 }
@@ -28,56 +29,37 @@ pub const ENROL_USAGE: &str = "\
 usage:
   agent-hub enrol [why]           request enrolment and wait for operator approval
 
-  --name <name>     the display name to register, defaulting to the agent id
-  --id <id>         the suggested agent id, defaulting to a slug of the name
-  --url <url>       the hub to enrol with, overriding HUB_URL
-  --why <why>       a one-line reason for the operator, at most 200 characters
-  --force           enrol again even when a token is already configured
+  --member <name>        the member to enrol as, defaulting to a slug of this host's name
+  --display-name <name>  the display name to register, defaulting to the member
+  --url <url>            the hub to enrol with, overriding HUB_URL
+  --why <why>            a one-line reason for the operator, at most 200 characters
+  --force                enrol again even when a token is already stored for the member
 
-A successful enrolment saves the hub url and the token to the client config,
-so the next command reaches the hub with no environment set.
+A successful enrolment saves the hub url, the member and the token as a
+[[credential]] in the client config, so the next command reaches the hub with no
+environment set. If the operator approves under another name, the saved entry
+takes that name.
 
-That config file is per user, so a second agent on one machine keeps its own by
-naming the file with HUB_CONFIG=<path>. Enrolling over the token already
-configured is refused; --force replaces it.";
+That config file is per user and holds one credential for every member and hub
+this machine uses. HUB_CONFIG=<path> names a file of its own. Enrolling over a
+token already stored for the same member is refused; --force replaces it.";
 
 impl EnrolOptions {
     pub fn parse(args: &[String]) -> Result<Self, String> {
         let mut options = Self::default();
         let mut iter = args.iter();
         while let Some(arg) = iter.next() {
+            let mut value = |name: &str| {
+                iter.next()
+                    .cloned()
+                    .ok_or_else(|| format!("{name} requires a value"))
+            };
             match arg.as_str() {
-                "--name" | "--display-name" => {
-                    options.display_name = Some(
-                        iter.next()
-                            .ok_or_else(|| format!("{arg} requires a value"))?
-                            .clone(),
-                    );
-                }
-                "--why" => {
-                    options.why = Some(
-                        iter.next()
-                            .ok_or_else(|| "--why requires a value".to_string())?
-                            .clone(),
-                    );
-                }
-                "--id" => {
-                    options.id = Some(
-                        iter.next()
-                            .ok_or_else(|| "--id requires a value".to_string())?
-                            .clone(),
-                    );
-                }
-                "--url" => {
-                    options.url = Some(
-                        iter.next()
-                            .ok_or_else(|| "--url requires a value".to_string())?
-                            .clone(),
-                    );
-                }
-                "--force" => {
-                    options.force = true;
-                }
+                "--display-name" => options.display_name = Some(value("--display-name")?),
+                "--why" => options.why = Some(value("--why")?),
+                "--member" => options.member = Some(value("--member")?),
+                "--url" => options.url = Some(value("--url")?),
+                "--force" => options.force = true,
                 arg if arg.starts_with('-') => {
                     return Err(format!("unknown option '{arg}'"));
                 }
@@ -93,55 +75,80 @@ impl EnrolOptions {
     }
 }
 
-/// The refusal for a config file that already holds a token.
-///
-/// The second agent on one machine is the case this exists for: it reaches the
-/// same per-user file as the first, and a bare "a token is already configured"
-/// names no way forward. Both remedies are here, and neither is a silent
-/// success: `--force` replaces the token, `HUB_CONFIG` keeps the other one
-/// where it is.
-const ALREADY_CONFIGURED: &str = "\
-agent-hub enrol: a token is already configured for another identity
-  to enrol over it:    agent-hub enrol --force --id <id> --name <name>
-  to keep both tokens: HUB_CONFIG=<path> agent-hub enrol --id <id> --name <name>
-The config file is per user, so a second agent on one machine names its own.";
+/// A member id from a host name: lowercase, anything outside `[a-z0-9._-]`
+/// turned into a dash, at most 63 characters, or none when nothing usable is
+/// left or the id is not one a new member may take.
+pub fn host_slug(host: &str) -> Option<String> {
+    let mut out = String::new();
+    for c in host.to_ascii_lowercase().chars() {
+        if c.is_ascii_alphanumeric() || matches!(c, '.' | '_') {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let slug: String = out.trim_matches(['-', '.', '_']).chars().take(63).collect();
+    let slug = slug.trim_end_matches(['-', '.', '_']).to_string();
+    crate::store::identity::valid_new_member_id(&slug).then_some(slug)
+}
 
-/// Request agent enrolment on the hub and long-poll until operator decision.
+/// The member a bare `agent-hub enrol` asks for: this host's slug, else a
+/// short random one.
+fn default_member() -> String {
+    host_slug(&super::lockdir::real_host()).unwrap_or_else(|| {
+        use rand::RngCore;
+        format!("cli-{:04x}", rand::rng().next_u32() & 0xffff)
+    })
+}
+
+/// Request member enrolment on the hub and long-poll until operator decision.
 pub async fn enrol(config: &ClientConfig, args: &[String]) -> Result<(), Failure> {
     let options = EnrolOptions::parse(args).map_err(Failure::Usage)?;
 
-    if config.token.is_some() && !options.force {
-        // The config file is per user, so a token already sitting in it is
-        // another agent's. Naming that, and the two ways out, is the whole of
-        // this refusal: it stays one, because writing over a token nobody
-        // asked to lose is worse than a second file.
-        println!("{}", ALREADY_CONFIGURED);
-        return Ok(());
-    }
-
-    let url = options
-        .url
-        .as_deref()
-        .or(config.url.as_deref())
-        .ok_or_else(|| {
+    let url = match options.url.as_deref() {
+        Some(url) => url.to_string(),
+        None => config.url.clone().ok_or_else(|| {
             Failure::Config(format!(
                 "no hub URL configured; set HUB_URL or write [client] url to {}",
                 crate::config::client_config_hint(&|key| std::env::var(key).ok())
             ))
-        })?
-        .trim_end_matches('/');
+        })?,
+    };
+    let url = url.trim().trim_end_matches('/').to_string();
 
-    let display_name = options
-        .display_name
-        .or_else(|| config.agent_id.clone())
-        .or_else(|| std::env::var("USER").ok())
-        .or_else(|| std::env::var("HOSTNAME").ok())
-        .unwrap_or_else(|| "Agent".to_string());
+    let member = match options.member.as_deref() {
+        Some(member) => member.trim().to_string(),
+        None => default_member(),
+    };
+    if !crate::store::identity::valid_new_member_id(&member) {
+        return Err(Failure::Usage(format!(
+            "'{member}' is not a member name: use 1 to 63 of a-z, 0-9, '.', '_' or '-', starting \
+             with a letter or digit"
+        )));
+    }
+
+    let wanted = normalise_url(&url);
+    let taken = config.credentials.iter().any(|credential| {
+        normalise_url(&credential.url) == wanted
+            && credential.member.as_deref().map(str::trim) == Some(member.as_str())
+    });
+    if taken && !options.force {
+        // The token on disk is the member's own, and writing over one nobody
+        // asked to lose is worse than naming the way out.
+        println!(
+            "agent-hub enrol: a token is already stored for member '{member}' at {url}\n  \
+             to replace it:       agent-hub enrol --force --member {member}\n  \
+             to enrol as another: agent-hub enrol --member <name>\n  \
+             to keep both files:  HUB_CONFIG=<path> agent-hub enrol --member {member}"
+        );
+        return Ok(());
+    }
+
+    let display_name = options.display_name.unwrap_or_else(|| member.clone());
 
     let why = options
         .why
         .unwrap_or_else(|| "Agent requesting access".to_string());
-
     if why.contains('\n') || why.contains('\r') {
         return Err(Failure::Usage("why must not contain newlines".to_string()));
     }
@@ -157,13 +164,14 @@ pub async fn enrol(config: &ClientConfig, args: &[String]) -> Result<(), Failure
         .map_err(|err| Failure::Failed(format!("failed to build HTTP client: {err}")))?;
 
     let enrol_endpoint = format!("{url}/api/v1/enrol");
-    let mut enrol_body = json!({
+    let enrol_body = json!({
+        "member": member,
         "display_name": display_name,
         "why": why,
+        "agent": crate::agent_name::CLI,
+        "os": std::env::consts::OS,
+        "host": super::lockdir::real_host(),
     });
-    if let Some(id) = options.id {
-        enrol_body["suggested_id"] = json!(id);
-    }
 
     eprintln!("agent-hub enrol: requesting enrolment at {url}...");
 
@@ -179,7 +187,7 @@ pub async fn enrol(config: &ClientConfig, args: &[String]) -> Result<(), Failure
         // Enrolment being disabled is a refused request, not a bad token, so
         // it exits 1 rather than the token-refused 77 a hook re-enrols on.
         return Err(Failure::Failed(format!(
-            "{enrol_endpoint} refused the request: agent enrolment is disabled on this hub"
+            "{enrol_endpoint} refused the request: enrolment is disabled on this hub"
         )));
     }
     if status == StatusCode::TOO_MANY_REQUESTS {
@@ -205,15 +213,33 @@ pub async fn enrol(config: &ClientConfig, args: &[String]) -> Result<(), Failure
         .ok_or_else(|| Failure::Failed("missing token in enrolment response".to_string()))?
         .to_string();
 
-    let initial_agent_id = body
-        .get("agent_id")
+    let requested = body
+        .get("member")
         .and_then(serde_json::Value::as_str)
-        .unwrap_or("unknown")
+        .unwrap_or(&member)
         .to_string();
 
     eprintln!(
-        "agent-hub enrol: pending approval for agent '{initial_agent_id}'. Waiting for operator decision..."
+        "agent-hub enrol: pending approval for member '{requested}'. Waiting for operator decision..."
     );
+
+    // The pending token is the one that becomes active on approval, so it is
+    // stored now, under the name asked for: a client that is stopped while it
+    // waits still holds it once the operator decides.
+    let saved_to = crate::config::credential_path(&|key| std::env::var(key).ok());
+    let stored = match saved_to.as_deref() {
+        Some(path) => match store_pending(path, &url, &requested, &token).await {
+            Ok(()) => true,
+            Err(err) => {
+                eprintln!(
+                    "agent-hub enrol: warning: could not write the token to {}: {err}",
+                    path.display()
+                );
+                false
+            }
+        },
+        None => false,
+    };
 
     let status_endpoint = format!("{url}/api/v1/enrol/status?wait=30");
     loop {
@@ -253,47 +279,56 @@ pub async fn enrol(config: &ClientConfig, args: &[String]) -> Result<(), Failure
             .unwrap_or("");
 
         if state == "approved" {
-            let final_agent_id = status_json
-                .get("agent_id")
+            let approved = status_json
+                .get("member")
                 .and_then(serde_json::Value::as_str)
-                .unwrap_or(&initial_agent_id);
-            let share = status_json
-                .get("share")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
+                .unwrap_or(&requested)
+                .to_string();
 
-            println!("Enrolment approved for agent '{final_agent_id}'.");
+            println!("Enrolment approved for member '{approved}'.");
 
-            // The token is shown once and only the hash is stored, so a client
-            // that leaves here without it has no way back. When the operator
-            // approved with sharing on, the client collects it and writes both
-            // the token and the url, so the next command needs no environment.
-            let saved = if share {
-                match user_config_target() {
-                    Some(config_path) => match write_client_config(&config_path, url, &token) {
-                        Ok(()) => {
-                            println!(
-                                "Token saved to {}, with the hub url.",
-                                config_path.display()
-                            );
-                            true
-                        }
-                        Err(err) => {
-                            eprintln!(
-                                "agent-hub enrol: warning: could not write token to {}: {err}",
-                                config_path.display()
-                            );
-                            false
-                        }
-                    },
-                    None => false,
+            let mut saved = stored;
+            if stored
+                && approved != requested
+                && let Some(path) = saved_to.as_deref()
+            {
+                let renamed = {
+                    let (path, url, from, to) = (
+                        path.to_path_buf(),
+                        url.clone(),
+                        requested.clone(),
+                        approved.clone(),
+                    );
+                    tokio::task::spawn_blocking(move || {
+                        credential::rekey(&path, &url, &from, &to, &WriteOptions::default())
+                    })
+                    .await
+                };
+                match renamed {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => {
+                        eprintln!(
+                            "agent-hub enrol: warning: could not rename '{requested}' to \
+                             '{approved}' in {}: {err}",
+                            path.display()
+                        );
+                        saved = false;
+                    }
+                    Err(err) => {
+                        eprintln!("agent-hub enrol: warning: the rename did not finish: {err}");
+                        saved = false;
+                    }
                 }
-            } else {
-                false
-            };
+            }
 
-            if !saved {
-                println!("Token: {token}");
+            match (&saved_to, saved) {
+                (Some(path), true) => {
+                    println!(
+                        "Token saved to {}, with the hub url and member.",
+                        path.display()
+                    );
+                }
+                _ => println!("Token: {token}"),
             }
 
             // Say what will now work, whether the token was saved or the
@@ -312,21 +347,31 @@ pub async fn enrol(config: &ClientConfig, args: &[String]) -> Result<(), Failure
     }
 }
 
+/// Store the pending token under the requested member, off the async
+/// threads: the config lock may be waited for.
+async fn store_pending(
+    path: &Path,
+    url: &str,
+    member: &str,
+    token: &str,
+) -> Result<(), crate::error::Error> {
+    let (path, url, member, token) = (
+        path.to_path_buf(),
+        url.to_string(),
+        member.to_string(),
+        token.to_string(),
+    );
+    tokio::task::spawn_blocking(move || {
+        credential::write(&path, &url, &member, &token, &WriteOptions::default())
+    })
+    .await
+    .map_err(|err| crate::error::Error::Unavailable(format!("the write did not finish: {err}")))?
+}
+
 /// The user config file, resolved by the config module so the file that is
 /// read is the file that is written.
 pub fn user_config_target() -> Option<PathBuf> {
-    crate::config::user_config_target(&|key| std::env::var(key).ok())
-}
-
-/// Persist the issued token through the config module, which owns the file.
-pub fn write_client_token(path: &Path, token: &str) -> std::io::Result<()> {
-    crate::config::write_client_token(path, token)
-}
-
-/// Persist the hub url and token through the config module, which owns the
-/// file, so one successful enrolment configures the next command.
-pub fn write_client_config(path: &Path, url: &str, token: &str) -> std::io::Result<()> {
-    crate::config::write_client_config(path, &[("url", url), ("token", token)])
+    crate::config::credential_path(&|key| std::env::var(key).ok())
 }
 
 #[cfg(test)]
@@ -335,10 +380,22 @@ mod tests {
 
     #[test]
     fn the_user_config_target_prefers_hub_config() {
-        let target = crate::config::user_config_target(&|key| match key {
+        let target = crate::config::credential_path(&|key| match key {
             "HUB_CONFIG" => Some("chosen.toml".to_string()),
             _ => None,
         });
         assert_eq!(target.as_deref(), Some(Path::new("chosen.toml")));
+    }
+
+    #[test]
+    fn a_host_name_becomes_a_member_slug() {
+        assert_eq!(
+            host_slug("Arun-Laptop.local").as_deref(),
+            Some("arun-laptop.local")
+        );
+        assert_eq!(host_slug("my host!").as_deref(), Some("my-host"));
+        assert_eq!(host_slug("---"), None);
+        assert_eq!(host_slug("loopback"), None);
+        assert_eq!(host_slug(&"a".repeat(80)).map(|s| s.len()), Some(63));
     }
 }

@@ -651,7 +651,7 @@ fn purge_refuses_while_something_holds_the_store() {
     let sandbox = Sandbox::new("svc-guard-held");
     assert_exit(&sandbox.install(&["--no-start"]), 0);
     let mut holder = sandbox
-        .cmd(&["mcp"])
+        .cmd(&["mcp", "--embedded"])
         .env("HUB_DATA_DIR", sandbox.data())
         // The installed config names a hub for clients; the session is to run
         // embedded, so it reads no config.

@@ -943,7 +943,7 @@ fn error_code(failure: &Failure) -> Option<&str> {
 
 /// One connection to the hub, and the project knowledge base it reaches.
 struct Hub<'a> {
-    service: RunningService<RoleClient, ()>,
+    service: RunningService<RoleClient, crate::client::CliClient>,
     config: &'a ClientConfig,
     project: &'a str,
 }
