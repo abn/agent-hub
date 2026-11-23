@@ -50,18 +50,16 @@ fn installs_the_plugin_enables_it_and_asks_for_a_restart() {
     let dir = plugin_dir(&home);
     assert_eq!(read_json(&dir.join("plugin.json"))["name"], "agent-hub");
     let mcp = read_json(&dir.join("mcp_config.json"));
-    assert_eq!(
-        mcp["mcpServers"]["agent-hub"]["args"],
-        json!(["mcp", "--proxy"])
-    );
-    assert_eq!(
-        mcp["mcpServers"]["agent-hub"]["env"]["HUB_AGENT_ID"],
-        "antigravity"
+    let server = &mcp["mcpServers"]["agent-hub"];
+    assert_eq!(server["args"], json!(["mcp"]));
+    assert!(
+        server.get("env").is_none(),
+        "Antigravity expands no env: {server}"
     );
     let hooks = read_json(&dir.join("hooks.json"));
     assert_eq!(
         hooks["agent-hub"]["PreInvocation"][0]["command"],
-        "agent-hub hook prompt --harness antigravity"
+        "./bin/agent-hub-launcher hook prompt --harness antigravity"
     );
     assert!(
         fs::read_to_string(dir.join("rules/agent-hub.md"))
@@ -74,6 +72,85 @@ fn installs_the_plugin_enables_it_and_asks_for_a_restart() {
 
     let config = read_json(&home.join(".gemini/config/config.json"));
     assert_eq!(config["plugins"]["agent-hub"]["enabled"], true);
+}
+
+/// The launcher the install writes, and the path the MCP entry runs.
+fn installed_launcher(home: &Path) -> std::path::PathBuf {
+    plugin_dir(home).join("bin/agent-hub-launcher")
+}
+
+#[cfg(unix)]
+#[test]
+fn installs_an_executable_launcher_and_points_the_mcp_entry_at_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = TempDir::new("setup-agy-launcher");
+    assert!(setup(&home, &["antigravity"]).status.success());
+
+    let launcher = installed_launcher(&home);
+    let shipped =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/antigravity/bin/agent-hub-launcher");
+    assert_eq!(fs::read(&launcher).unwrap(), fs::read(shipped).unwrap());
+    assert_eq!(
+        fs::metadata(&launcher).unwrap().permissions().mode() & 0o777,
+        0o755,
+        "the harness runs it"
+    );
+
+    let mcp = read_json(&plugin_dir(&home).join("mcp_config.json"));
+    let command = mcp["mcpServers"]["agent-hub"]["command"]
+        .as_str()
+        .expect("a command");
+    assert!(Path::new(command).is_absolute(), "{command}");
+    assert_eq!(
+        Path::new(command),
+        launcher,
+        "the entry runs the installed launcher"
+    );
+    assert_eq!(mcp["mcpServers"]["agent-hub"]["args"], json!(["mcp"]));
+    // Parsed, not run: a run would look for a binary to fetch.
+    let parsed = Command::new("sh")
+        .args(["-n", command])
+        .output()
+        .expect("sh parses the launcher");
+    assert!(parsed.status.success(), "{parsed:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_launcher_that_lost_its_execute_bit_is_made_executable_again_without_a_backup() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = TempDir::new("setup-agy-chmod");
+    assert!(setup(&home, &["antigravity"]).status.success());
+    let launcher = installed_launcher(&home);
+    fs::set_permissions(&launcher, fs::Permissions::from_mode(0o644)).unwrap();
+
+    assert!(setup(&home, &["antigravity"]).status.success());
+
+    assert_eq!(
+        fs::metadata(&launcher).unwrap().permissions().mode() & 0o777,
+        0o755
+    );
+    assert!(!home.join(".gemini/config/agent-hub-backup").exists());
+}
+
+#[test]
+fn a_workspace_install_points_the_entry_at_the_workspace_launcher() {
+    let home = TempDir::new("setup-agy-wsl-home");
+    let workspace = TempDir::new("setup-agy-wsl");
+    assert!(
+        setup(
+            &home,
+            &["antigravity", "--workspace", workspace.to_str().unwrap()],
+        )
+        .status
+        .success()
+    );
+    let dir = workspace.join(".agents/plugins/agent-hub");
+    let mcp = read_json(&dir.join("mcp_config.json"));
+    assert_eq!(
+        Path::new(mcp["mcpServers"]["agent-hub"]["command"].as_str().unwrap()),
+        dir.join("bin/agent-hub-launcher")
+    );
 }
 
 #[test]
@@ -274,6 +351,14 @@ fn usage_errors_exit_2() {
 #[test]
 fn the_installed_plugin_passes_the_antigravity_validator() {
     if Command::new("agy").arg("--version").output().is_err() {
+        // A CI row that declares the validator must have it.
+        assert!(
+            !matches!(
+                std::env::var("HUB_REQUIRE_AGY").as_deref(),
+                Ok("1" | "true" | "yes" | "TRUE" | "True" | "YES")
+            ),
+            "HUB_REQUIRE_AGY is set, so a missing agy is a failure"
+        );
         eprintln!("agy not on PATH, skipping");
         return;
     }

@@ -1,0 +1,31 @@
+{
+  "name": "resolve-project-file-no-project-key",
+  "input": {
+    "agent": "claude-code",
+    "date": "2026-11-23",
+    "cwd": "/work/agent-hub",
+    "env": {},
+    "git": {
+      "is_repo": true,
+      "top_level": "/work/agent-hub",
+      "origin_url": "git@github.com:agync/agent-hub.git",
+      "branch": "feat/x",
+      "detached": false,
+      "linked_worktree": false
+    },
+    "files": {
+      "/work/agent-hub/.agent-hub.toml": "member = \"laptop\"\n"
+    },
+    "known_projects": [
+      "agent-hub"
+    ],
+    "personal_project": "dev-claude"
+  },
+  "expected": {
+    "project_id": "agent-hub",
+    "project_source": "origin",
+    "session_name": "feat-x",
+    "session_source": "branch",
+    "context_line": null
+  }
+}

@@ -30,6 +30,11 @@ export function noticeLine(item) {
   return `- [${sanitize(item.kind)}] ${title} (${sanitize(item.project)}, ${sanitize(item.id)})`;
 }
 
+// One line about the connection, such as a member waiting for approval.
+export function noticeBlock(line) {
+  return `<agent-hub>\n${sanitize(line)}\n</agent-hub>`;
+}
+
 export function wakeMode(value) {
   return value === "all" || value === "never" ? value : "direct";
 }
@@ -52,15 +57,17 @@ export function contextBlock(input) {
   const project_id = sanitize(input.project_id);
   const session_name = sanitize(input.session_name);
   const session_id = input.session_id ? sanitize(input.session_id) : null;
-  const actor = sanitize(input.actor);
+  const member = sanitize(input.member);
+  const agent = sanitize(input.agent);
+  const how = input.plugin_adds_session === false ? "on every hub call" : "on hub calls (the plugin adds it)";
   const anchor = input.anchor
     ? { ...input.anchor, phase: sanitize(input.anchor.phase), age: sanitize(input.anchor.age) }
     : null;
   const contextLines = (input.context_lines ?? []).map(sanitize);
   const head = [
-    `project ${project_id} | session ${session_name}${session_id ? ` (${session_id})` : ""} | you are ${actor}`,
+    `project ${project_id} | session ${session_name}${session_id ? ` (${session_id})` : ""} | you are ${member} \u00b7 ${agent}`,
     ...contextLines,
-    `Bind your hub connection now: session_start(project_id: "${project_id}", session_name: "${session_name}").`,
+    `Pass session: {"project_id": "${project_id}", "name": "${session_name}"} ${how}.`,
     "Do not call session_brief; this block is the brief.",
   ];
   const groups = {

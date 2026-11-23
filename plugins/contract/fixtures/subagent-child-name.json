@@ -1,0 +1,29 @@
+{
+  "name": "subagent-child-name",
+  "input": {
+    "project_id": "homelab",
+    "parent": "feat-x",
+    "agent_type": "general-purpose",
+    "agent_id": "af9c57a04aa308f01",
+    "mapped": null,
+    "replies": [
+      {
+        "ok": {
+          "session_id": "01J8Z3K9A1B2C3D4E5F6G7H8J9",
+          "project_id": "homelab",
+          "status": "active",
+          "outcome": "created"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "calls": [
+      {
+        "session_name": "feat-x/general-purpose-af9c57a0",
+        "exclusive": true
+      }
+    ],
+    "child": "feat-x/general-purpose-af9c57a0"
+  }
+}

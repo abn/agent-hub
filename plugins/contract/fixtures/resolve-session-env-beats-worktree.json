@@ -1,0 +1,31 @@
+{
+  "name": "resolve-session-env-beats-worktree",
+  "input": {
+    "agent": "claude-code",
+    "date": "2026-11-23",
+    "cwd": "/work/agent-hub",
+    "env": {
+      "HUB_SESSION": "pinned-name"
+    },
+    "git": {
+      "is_repo": true,
+      "top_level": "/work/feat-login",
+      "origin_url": "git@github.com:agync/agent-hub.git",
+      "branch": "main",
+      "detached": false,
+      "linked_worktree": true
+    },
+    "files": {},
+    "known_projects": [
+      "agent-hub"
+    ],
+    "personal_project": "dev-claude"
+  },
+  "expected": {
+    "project_id": "agent-hub",
+    "project_source": "origin",
+    "session_name": "pinned-name",
+    "session_source": "env",
+    "context_line": null
+  }
+}

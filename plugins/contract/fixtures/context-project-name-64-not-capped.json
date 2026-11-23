@@ -4,7 +4,8 @@
     "project_id": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
     "session_name": "feat-login-flow",
     "session_id": "s_01J8",
-    "actor": "dev/claude",
+    "member": "dev",
+    "agent": "claude-code",
     "brief": [],
     "anchor": null,
     "handoff": [],
@@ -12,7 +13,7 @@
     "pending": []
   },
   "expected": {
-    "text": "<agent-hub>\nproject pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp | session feat-login-flow (s_01J8) | you are dev/claude\nBind your hub connection now: session_start(project_id: \"pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp\", session_name: \"feat-login-flow\").\nDo not call session_brief; this block is the brief.\n</agent-hub>",
+    "text": "<agent-hub>\nproject pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp | session feat-login-flow (s_01J8) | you are dev · claude-code\nPass session: {\"project_id\": \"pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp\", \"name\": \"feat-login-flow\"} on hub calls (the plugin adds it).\nDo not call session_brief; this block is the brief.\n</agent-hub>",
     "truncated": false
   }
 }

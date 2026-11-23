@@ -207,7 +207,14 @@ pub struct ContextInput {
     pub session_name: String,
     #[serde(default)]
     pub session_id: Option<String>,
-    pub actor: String,
+    /// The member the session acts as.
+    pub member: String,
+    /// The agent the hub knows this client by.
+    pub agent: String,
+    /// Whether the plugin adds `session` to the model's hub calls. Claude and
+    /// OpenCode do; Antigravity has no such hook, so the model passes it.
+    #[serde(default = "plugin_adds_session")]
+    pub plugin_adds_session: bool,
     #[serde(default)]
     pub context_lines: Vec<String>,
     #[serde(default)]
@@ -220,6 +227,10 @@ pub struct ContextInput {
     pub kb_index: Vec<String>,
     #[serde(default)]
     pub pending: Vec<String>,
+}
+
+fn plugin_adds_session() -> bool {
+    true
 }
 
 /// The rendered block.
@@ -244,16 +255,22 @@ fn header_line(input: &ContextInput) -> String {
         .map(|id| format!(" ({})", sanitize(id)))
         .unwrap_or_default();
     format!(
-        "project {} | session {}{id} | you are {}",
+        "project {} | session {}{id} | you are {} \u{b7} {}",
         sanitize(&input.project_id),
         sanitize(&input.session_name),
-        sanitize(&input.actor)
+        sanitize(&input.member),
+        sanitize(&input.agent)
     )
 }
 
 fn bind_line(input: &ContextInput) -> String {
+    let how = if input.plugin_adds_session {
+        "on hub calls (the plugin adds it)"
+    } else {
+        "on every hub call"
+    };
     format!(
-        "Bind your hub connection now: session_start(project_id: \"{}\", session_name: \"{}\").",
+        "Pass session: {{\"project_id\": \"{}\", \"name\": \"{}\"}} {how}.",
         sanitize(&input.project_id),
         sanitize(&input.session_name)
     )
@@ -346,6 +363,12 @@ pub fn pointer_block(input: &ContextInput) -> String {
     format!("<agent-hub>\n{}\n</agent-hub>", body.join("\n"))
 }
 
+/// A block that holds one line about the connection, such as a hub that is
+/// unreachable or a member waiting for approval.
+pub fn notice_block(line: &str) -> String {
+    format!("<agent-hub>\n{}\n</agent-hub>", sanitize(line))
+}
+
 /// A block that only lists what is waiting, for a prompt on a session the
 /// model already knows.
 pub fn pending_block(lines: &[String]) -> String {
@@ -359,6 +382,9 @@ pub struct Output {
     pub context: Option<String>,
     #[serde(default)]
     pub compaction_instructions: Option<String>,
+    /// The tool input a `PreToolUse` hook replaces the model's with.
+    #[serde(default)]
+    pub updated_input: Option<Value>,
 }
 
 /// The harness hook output for one event, without a trailing newline.
@@ -384,6 +410,16 @@ pub fn wire(harness: Harness, event: Event, output: &Output) -> String {
         (Harness::Claude, Event::PreCompact) => {
             output.compaction_instructions.clone().unwrap_or_default()
         }
+        // `updatedInput` alone: a `permissionDecision` would change whether the
+        // call is allowed, and this hook only changes what it carries.
+        (Harness::Claude, Event::PreToolUse) => match &output.updated_input {
+            Some(input) => json!({"hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "updatedInput": input,
+            }})
+            .to_string(),
+            None => noop,
+        },
         (Harness::Antigravity, Event::Prompt) => match context {
             Some(context) => json!({"injectSteps": [{"ephemeralMessage": context}]}).to_string(),
             None => noop,

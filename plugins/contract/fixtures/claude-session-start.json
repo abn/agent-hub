@@ -4,7 +4,7 @@
     "harness": "claude",
     "event": "session-start",
     "output": {
-      "context": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev/claude\n</agent-hub>",
+      "context": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev \u00b7 claude-code\n</agent-hub>",
       "compaction_instructions": null
     }
   },
@@ -12,7 +12,7 @@
     "stdout_json": {
       "hookSpecificOutput": {
         "hookEventName": "SessionStart",
-        "additionalContext": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev/claude\n</agent-hub>"
+        "additionalContext": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev \u00b7 claude-code\n</agent-hub>"
       }
     },
     "exit_code": 0

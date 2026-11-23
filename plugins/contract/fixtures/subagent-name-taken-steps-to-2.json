@@ -1,0 +1,46 @@
+{
+  "name": "subagent-name-taken-steps-to-2",
+  "input": {
+    "project_id": "homelab",
+    "parent": "feat-x",
+    "agent_type": "general-purpose",
+    "agent_id": "af9c57a04aa308f01",
+    "mapped": null,
+    "replies": [
+      {
+        "error": {
+          "error": {
+            "code": "conflict",
+            "message": "session 'feat-x/general-purpose-af9c57a0' already exists",
+            "retryable": false,
+            "details": {
+              "reason": "session_name_taken",
+              "session_id": "01J8Z3KB7C8D9E0F1G2H3J4K5M"
+            }
+          }
+        }
+      },
+      {
+        "ok": {
+          "session_id": "s2",
+          "project_id": "homelab",
+          "status": "active",
+          "outcome": "created"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "calls": [
+      {
+        "session_name": "feat-x/general-purpose-af9c57a0",
+        "exclusive": true
+      },
+      {
+        "session_name": "feat-x/general-purpose-af9c57a0-2",
+        "exclusive": true
+      }
+    ],
+    "child": "feat-x/general-purpose-af9c57a0-2"
+  }
+}

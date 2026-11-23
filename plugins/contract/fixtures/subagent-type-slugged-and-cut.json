@@ -1,0 +1,29 @@
+{
+  "name": "subagent-type-slugged-and-cut",
+  "input": {
+    "project_id": "homelab",
+    "parent": "feat-x",
+    "agent_type": "Code Reviewer (strict) for very long names",
+    "agent_id": "b7e1a2c9d4f50318",
+    "mapped": null,
+    "replies": [
+      {
+        "ok": {
+          "session_id": "s1",
+          "project_id": "homelab",
+          "status": "active",
+          "outcome": "created"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "calls": [
+      {
+        "session_name": "feat-x/code-reviewer-strict-for-b7e1a2c9",
+        "exclusive": true
+      }
+    ],
+    "child": "feat-x/code-reviewer-strict-for-b7e1a2c9"
+  }
+}

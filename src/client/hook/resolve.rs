@@ -9,12 +9,13 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
 
 use super::render::{clip, flatten};
 
 const NAME_MAX: usize = 64;
-const PERSONAL_LINE: &str = "no project matched; write `.agent-hub` to pin one";
+const PERSONAL_LINE: &str = "no project matched; write `.agent-hub.toml` to pin one";
+const PROJECT_FILE: &str = ".agent-hub.toml";
+const LEGACY_FILE: &str = ".agent-hub";
 
 /// What git says about the working directory.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -28,17 +29,24 @@ pub struct GitFacts {
     pub branch: Option<String>,
     #[serde(default)]
     pub detached: bool,
+    /// Whether the top level is a linked worktree, whose directory name then
+    /// names the session when no branch does.
+    #[serde(default)]
+    pub linked_worktree: bool,
 }
 
 /// Everything resolution reads.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ResolveInput {
-    pub harness: String,
-    pub harness_session_id: String,
+    /// The canonical agent name, which names the session of last resort.
+    pub agent: String,
+    /// Today as `YYYY-MM-DD`, for the same.
+    pub date: String,
     #[serde(default)]
     pub env: HashMap<String, String>,
     pub git: GitFacts,
-    /// Absolute path to file text, for the `.agent-hub` file.
+    /// Absolute path to file text, for `.agent-hub.toml` and a legacy
+    /// `.agent-hub`.
     #[serde(default)]
     pub files: HashMap<String, String>,
     #[serde(default)]
@@ -63,7 +71,8 @@ pub enum ProjectSource {
 pub enum SessionSource {
     Env,
     Branch,
-    HarnessSession,
+    Worktree,
+    Date,
 }
 
 /// The project and session a harness session maps to.
@@ -136,25 +145,40 @@ pub fn repo_name(origin_url: &str) -> Option<String> {
     (!last.is_empty()).then(|| last.to_string())
 }
 
-/// The first 8 characters of a harness session id that a session name may hold.
-/// An id with fewer than 8 of them is named by the start of its SHA-256.
-fn short_session_id(id: &str) -> String {
-    use std::fmt::Write;
-    let valid: String = id
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
-        .take(8)
-        .collect();
-    if valid.len() == 8 {
-        return valid;
+/// The `project` key of a `.agent-hub.toml`: a quoted string in the part
+/// before the first table. Anything else reads as no pin.
+fn toml_project(text: &str) -> Option<String> {
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.starts_with('[') {
+            return None;
+        }
+        let Some(rest) = line.strip_prefix("project") else {
+            continue;
+        };
+        let Some(value) = rest.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        let value = value.trim_start();
+        let mut chars = value.chars();
+        let quote = chars.next().filter(|q| matches!(q, '"' | '\''))?;
+        let mut out = String::new();
+        let mut escaped = false;
+        for c in chars {
+            if quote == '"' && escaped {
+                out.push(c);
+                escaped = false;
+            } else if quote == '"' && c == '\\' {
+                escaped = true;
+            } else if c == quote {
+                return Some(out);
+            } else {
+                out.push(c);
+            }
+        }
+        return None;
     }
-    sha2::Sha256::digest(id.as_bytes())
-        .iter()
-        .take(4)
-        .fold(String::new(), |mut hex, byte| {
-            write!(hex, "{byte:02x}").ok();
-            hex
-        })
+    None
 }
 
 fn set(value: Option<&String>) -> Option<&str> {
@@ -166,6 +190,21 @@ fn rejection(source: &str, value: &str) -> String {
         "ignored {source} \"{}\": not [A-Za-z0-9_-]{{1,64}}",
         clip(&flatten(value), NAME_MAX)
     )
+}
+
+/// The agent as a session name holds it: any character a name cannot hold is
+/// a `-`, as the hub's own suggestion makes it.
+fn dated_agent(agent: &str) -> String {
+    agent
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect()
 }
 
 /// Resolve the project and the session name.
@@ -185,17 +224,26 @@ pub fn resolve_context(input: &ResolveInput) -> Resolved {
 
     let top = input.git.top_level.as_deref().filter(|_| input.git.is_repo);
 
-    if project.is_none()
-        && let Some(top) = top
-        && let Some(text) = input.files.get(&format!("{top}/.agent-hub"))
-    {
-        let first = text.split('\n').next().unwrap_or_default();
-        let first = first.strip_suffix('\r').unwrap_or(first).trim();
-        if !first.is_empty() {
-            if valid_id(first) {
-                project = Some((first.to_string(), ProjectSource::File));
+    if let Some(top) = top {
+        if project.is_none()
+            && let Some(text) = input.files.get(&format!("{top}/{PROJECT_FILE}"))
+            && let Some(pinned) = toml_project(text).map(|text| text.trim().to_string())
+            && !pinned.is_empty()
+        {
+            if valid_id(&pinned) {
+                project = Some((pinned, ProjectSource::File));
             } else {
-                project_lines.push(rejection(".agent-hub", first));
+                project_lines.push(rejection(PROJECT_FILE, &pinned));
+            }
+        }
+        if let Some(text) = input.files.get(&format!("{top}/{LEGACY_FILE}")) {
+            let first = text.split('\n').next().unwrap_or_default();
+            let first = first.strip_suffix('\r').unwrap_or(first).trim();
+            if !first.is_empty() {
+                project_lines.push(format!(
+                    "found {LEGACY_FILE}; this release reads {PROJECT_FILE}: project = \"{}\"",
+                    clip(&flatten(first), NAME_MAX)
+                ));
             }
         }
     }
@@ -249,14 +297,20 @@ pub fn resolve_context(input: &ResolveInput) -> Resolved {
     {
         session = Some((name, SessionSource::Branch));
     }
+    if session.is_none()
+        && input.git.linked_worktree
+        && let Some(top) = top
+        && let Some(name) = top
+            .split('/')
+            .rfind(|part| !part.is_empty())
+            .and_then(inferred)
+    {
+        session = Some((name, SessionSource::Worktree));
+    }
     let (session_name, session_source) = session.unwrap_or_else(|| {
         (
-            format!(
-                "{}-{}",
-                input.harness,
-                short_session_id(&input.harness_session_id)
-            ),
-            SessionSource::HarnessSession,
+            format!("{}-{}", dated_agent(&input.agent), input.date),
+            SessionSource::Date,
         )
     });
     lines.extend(session_lines);
@@ -331,7 +385,24 @@ pub fn gather_git(cwd: &str, until: Instant) -> GitFacts {
     };
     let branch = run_git(cwd, &["symbolic-ref", "--short", "-q", "HEAD"], until)
         .filter(|branch| !branch.is_empty());
+    // A linked worktree's git directory is not the repository's common one.
+    let linked_worktree = match (
+        run_git(
+            cwd,
+            &["rev-parse", "--path-format=absolute", "--git-dir"],
+            until,
+        ),
+        run_git(
+            cwd,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+            until,
+        ),
+    ) {
+        (Some(dir), Some(common)) => dir != common,
+        _ => false,
+    };
     GitFacts {
+        linked_worktree,
         is_repo: true,
         top_level: Some(top),
         origin_url: run_git(cwd, &["remote", "get-url", "origin"], until)
@@ -389,19 +460,22 @@ pub(crate) fn handle_path(file: &std::fs::File) -> Option<std::path::PathBuf> {
     }
 }
 
-/// The most of the `.agent-hub` file that is read. Only its first line counts.
+/// The most of a project file that is read. Only its start counts.
 const PIN_FILE_MAX: u64 = 4096;
 
-/// The `.agent-hub` file at the top level, keyed by its absolute path. It is
-/// read only when it is a regular file, and only its first 4 KiB.
+/// `.agent-hub.toml` and a legacy `.agent-hub` at the top level, keyed by
+/// absolute path. Each is read only when it is a regular file, and only its
+/// first 4 KiB.
 pub fn read_top_level_file(top: Option<&str>) -> HashMap<String, String> {
     let mut files = HashMap::new();
     if let Some(top) = top {
-        let path = format!("{top}/.agent-hub");
-        if let Some(file) = open_regular(Path::new(&path)) {
-            let mut bytes = Vec::new();
-            if file.take(PIN_FILE_MAX).read_to_end(&mut bytes).is_ok() {
-                files.insert(path, String::from_utf8_lossy(&bytes).into_owned());
+        for name in [PROJECT_FILE, LEGACY_FILE] {
+            let path = format!("{top}/{name}");
+            if let Some(file) = open_regular(Path::new(&path)) {
+                let mut bytes = Vec::new();
+                if file.take(PIN_FILE_MAX).read_to_end(&mut bytes).is_ok() {
+                    files.insert(path, String::from_utf8_lossy(&bytes).into_owned());
+                }
             }
         }
     }

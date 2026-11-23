@@ -70,6 +70,7 @@ fn entry(url: &str, member: &str, token: &str) -> Credential {
         url: url.to_string(),
         member: Some(member.to_string()),
         token: token.to_string(),
+        default: false,
     }
 }
 
@@ -182,6 +183,7 @@ fn a_legacy_client_token_folds_in_as_one_unnamed_credential_and_is_never_touched
             url: "https://h".to_string(),
             member: None,
             token: "legacy".to_string(),
+            default: false,
         }]
     );
     write(&path, "https://h", "laptop", "named", &opts()).unwrap();

@@ -4,7 +4,7 @@
     "harness": "antigravity",
     "event": "pre-compact",
     "output": {
-      "context": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev/claude\n</agent-hub>",
+      "context": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev \u00b7 claude-code\n</agent-hub>",
       "compaction_instructions": "Keep: hub project agent-hub, session feat-login-flow (id s_01J8), the current phase and open hub items."
     }
   },

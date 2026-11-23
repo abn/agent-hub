@@ -14,10 +14,10 @@ describe.each([
 ])("MCP over streamable HTTP with %s", (_label, sse) => {
   it("initializes once, carries the session id and calls a tool", async () => {
     fake = await startFakeHub({ sse });
-    const hub = createHub({ url: fake.url, token: "tok", agentName: "opencode" });
+    const hub = createHub({ url: fake.url, token: "tok" });
     const who = await hub.callTool("whoami");
     await hub.callTool("session_brief", {});
-    expect(who.actor).toBe("tester/opencode");
+    expect(who.member).toBe("tester");
     expect(fake.initializations).toBe(1);
     const post = fake.requests.filter((r) => r.method === "POST").at(-1);
     expect(post.headers["mcp-session-id"]).toBe("mcp-1");
@@ -28,11 +28,11 @@ describe.each([
 
   it("starts a new MCP session when the hub forgot the old one", async () => {
     fake = await startFakeHub({ sse });
-    const hub = createHub({ url: fake.url, token: "tok", agentName: "opencode" });
+    const hub = createHub({ url: fake.url, token: "tok" });
     await hub.callTool("whoami");
     fake.mcpSessions.clear();
     const who = await hub.callTool("whoami");
-    expect(who.actor).toBe("tester/opencode");
+    expect(who.member).toBe("tester");
     expect(fake.initializations).toBe(2);
   });
 });
@@ -233,7 +233,7 @@ describe("a shared initialization", () => {
   it("lets a waiting caller abort on its own signal while another still completes", async () => {
     fake = await startFakeHub();
     fake.initDelay = 400;
-    const hub = createHub({ url: fake.url, token: "t", agentName: "a" });
+    const hub = createHub({ url: fake.url, token: "t" });
     const ctrl = new AbortController();
     const first = hub.callTool("whoami", {}, { signal: ctrl.signal });
     const second = hub.callTool("whoami", {});
@@ -243,6 +243,43 @@ describe("a shared initialization", () => {
     expect(Date.now() - started).toBeLessThan(300);
     await expect(second).resolves.toBeDefined();
     expect(fake.initializations).toBe(1);
+    await hub.close();
+  });
+});
+
+describe("what a refusal carries", () => {
+  it("keeps the hub's reason on the error", async () => {
+    fake = await startFakeHub();
+    fake.sessionNames.add("work");
+    const hub = createHub({ url: fake.url, token: "t" });
+    const refused = await hub.callTool("session_start", { project_id: "p", session_name: "work", exclusive: true }).catch((e) => e);
+    expect(refused).toBeInstanceOf(HubError);
+    expect(refused.reason).toBe("session_name_taken");
+    expect(refused.details).toMatchObject({ session_id: "s_OLD" });
+    await hub.close();
+  });
+});
+
+describe("the token", () => {
+  it("names itself opencode on every request, whatever the token", async () => {
+    fake = await startFakeHub();
+    const hub = createHub({ url: fake.url });
+    await hub.callTool("whoami");
+    for (const request of fake.requests.filter((r) => r.path === "/mcp")) {
+      expect(request.headers["x-agent-id"]).toBe("opencode");
+      expect(request.headers.authorization).toBeUndefined();
+    }
+    await hub.close();
+  });
+
+  it("opens a new MCP session under a token that arrives later", async () => {
+    fake = await startFakeHub();
+    const hub = createHub({ url: fake.url });
+    await hub.callTool("whoami");
+    hub.setToken("later");
+    await hub.callTool("whoami");
+    expect(fake.initializations).toBe(2);
+    expect(fake.requests.at(-1).headers.authorization).toBe("Bearer later");
     await hub.close();
   });
 });

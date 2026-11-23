@@ -20,8 +20,10 @@ usage:
   --workspace DIR  install into DIR/.agents/plugins instead of the user's
                    Antigravity plugin directory
 
-The plugin runs the hook commands, so agent-hub has to be on PATH, and it
-reaches the hub through config.toml, which agent-hub enrol writes.
+The plugin runs its hooks and its MCP server through the launcher it installs
+in bin/, which fetches the agent-hub binary on first use when none matching
+this version is on PATH. It reaches the hub through config.toml, which
+agent-hub enrol writes.
 ";
 
 const PLUGIN_NAME: &str = "agent-hub";
@@ -30,6 +32,8 @@ const PLUGIN_NAME: &str = "agent-hub";
 struct Embedded {
     rel: &'static str,
     bytes: &'static [u8],
+    /// Installed mode 755, as the harness runs it.
+    executable: bool,
 }
 
 macro_rules! embed {
@@ -37,20 +41,35 @@ macro_rules! embed {
         Embedded {
             rel: $rel,
             bytes: include_bytes!($path),
+            executable: false,
+        }
+    };
+    ($rel:literal, $path:literal, executable) => {
+        Embedded {
+            rel: $rel,
+            bytes: include_bytes!($path),
+            executable: true,
         }
     };
 }
+
+/// The plugin's MCP config. Its `command` is a path the install fills in, so
+/// the file is written from this text and is not in [`PLUGIN_FILES`].
+const MCP_CONFIG: &str = include_str!("../../../plugins/antigravity/mcp_config.json");
+const MCP_CONFIG_REL: &str = "mcp_config.json";
+const LAUNCHER_REL: &str = "bin/agent-hub-launcher";
 
 /// Everything the release archive carries: `plugins/antigravity` less its
 /// README, and the whole of `skills/agent-hub`. The `skill_tree_is_installed`
 /// test walks the skill directory, so a file added there and missing here fails.
 const PLUGIN_FILES: &[Embedded] = &[
     embed!("plugin.json", "../../../plugins/antigravity/plugin.json"),
-    embed!(
-        "mcp_config.json",
-        "../../../plugins/antigravity/mcp_config.json"
-    ),
     embed!("hooks.json", "../../../plugins/antigravity/hooks.json"),
+    embed!(
+        "bin/agent-hub-launcher",
+        "../../../plugins/antigravity/bin/agent-hub-launcher",
+        executable
+    ),
     embed!(
         "rules/agent-hub.md",
         "../../../plugins/antigravity/rules/agent-hub.md"
@@ -183,23 +202,40 @@ fn install_antigravity(home: &Path, workspace: Option<&Path>) -> Result<Vec<Stri
     };
     let plugin_dir = plugins_dir.join(PLUGIN_NAME);
     refuse_symlinks(base, &plugin_dir)?;
+    let launcher = std::path::absolute(plugin_dir.join(LAUNCHER_REL))
+        .map_err(|err| format!("resolve {}: {err}", plugin_dir.display()))?;
+    let mcp_config = mcp_config_for(&launcher)?;
     let mut backup = Backup::new(base, backup_root);
     // The global config is never copied into a workspace.
     let mut config_backup = Backup::new(home, config_backup_root);
 
     let mut report = Vec::new();
     let mut written = 0;
+    let mcp_target = plugin_dir.join(MCP_CONFIG_REL);
+    if write_if_changed(
+        base,
+        &mcp_target,
+        mcp_config.as_bytes(),
+        &mut backup,
+        Path::new(MCP_CONFIG_REL),
+    )? {
+        written += 1;
+    }
     for file in PLUGIN_FILES {
         let target = plugin_dir.join(file.rel);
         if write_if_changed(base, &target, file.bytes, &mut backup, Path::new(file.rel))? {
             written += 1;
         }
+        if file.executable {
+            make_executable(&target)?;
+        }
     }
     report.push(format!(
         "plugin: {} ({written} of {} files written)",
         plugin_dir.display(),
-        PLUGIN_FILES.len()
+        PLUGIN_FILES.len() + 1
     ));
+    report.push(format!("launcher: {}", launcher.display()));
 
     let config_path = user_config.join("config.json");
     let changed = enable_plugin(home, &config_path, &mut config_backup)?;
@@ -213,6 +249,44 @@ fn install_antigravity(home: &Path, workspace: Option<&Path>) -> Result<Vec<Stri
         }
     ));
     Ok(report)
+}
+
+/// The plugin's MCP config with `command` set to the installed launcher's
+/// absolute path. Antigravity expands no variable in a command it runs, so the
+/// path is written out.
+fn mcp_config_for(launcher: &Path) -> Result<String, String> {
+    let mut config: Value = serde_json::from_str(MCP_CONFIG)
+        .map_err(|err| format!("the embedded {MCP_CONFIG_REL} is not JSON: {err}"))?;
+    let command = launcher
+        .to_str()
+        .ok_or_else(|| format!("{} is not valid UTF-8", launcher.display()))?;
+    let server = config
+        .pointer_mut(&format!("/mcpServers/{PLUGIN_NAME}"))
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| format!("the embedded {MCP_CONFIG_REL} has no {PLUGIN_NAME} server"))?;
+    server.insert("command".to_string(), json!(command));
+    let mut text = serde_json::to_string_pretty(&config)
+        .map_err(|err| format!("encode {MCP_CONFIG_REL}: {err}"))?;
+    text.push('\n');
+    Ok(text)
+}
+
+/// Set mode 755 on a file this install wrote, which an archive or a copy may
+/// have left without the execute bit.
+fn make_executable(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = fs::symlink_metadata(path)
+            .map_err(|err| format!("inspect {}: {err}", path.display()))?;
+        if meta.permissions().mode() & 0o777 != 0o755 {
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+                .map_err(|err| format!("chmod {}: {err}", path.display()))?;
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
 }
 
 /// Refuse when any component of `path` below `base` is a symlink. A component

@@ -1,0 +1,33 @@
+{
+  "name": "claude-pre-tool-use-updated-input",
+  "input": {
+    "harness": "claude",
+    "event": "pre-tool-use",
+    "output": {
+      "context": null,
+      "compaction_instructions": null,
+      "updated_input": {
+        "project_id": "homelab",
+        "session": {
+          "project_id": "homelab",
+          "name": "feat-x"
+        }
+      }
+    }
+  },
+  "expected": {
+    "stdout_json": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "updatedInput": {
+          "project_id": "homelab",
+          "session": {
+            "project_id": "homelab",
+            "name": "feat-x"
+          }
+        }
+      }
+    },
+    "exit_code": 0
+  }
+}

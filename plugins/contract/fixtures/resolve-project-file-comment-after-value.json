@@ -1,27 +1,30 @@
 {
-  "name": "resolve-project-file-first-line-trimmed",
+  "name": "resolve-project-file-comment-after-value",
   "input": {
-    "harness": "claude",
-    "harness_session_id": "3f9a1c27-6b1d-4e0a-9c55-0a1b2c3d4e5f",
+    "agent": "claude-code",
+    "date": "2026-11-23",
     "cwd": "/work/agent-hub",
     "env": {},
     "git": {
       "is_repo": true,
       "top_level": "/work/agent-hub",
       "origin_url": "git@github.com:agync/agent-hub.git",
-      "branch": "fix/y",
-      "detached": false
+      "branch": "feat/x",
+      "detached": false,
+      "linked_worktree": false
     },
     "files": {
-      "/work/agent-hub/.agent-hub": "  pinned  \nignored second line\n"
+      "/work/agent-hub/.agent-hub.toml": "project = \"pinned\" # the project\n"
     },
-    "known_projects": [],
+    "known_projects": [
+      "agent-hub"
+    ],
     "personal_project": "dev-claude"
   },
   "expected": {
     "project_id": "pinned",
     "project_source": "file",
-    "session_name": "fix-y",
+    "session_name": "feat-x",
     "session_source": "branch",
     "context_line": null
   }

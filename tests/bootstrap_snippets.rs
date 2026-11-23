@@ -61,8 +61,8 @@ fn opencode_snippet_is_the_entry_the_plugin_registers() {
     assert_eq!(actual, expected);
 }
 
-/// The Antigravity plugin is not on this base. The comparison runs once its
-/// `mcp_config.json` exists.
+/// The Antigravity entry is a stdio `agent-hub mcp` with no `env` block, since
+/// Antigravity expands no variable. The guide must match the plugin's file.
 #[test]
 fn antigravity_snippet_is_the_plugin_mcp_config() {
     let path = root().join("plugins/antigravity/mcp_config.json");
@@ -71,8 +71,8 @@ fn antigravity_snippet_is_the_plugin_mcp_config() {
         let snip = snippet(&guide(), "Antigravity");
         let server = &snip["mcpServers"]["agent-hub"];
         assert_eq!(server["command"], "agent-hub");
-        assert_eq!(server["args"], json!(["mcp", "--proxy"]));
-        assert_eq!(server["env"]["HUB_AGENT_ID"], "antigravity");
+        assert_eq!(server["args"], json!(["mcp"]));
+        assert!(server.get("env").is_none(), "no env block: {server}");
         return;
     }
     assert_eq!(

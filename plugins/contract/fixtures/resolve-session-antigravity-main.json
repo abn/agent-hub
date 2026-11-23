@@ -1,8 +1,8 @@
 {
   "name": "resolve-session-antigravity-main",
   "input": {
-    "harness": "antigravity",
-    "harness_session_id": "conv-0042-abcdef",
+    "agent": "antigravity",
+    "date": "2026-11-23",
     "cwd": "/work/agent-hub",
     "env": {},
     "git": {
@@ -10,7 +10,8 @@
       "top_level": "/work/agent-hub",
       "origin_url": "git@github.com:agync/agent-hub.git",
       "branch": "main",
-      "detached": false
+      "detached": false,
+      "linked_worktree": false
     },
     "files": {},
     "known_projects": [
@@ -21,8 +22,8 @@
   "expected": {
     "project_id": "agent-hub",
     "project_source": "origin",
-    "session_name": "antigravity-conv-004",
-    "session_source": "harness_session",
+    "session_name": "antigravity-2026-11-23",
+    "session_source": "date",
     "context_line": null
   }
 }

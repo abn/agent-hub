@@ -1,0 +1,30 @@
+{
+  "name": "pretool-no-session-yet-is-no-op",
+  "input": {
+    "state": {
+      "prompts": 0
+    },
+    "stdin": {
+      "session_id": "70ce4ccd-5b1e-4c6f-9a2d-3e8f7a1b0c94",
+      "prompt_id": "89e28a63-1d4c-4f7b-b6a0-52c9d8e3f1a7",
+      "permission_mode": "default",
+      "effort": {
+        "level": "medium"
+      },
+      "hook_event_name": "PreToolUse",
+      "tool_name": "mcp__plugin_agent-hub_agent-hub__feed_read",
+      "tool_input": {
+        "project_id": "homelab"
+      },
+      "tool_use_id": "toolu_01LaQ8mVx2nRzY5pK7tWc3Hd",
+      "mcp_server": {
+        "name": "plugin:agent-hub:agent-hub",
+        "source": "plugin"
+      }
+    }
+  },
+  "expected": {
+    "stdout_json": {},
+    "exit_code": 0
+  }
+}

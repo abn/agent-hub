@@ -49,24 +49,35 @@ const quiet = async (work, fallback) => {
   }
 };
 
-// Returns everything the loop and the hooks need to follow this session. The
-// block is the stable bundle. Items the hub reports as pending along the way,
-// in any tool result, are pushed onto `trailers`, which the caller owns so they
-// survive a start that fails part way.
-export async function startSession({ hub, cwd, harnessSessionId, env = process.env, now = Date.now(), trailers = [], signal }) {
+const NOT_A_MEMBER = "Not a member of this hub yet: call enrol.";
+const AGENT = "opencode";
+
+// Today, in UTC, as YYYY-MM-DD.
+const today = (now) => new Date(now).toISOString().slice(0, 10);
+
+// Returns everything the loop and the hooks need to follow this session, or the
+// one line that says why the hub cannot give one. The block is the stable
+// bundle. Items the hub reports as pending along the way, in any tool result,
+// are pushed onto `trailers`, which the caller owns so they survive a start
+// that fails part way. `notices` are the resolver's lines for the block.
+export async function startSession({ hub, cwd, env = process.env, now = Date.now(), trailers = [], notices = [], signal }) {
   const call = (name, args) => hub.callTool(name, args, { trailers, signal });
   const git = gatherGit(cwd);
-  const who = await quiet(() => call("whoami"), {});
+  const who = await call("whoami");
+  if (who.state === "pending") return { notice: `Waiting for approval as ${who.member ?? ""}.` };
+  if (who.state === "anonymous") return { notice: NOT_A_MEMBER };
+  const member = who.member ?? who.actor ?? "local";
+  const agent = who.agent ?? AGENT;
   const known = await quiet(() => hub.projects({ signal }), []);
   const resolved = resolveContext({
-    harness: "opencode",
-    harness_session_id: harnessSessionId,
+    agent,
+    date: today(now),
     cwd,
     env,
     git,
     files: readTopLevelFile(git.top_level),
     known_projects: known,
-    personal_project: who.personal_project ?? who.actor ?? "opencode",
+    personal_project: who.personal_project ?? member,
   });
   const { project_id: projectId, session_name: sessionName } = resolved;
 
@@ -85,20 +96,21 @@ export async function startSession({ hub, cwd, harnessSessionId, env = process.e
     project_id: projectId,
     session_name: sessionName,
     session_id: hubSessionId,
-    actor: who.actor ?? "opencode",
-    context_lines: resolved.context_line ? resolved.context_line.split("\n") : [],
+    member,
+    agent,
+    context_lines: [...notices, ...(resolved.context_line ? resolved.context_line.split("\n") : [])],
     brief: briefLines(brief),
     anchor: anchorView(started.anchor, now),
     handoff: splitLines(started.handoff),
     kb_index: splitLines(index?.content),
   });
-  return { block: text, projectId, sessionName, hubSessionId, actor: who.actor ?? "opencode" };
+  return { block: text, projectId, sessionName, hubSessionId, member, agent };
 }
 
-export function subagentText(hubSessionId) {
-  return hubSessionId
-    ? `You share the parent's hub connection and session ${hubSessionId}. Do not call session_start. Write with \`session: {session_id: "${hubSessionId}"}\`.`
-    : "You share the parent's hub connection and session. Do not call session_start.";
+// What a subagent is told about its own hub session.
+export function subagentText(projectId, sessionName) {
+  const ref = JSON.stringify({ project_id: projectId, name: sessionName }).replace(/":/gu, '": ').replace(/,"/gu, ', "');
+  return `You work in hub session ${sessionName} (project ${projectId}). Hub calls carry it; pass session: ${ref} if you call a hub tool directly.`;
 }
 
 export function keepInstruction({ projectId, sessionName, hubSessionId }) {
