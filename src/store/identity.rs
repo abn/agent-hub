@@ -53,7 +53,10 @@ pub struct IssuedToken {
 /// A grant of one project to one agent.
 #[derive(Debug, Clone, Serialize)]
 pub struct Grant {
+    /// The member the grant opens the project to. Kept under its old name
+    /// until every reader takes `member_id`.
     pub agent_id: String,
+    pub member_id: String,
     pub project_id: String,
     pub created_at: String,
 }
@@ -76,8 +79,8 @@ pub async fn resolve_token(db: &Database, token_hash: &str) -> Result<Option<(St
     let mut rows = conn
         .query(
             "SELECT a.id, a.last_seen_at, t.last_used_at, a.state
-             FROM agent_tokens t
-             JOIN agents a ON a.id = t.agent_id
+             FROM member_tokens t
+             JOIN members a ON a.id = t.member_id
              WHERE t.token_hash = ?1 AND t.revoked_at IS NULL",
             [token_hash],
         )
@@ -114,7 +117,7 @@ async fn touch(
     if stale(token_used) {
         let _turn = super::write_turn().await?;
         conn.execute(
-            "UPDATE agent_tokens SET last_used_at = ?1 WHERE token_hash = ?2",
+            "UPDATE member_tokens SET last_used_at = ?1 WHERE token_hash = ?2",
             vec![
                 Value::Text(now_text.clone()),
                 Value::Text(token_hash.to_string()),
@@ -126,7 +129,7 @@ async fn touch(
     if stale(agent_seen) {
         let _turn = super::write_turn().await?;
         conn.execute(
-            "UPDATE agents SET last_seen_at = ?1 WHERE id = ?2",
+            "UPDATE members SET last_seen_at = ?1 WHERE id = ?2",
             vec![Value::Text(now_text), Value::Text(agent_id.to_string())],
         )
         .await
@@ -141,8 +144,8 @@ pub async fn list_agents(db: &Database) -> Result<Vec<Agent>> {
     let mut rows = conn
         .query(
             "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source,
-                    EXISTS(SELECT 1 FROM agent_tokens t WHERE t.agent_id = agents.id AND t.revoked_at IS NULL)
-             FROM agents ORDER BY created_at ASC",
+                    EXISTS(SELECT 1 FROM member_tokens t WHERE t.member_id = members.id AND t.revoked_at IS NULL)
+             FROM members ORDER BY created_at ASC",
             (),
         )
         .await
@@ -160,8 +163,8 @@ pub async fn get_agent(db: &Database, id: &str) -> Result<Option<Agent>> {
     let mut rows = conn
         .query(
             "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source,
-                    EXISTS(SELECT 1 FROM agent_tokens t WHERE t.agent_id = agents.id AND t.revoked_at IS NULL)
-             FROM agents WHERE id = ?1",
+                    EXISTS(SELECT 1 FROM member_tokens t WHERE t.member_id = members.id AND t.revoked_at IS NULL)
+             FROM members WHERE id = ?1",
             [id],
         )
         .await
@@ -192,6 +195,10 @@ pub async fn ensure_local_agent(db: &Database, id: &str) -> Result<String> {
 /// Create an agent and its personal space as one unit.
 pub async fn create_agent(db: &Database, id: &str, display_name: &str) -> Result<Agent> {
     validate_agent_id(id)?;
+    create_inner(db, id, display_name).await
+}
+
+async fn create_inner(db: &Database, id: &str, display_name: &str) -> Result<Agent> {
     validate_display_name(display_name)?;
     let created_at = crate::store::now_rfc3339();
     let personal_project_id = format!("space-{}", crate::store::next_id());
@@ -200,7 +207,7 @@ pub async fn create_agent(db: &Database, id: &str, display_name: &str) -> Result
     let tx = super::begin_write(db).await?;
     let mut rows = tx
         .query(
-            "SELECT 1 FROM agents WHERE id = ?1",
+            "SELECT 1 FROM members WHERE id = ?1",
             vec![Value::Text(id.to_string())],
         )
         .await
@@ -209,7 +216,7 @@ pub async fn create_agent(db: &Database, id: &str, display_name: &str) -> Result
         return Err(Error::Conflict(format!("agent {id} already exists")));
     }
     tx.execute(
-        "INSERT INTO agents(id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source)
+        "INSERT INTO members(id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source)
          VALUES (?1, ?2, ?3, ?4, NULL, 'active', NULL, NULL)",
         vec![
             Value::Text(id.to_string()),
@@ -259,7 +266,7 @@ pub async fn has_grant(db: &Database, agent_id: &str, project_id: &str) -> Resul
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT 1 FROM grants WHERE agent_id = ?1 AND project_id = ?2",
+            "SELECT 1 FROM grants WHERE member_id = ?1 AND project_id = ?2",
             [agent_id, project_id],
         )
         .await
@@ -273,6 +280,12 @@ pub async fn has_grant(db: &Database, agent_id: &str, project_id: &str) -> Resul
 /// inserted in the same transaction, so a reissue never leaves two usable
 /// tokens. The plaintext is returned once and never stored.
 pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
+    issue_token_inner(db, agent_id)
+        .await
+        .map(|(issued, _)| issued)
+}
+
+async fn issue_token_inner(db: &Database, agent_id: &str) -> Result<(IssuedToken, Vec<String>)> {
     if RESERVED_AGENT_IDS.contains(&agent_id) {
         return Err(Error::InvalidArgument(format!(
             "agent id '{agent_id}' is reserved for the hub's own identities; \
@@ -286,7 +299,7 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
     let tx = super::begin_write(db).await?;
     let mut rows = tx
         .query(
-            "SELECT personal_project_id FROM agents WHERE id = ?1",
+            "SELECT personal_project_id FROM members WHERE id = ?1",
             vec![Value::Text(agent_id.to_string())],
         )
         .await
@@ -298,8 +311,9 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
     };
     let personal_project_id = text(&row, 0)?;
     drop(rows);
+    let revoked = live_hashes(&tx, agent_id).await?;
     tx.execute(
-        "UPDATE agent_tokens SET revoked_at = ?1 WHERE agent_id = ?2 AND revoked_at IS NULL",
+        "UPDATE member_tokens SET revoked_at = ?1 WHERE member_id = ?2 AND revoked_at IS NULL",
         vec![
             Value::Text(created_at.clone()),
             Value::Text(agent_id.to_string()),
@@ -308,7 +322,7 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
     .await
     .map_err(engine)?;
     tx.execute(
-        "INSERT INTO agent_tokens(token_hash, agent_id, created_at, last_used_at, revoked_at)
+        "INSERT INTO member_tokens(token_hash, member_id, created_at, last_used_at, revoked_at)
          VALUES (?1, ?2, ?3, NULL, NULL)",
         vec![
             Value::Text(token_hash),
@@ -327,10 +341,29 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
     .await?;
     tx.commit().await.map_err(engine)?;
 
-    Ok(IssuedToken {
-        token: plaintext,
-        created_at,
-    })
+    Ok((
+        IssuedToken {
+            token: plaintext,
+            created_at,
+        },
+        revoked,
+    ))
+}
+
+/// The hashes of a member's tokens that are not revoked.
+async fn live_hashes(conn: &turso::Connection, member: &str) -> Result<Vec<String>> {
+    let mut rows = conn
+        .query(
+            "SELECT token_hash FROM member_tokens WHERE member_id = ?1 AND revoked_at IS NULL",
+            [member],
+        )
+        .await
+        .map_err(engine)?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        out.push(text(&row, 0)?);
+    }
+    Ok(out)
 }
 
 /// Revoke the agent's live token, if it has one.
@@ -338,11 +371,15 @@ pub async fn issue_token(db: &Database, agent_id: &str) -> Result<IssuedToken> {
 /// Agent-keyed and idempotent: revoking an agent that already has no live
 /// token is not an error. An unknown agent is not found.
 pub async fn revoke_token(db: &Database, agent_id: &str) -> Result<()> {
+    revoke_token_inner(db, agent_id).await.map(|_| ())
+}
+
+async fn revoke_token_inner(db: &Database, agent_id: &str) -> Result<Vec<String>> {
     let now = crate::store::now_rfc3339();
     let tx = super::begin_write(db).await?;
     let mut rows = tx
         .query(
-            "SELECT personal_project_id FROM agents WHERE id = ?1",
+            "SELECT personal_project_id FROM members WHERE id = ?1",
             vec![Value::Text(agent_id.to_string())],
         )
         .await
@@ -354,9 +391,10 @@ pub async fn revoke_token(db: &Database, agent_id: &str) -> Result<()> {
     };
     let personal_project_id = text(&row, 0)?;
     drop(rows);
+    let revoked = live_hashes(&tx, agent_id).await?;
     let affected = tx
         .execute(
-            "UPDATE agent_tokens SET revoked_at = ?1 WHERE agent_id = ?2 AND revoked_at IS NULL",
+            "UPDATE member_tokens SET revoked_at = ?1 WHERE member_id = ?2 AND revoked_at IS NULL",
             vec![Value::Text(now), Value::Text(agent_id.to_string())],
         )
         .await
@@ -371,7 +409,7 @@ pub async fn revoke_token(db: &Database, agent_id: &str) -> Result<()> {
         .await?;
     }
     tx.commit().await.map_err(engine)?;
-    Ok(())
+    Ok(revoked)
 }
 
 /// List an agent's grants.
@@ -379,8 +417,8 @@ pub async fn list_grants(db: &Database, agent_id: &str) -> Result<Vec<Grant>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT agent_id, project_id, created_at
-             FROM grants WHERE agent_id = ?1 ORDER BY created_at ASC",
+            "SELECT member_id, project_id, created_at
+             FROM grants WHERE member_id = ?1 ORDER BY created_at ASC",
             [agent_id],
         )
         .await
@@ -405,9 +443,9 @@ pub async fn add_grant(db: &Database, agent_id: &str, project_id: &str) -> Resul
         return Err(Error::NotFound(format!("project {project_id} not found")));
     }
     tx.execute(
-        "INSERT INTO grants(agent_id, project_id, created_at)
+        "INSERT INTO grants(member_id, project_id, created_at)
          VALUES (?1, ?2, ?3)
-         ON CONFLICT(agent_id, project_id) DO UPDATE SET
+         ON CONFLICT(member_id, project_id) DO UPDATE SET
            created_at = excluded.created_at",
         vec![
             Value::Text(agent_id.to_string()),
@@ -431,6 +469,7 @@ pub async fn add_grant(db: &Database, agent_id: &str, project_id: &str) -> Resul
     tx.commit().await.map_err(engine)?;
     Ok(Grant {
         agent_id: agent_id.to_string(),
+        member_id: agent_id.to_string(),
         project_id: project_id.to_string(),
         created_at,
     })
@@ -440,12 +479,18 @@ pub async fn add_grant(db: &Database, agent_id: &str, project_id: &str) -> Resul
 /// stops blocking its source and cannot accumulate. Returns how many were
 /// cleaned up. Reuses the refusal path, so the tokens, personal project, events
 /// and their search rows all go with it.
-pub async fn expire_pending(db: &Database, ttl: std::time::Duration) -> Result<usize> {
+///
+/// Returns how many expired and the hashes of the tokens they held, which the
+/// caller sends on `AppState::revocations`.
+pub async fn expire_pending(
+    db: &Database,
+    ttl: std::time::Duration,
+) -> Result<(usize, Vec<String>)> {
     let now = time::OffsetDateTime::now_utc();
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, created_at FROM agents WHERE state = 'pending'",
+            "SELECT id, created_at FROM members WHERE state = 'pending'",
             (),
         )
         .await
@@ -467,15 +512,19 @@ pub async fn expire_pending(db: &Database, ttl: std::time::Duration) -> Result<u
     drop(rows);
 
     let mut expired = 0;
+    let mut hashes = Vec::new();
     for id in stale {
         match refuse_enrolment(db, &id).await {
-            Ok(()) => expired += 1,
+            Ok(gone) => {
+                expired += 1;
+                hashes.extend(gone);
+            }
             Err(err) => {
                 tracing::warn!(agent_id = %id, error = %err, "could not expire a pending enrolment")
             }
         }
     }
-    Ok(expired)
+    Ok((expired, hashes))
 }
 
 /// Remove a grant.
@@ -483,7 +532,7 @@ pub async fn remove_grant(db: &Database, agent_id: &str, project_id: &str) -> Re
     let tx = super::begin_write(db).await?;
     let affected = tx
         .execute(
-            "DELETE FROM grants WHERE agent_id = ?1 AND project_id = ?2",
+            "DELETE FROM grants WHERE member_id = ?1 AND project_id = ?2",
             vec![
                 Value::Text(agent_id.to_string()),
                 Value::Text(project_id.to_string()),
@@ -523,6 +572,22 @@ pub async fn enrol_agent(
     pending_max: usize,
 ) -> Result<(Agent, IssuedToken)> {
     validate_agent_id(id)?;
+    enrol_inner(db, id, display_name, source, why, pending_max, None).await
+}
+
+/// What an MCP enrolment adds to the request: the asking agent, its OS and
+/// its host.
+type EnrolExtra<'a> = (&'a str, Option<&'a str>, Option<&'a str>);
+
+async fn enrol_inner(
+    db: &Database,
+    id: &str,
+    display_name: &str,
+    source: &str,
+    why: &str,
+    pending_max: usize,
+    extra: Option<EnrolExtra<'_>>,
+) -> Result<(Agent, IssuedToken)> {
     validate_display_name(display_name)?;
     let created_at = crate::store::now_rfc3339();
     let personal_project_id = format!("space-{}", crate::store::next_id());
@@ -539,7 +604,7 @@ pub async fn enrol_agent(
     if source != "unknown" {
         let mut pending_rows = tx
             .query(
-                "SELECT 1 FROM agents WHERE state = 'pending' AND enrol_source = ?1",
+                "SELECT 1 FROM members WHERE state = 'pending' AND enrol_source = ?1",
                 vec![Value::Text(source.to_string())],
             )
             .await
@@ -557,7 +622,7 @@ pub async fn enrol_agent(
     // A whole-hub ceiling, checked in the same transaction, so a caller that
     // varies its source cannot fill the store with pending agents.
     let mut pending_count = tx
-        .query("SELECT COUNT(*) FROM agents WHERE state = 'pending'", ())
+        .query("SELECT COUNT(*) FROM members WHERE state = 'pending'", ())
         .await
         .map_err(engine)?;
     let pending: i64 = match pending_count.next().await.map_err(engine)? {
@@ -580,7 +645,7 @@ pub async fn enrol_agent(
     // Conflict check on agent id.
     let mut id_rows = tx
         .query(
-            "SELECT 1 FROM agents WHERE id = ?1",
+            "SELECT 1 FROM members WHERE id = ?1",
             vec![Value::Text(id.to_string())],
         )
         .await
@@ -592,9 +657,11 @@ pub async fn enrol_agent(
     }
     drop(id_rows);
 
+    let opt = |value: Option<&str>| value.map_or(Value::Null, |v| Value::Text(v.to_string()));
     tx.execute(
-        "INSERT INTO agents(id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source)
-         VALUES (?1, ?2, ?3, ?4, NULL, 'pending', ?5, ?6)",
+        "INSERT INTO members(id, display_name, personal_project_id, created_at, last_seen_at, state,
+            enrol_note, enrol_source, enrol_agent, enrol_os, enrol_host)
+         VALUES (?1, ?2, ?3, ?4, NULL, 'pending', ?5, ?6, ?7, ?8, ?9)",
         vec![
             Value::Text(id.to_string()),
             Value::Text(display_name.to_string()),
@@ -602,13 +669,16 @@ pub async fn enrol_agent(
             Value::Text(created_at.clone()),
             Value::Text(why.to_string()),
             Value::Text(source.to_string()),
+            opt(extra.map(|(agent, _, _)| agent)),
+            opt(extra.and_then(|(_, os, _)| os)),
+            opt(extra.and_then(|(_, _, host)| host)),
         ],
     )
     .await
     .map_err(engine)?;
 
     tx.execute(
-        "INSERT INTO agent_tokens(token_hash, agent_id, created_at, last_used_at, revoked_at)
+        "INSERT INTO member_tokens(token_hash, member_id, created_at, last_used_at, revoked_at)
          VALUES (?1, ?2, ?3, NULL, NULL)",
         vec![
             Value::Text(token_hash),
@@ -641,7 +711,7 @@ pub async fn enrol_agent(
             summary: format!("{display_name} wants to join"),
             payload: Some(serde_json::json!({
                 "action": "enrol_request",
-                "agent_id": id,
+                "member": id,
                 "display_name": display_name,
                 "source": source,
                 "why": why,
@@ -707,8 +777,8 @@ pub(crate) async fn approve_enrolment_in_tx(
     let mut rows = tx
         .query(
             "SELECT id, display_name, personal_project_id, created_at, last_seen_at, state, enrol_note, enrol_source,
-                    EXISTS(SELECT 1 FROM agent_tokens t WHERE t.agent_id = agents.id AND t.revoked_at IS NULL)
-             FROM agents WHERE id = ?1",
+                    EXISTS(SELECT 1 FROM member_tokens t WHERE t.member_id = members.id AND t.revoked_at IS NULL)
+             FROM members WHERE id = ?1",
             vec![Value::Text(current_id.to_string())],
         )
         .await
@@ -731,7 +801,7 @@ pub(crate) async fn approve_enrolment_in_tx(
             validate_agent_id(target_id)?;
             let mut id_check = tx
                 .query(
-                    "SELECT 1 FROM agents WHERE id = ?1",
+                    "SELECT 1 FROM members WHERE id = ?1",
                     vec![Value::Text(target_id.to_string())],
                 )
                 .await
@@ -743,7 +813,7 @@ pub(crate) async fn approve_enrolment_in_tx(
             drop(id_check);
 
             tx.execute(
-                "UPDATE agent_tokens SET agent_id = ?1 WHERE agent_id = ?2",
+                "UPDATE member_tokens SET member_id = ?1 WHERE member_id = ?2",
                 vec![
                     Value::Text(target_id.to_string()),
                     Value::Text(current_id.to_string()),
@@ -756,7 +826,7 @@ pub(crate) async fn approve_enrolment_in_tx(
             // agent. Left behind, a later agent reusing the old id would inherit
             // the confidential project through policy::authorize. H9.
             tx.execute(
-                "UPDATE grants SET agent_id = ?1 WHERE agent_id = ?2",
+                "UPDATE grants SET member_id = ?1 WHERE member_id = ?2",
                 vec![
                     Value::Text(target_id.to_string()),
                     Value::Text(current_id.to_string()),
@@ -766,7 +836,7 @@ pub(crate) async fn approve_enrolment_in_tx(
             .map_err(engine)?;
 
             tx.execute(
-                "UPDATE projects SET owner_agent = ?1 WHERE owner_agent = ?2",
+                "UPDATE projects SET owner_member = ?1 WHERE owner_member = ?2",
                 vec![
                     Value::Text(target_id.to_string()),
                     Value::Text(current_id.to_string()),
@@ -775,6 +845,29 @@ pub(crate) async fn approve_enrolment_in_tx(
             .await
             .map_err(engine)?;
 
+            for sql in [
+                "UPDATE events SET member_id = ?1 WHERE member_id = ?2",
+                "UPDATE artifacts SET member_id = ?1 WHERE member_id = ?2",
+                "UPDATE comments SET member_id = ?1 WHERE member_id = ?2",
+                "UPDATE kb_comments SET member_id = ?1 WHERE member_id = ?2",
+                "UPDATE artifact_versions SET member_id = ?1 WHERE member_id = ?2",
+                "UPDATE sessions SET started_member = ?1 WHERE started_member = ?2",
+                "UPDATE session_participants SET member_id = ?1 WHERE member_id = ?2",
+                "UPDATE feed_cursors SET member_id = ?1 WHERE member_id = ?2",
+                "UPDATE notify_cursors SET member_id = ?1 WHERE member_id = ?2",
+                "UPDATE notify_backlog SET member_id = ?1 WHERE member_id = ?2",
+                "UPDATE notify_subscriptions SET member_id = ?1 WHERE member_id = ?2",
+            ] {
+                tx.execute(
+                    sql,
+                    vec![
+                        Value::Text(target_id.to_string()),
+                        Value::Text(current_id.to_string()),
+                    ],
+                )
+                .await
+                .map_err(engine)?;
+            }
             tx.execute(
                 "UPDATE events SET actor = ?1 WHERE actor = ?2",
                 vec![
@@ -786,7 +879,7 @@ pub(crate) async fn approve_enrolment_in_tx(
             .map_err(engine)?;
 
             tx.execute(
-                "UPDATE agents SET id = ?1 WHERE id = ?2",
+                "UPDATE members SET id = ?1 WHERE id = ?2",
                 vec![
                     Value::Text(target_id.to_string()),
                     Value::Text(current_id.to_string()),
@@ -807,7 +900,7 @@ pub(crate) async fn approve_enrolment_in_tx(
     if let Some(target_name) = new_display_name {
         validate_display_name(target_name)?;
         tx.execute(
-            "UPDATE agents SET display_name = ?1 WHERE id = ?2",
+            "UPDATE members SET display_name = ?1 WHERE id = ?2",
             vec![
                 Value::Text(target_name.to_string()),
                 Value::Text(effective_id.clone()),
@@ -819,7 +912,7 @@ pub(crate) async fn approve_enrolment_in_tx(
     }
 
     tx.execute(
-        "UPDATE agents SET state = 'active' WHERE id = ?1",
+        "UPDATE members SET state = 'active' WHERE id = ?1",
         vec![Value::Text(effective_id.clone())],
     )
     .await
@@ -831,9 +924,9 @@ pub(crate) async fn approve_enrolment_in_tx(
         for proj in project_ids {
             if row_exists(tx, Table::Projects, proj).await? {
                 tx.execute(
-                    "INSERT INTO grants(agent_id, project_id, created_at)
+                    "INSERT INTO grants(member_id, project_id, created_at)
                      VALUES (?1, ?2, ?3)
-                     ON CONFLICT(agent_id, project_id) DO UPDATE SET
+                     ON CONFLICT(member_id, project_id) DO UPDATE SET
                        created_at = excluded.created_at",
                     vec![
                         Value::Text(effective_id.clone()),
@@ -875,11 +968,13 @@ pub(crate) async fn approve_enrolment_in_tx(
 ///
 /// Deletes the agent row, its tokens, grants, personal space, and inbox items,
 /// leaving the suggested id free for a fresh attempt.
-pub async fn refuse_enrolment(db: &Database, id: &str) -> Result<()> {
+/// Returns the hashes of the tokens the refusal deleted, which the caller
+/// sends on `AppState::revocations`.
+pub async fn refuse_enrolment(db: &Database, id: &str) -> Result<Vec<String>> {
     let tx = super::begin_write(db).await?;
-    refuse_enrolment_in_tx(&tx, id).await?;
+    let hashes = refuse_enrolment_in_tx(&tx, id).await?;
     tx.commit().await.map_err(engine)?;
-    Ok(())
+    Ok(hashes)
 }
 
 /// Refuse an enrolment inside the caller's transaction.
@@ -887,10 +982,13 @@ pub async fn refuse_enrolment(db: &Database, id: &str) -> Result<()> {
 /// The decision path wipes a refused self-enrolment in the same transaction
 /// that records the decision. The caller owns commit and rollback; an error
 /// leaves the transaction to roll back when it is dropped.
-pub(crate) async fn refuse_enrolment_in_tx(tx: &crate::store::WriteTx, id: &str) -> Result<()> {
+pub(crate) async fn refuse_enrolment_in_tx(
+    tx: &crate::store::WriteTx,
+    id: &str,
+) -> Result<Vec<String>> {
     let mut rows = tx
         .query(
-            "SELECT personal_project_id, state FROM agents WHERE id = ?1",
+            "SELECT personal_project_id, state FROM members WHERE id = ?1",
             vec![Value::Text(id.to_string())],
         )
         .await
@@ -909,15 +1007,16 @@ pub(crate) async fn refuse_enrolment_in_tx(tx: &crate::store::WriteTx, id: &str)
         )));
     }
 
+    let hashes = live_hashes(tx, id).await?;
     tx.execute(
-        "DELETE FROM agent_tokens WHERE agent_id = ?1",
+        "DELETE FROM member_tokens WHERE member_id = ?1",
         vec![Value::Text(id.to_string())],
     )
     .await
     .map_err(engine)?;
 
     tx.execute(
-        "DELETE FROM grants WHERE agent_id = ?1",
+        "DELETE FROM grants WHERE member_id = ?1",
         vec![Value::Text(id.to_string())],
     )
     .await
@@ -956,13 +1055,13 @@ pub(crate) async fn refuse_enrolment_in_tx(tx: &crate::store::WriteTx, id: &str)
     .map_err(engine)?;
 
     tx.execute(
-        "DELETE FROM agents WHERE id = ?1",
+        "DELETE FROM members WHERE id = ?1",
         vec![Value::Text(id.to_string())],
     )
     .await
     .map_err(engine)?;
 
-    Ok(())
+    Ok(hashes)
 }
 
 /// The personal project of an agent whose enrolment is still pending, read
@@ -977,7 +1076,7 @@ pub(crate) async fn pending_enrolment_in_tx(
 ) -> Result<Option<String>> {
     let mut rows = tx
         .query(
-            "SELECT personal_project_id FROM agents WHERE id = ?1 AND state = 'pending'",
+            "SELECT personal_project_id FROM members WHERE id = ?1 AND state = 'pending'",
             vec![Value::Text(agent_id.to_string())],
         )
         .await
@@ -996,7 +1095,7 @@ pub async fn lookup_agent_by_token_hash(
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT a.id, a.state FROM agent_tokens t JOIN agents a ON a.id = t.agent_id WHERE t.token_hash = ?1 AND t.revoked_at IS NULL",
+            "SELECT a.id, a.state FROM member_tokens t JOIN members a ON a.id = t.member_id WHERE t.token_hash = ?1 AND t.revoked_at IS NULL",
             [token_hash],
         )
         .await
@@ -1070,8 +1169,8 @@ pub async fn retire_reserved_agents(db: &Database) -> Result<Vec<String>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT DISTINCT a.id FROM agent_tokens t
-             JOIN agents a ON a.id = t.agent_id
+            "SELECT DISTINCT a.id FROM member_tokens t
+             JOIN members a ON a.id = t.member_id
              WHERE t.revoked_at IS NULL AND a.id IN (?1, ?2, ?3)",
             RESERVED_AGENT_IDS
                 .map(|id| Value::Text(id.to_string()))
@@ -1135,6 +1234,7 @@ fn agent_from_row(row: &Row) -> Result<Agent> {
 fn grant_from_row(row: &Row) -> Result<Grant> {
     Ok(Grant {
         agent_id: text(row, 0)?,
+        member_id: text(row, 0)?,
         project_id: text(row, 1)?,
         created_at: text(row, 2)?,
     })
@@ -1151,7 +1251,7 @@ enum Table {
 impl Table {
     fn name(self) -> &'static str {
         match self {
-            Table::Agents => "agents",
+            Table::Agents => "members",
             Table::Projects => "projects",
         }
     }
@@ -1284,34 +1384,134 @@ pub async fn resolve_member_token(
     db: &Database,
     token_hash: &str,
 ) -> Result<Option<ResolvedToken>> {
-    let _ = (db, token_hash);
-    Err(super::unbuilt("identity::resolve_member_token"))
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT m.id, m.state, t.revoked_at, m.last_seen_at, t.last_used_at
+               FROM member_tokens t JOIN members m ON m.id = t.member_id
+              WHERE t.token_hash = ?1",
+            [token_hash],
+        )
+        .await
+        .map_err(engine)?;
+    let Some(row) = rows.next().await.map_err(engine)? else {
+        return Ok(None);
+    };
+    let member = text(&row, 0)?;
+    let pending = text_at(&row, 1)?.is_some_and(|state| state == "pending");
+    let revoked = text_at(&row, 2)?.is_some();
+    let (seen, used) = (text_at(&row, 3)?, text_at(&row, 4)?);
+    drop(rows);
+    let state = if revoked {
+        TokenState::Revoked
+    } else if pending {
+        TokenState::Pending
+    } else {
+        touch(&conn, token_hash, &member, used, seen).await?;
+        TokenState::Active
+    };
+    Ok(Some(ResolvedToken {
+        member,
+        token_hash: token_hash.to_string(),
+        state,
+    }))
 }
 
-/// Every member.
+const MEMBER_COLUMNS: &str =
+    "id, display_name, personal_project_id, created_at, last_seen_at, state,
+    enrol_note, enrol_source, enrol_agent, enrol_os, enrol_host,
+    EXISTS(SELECT 1 FROM member_tokens t WHERE t.member_id = members.id AND t.revoked_at IS NULL),
+    (SELECT COUNT(DISTINCT p.session_id) FROM session_participants p
+       JOIN sessions s ON s.id = p.session_id
+      WHERE p.member_id = members.id AND p.left_at IS NULL
+        AND s.status = 'active' AND s.deleted_at IS NULL)";
+
+fn member_from_row(row: &Row) -> Result<Member> {
+    Ok(Member {
+        id: text(row, 0)?,
+        display_name: text(row, 1)?,
+        personal_project_id: text_at(row, 2)?.unwrap_or_default(),
+        created_at: text(row, 3)?,
+        last_seen_at: text_at(row, 4)?,
+        state: text_at(row, 5)?.unwrap_or_else(|| "active".to_string()),
+        enrol: EnrolContext {
+            note: text_at(row, 6)?,
+            source: text_at(row, 7)?,
+            agent: text_at(row, 8)?,
+            os: text_at(row, 9)?,
+            host: text_at(row, 10)?,
+        },
+        has_live_token: integer_at(row, 11)?.unwrap_or(0) != 0,
+        live_sessions: integer_at(row, 12)?.unwrap_or(0),
+    })
+}
+
+/// Every member, oldest first.
 pub async fn list_members(db: &Database) -> Result<Vec<Member>> {
-    let _ = db;
-    Err(super::unbuilt("identity::list_members"))
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            &format!("SELECT {MEMBER_COLUMNS} FROM members ORDER BY created_at ASC"),
+            (),
+        )
+        .await
+        .map_err(engine)?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        out.push(member_from_row(&row)?);
+    }
+    Ok(out)
 }
 
 /// One member.
 pub async fn get_member(db: &Database, id: &str) -> Result<Option<Member>> {
-    let _ = (db, id);
-    Err(super::unbuilt("identity::get_member"))
+    let conn = super::connect(db)?;
+    let mut rows = conn
+        .query(
+            &format!("SELECT {MEMBER_COLUMNS} FROM members WHERE id = ?1"),
+            [id],
+        )
+        .await
+        .map_err(engine)?;
+    match rows.next().await.map_err(engine)? {
+        Some(row) => Ok(Some(member_from_row(&row)?)),
+        None => Ok(None),
+    }
+}
+
+fn refuse_member_id(id: &str) -> Error {
+    Error::InvalidArgument(format!(
+        "member id '{id}' must be 1 to 63 of lowercase letters, digits, '.', '_' or '-', starting \
+         with a letter or digit, and not one the hub reserves"
+    ))
+}
+
+async fn member_or_missing(db: &Database, id: &str) -> Result<Member> {
+    get_member(db, id)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("member {id} not found")))
 }
 
 /// Create a member with its personal space. Refuses an id that fails
 /// [`valid_new_member_id`].
 pub async fn create_member(db: &Database, id: &str, display_name: &str) -> Result<Member> {
-    let _ = (db, id, display_name);
-    Err(super::unbuilt("identity::create_member"))
+    if !valid_new_member_id(id) {
+        return Err(refuse_member_id(id));
+    }
+    create_inner(db, id, display_name).await?;
+    member_or_missing(db, id).await
 }
 
 /// Make sure a reserved-path member exists (`local`, `loopback`), creating it
 /// with no token. Returns its id.
 pub async fn ensure_member(db: &Database, id: &str) -> Result<String> {
-    let _ = (db, id);
-    Err(super::unbuilt("identity::ensure_member"))
+    if get_member(db, id).await?.is_some() {
+        return Ok(id.to_string());
+    }
+    match create_inner(db, id, id).await {
+        Ok(_) | Err(Error::Conflict(_)) => Ok(id.to_string()),
+        Err(err) => Err(err),
+    }
 }
 
 /// Record a pending enrolment with its context and issue the pending token.
@@ -1320,8 +1520,20 @@ pub async fn enrol_member(
     enrolment: &Enrolment<'_>,
     pending_max: usize,
 ) -> Result<(Member, IssuedToken)> {
-    let _ = (db, enrolment, pending_max);
-    Err(super::unbuilt("identity::enrol_member"))
+    if !valid_new_member_id(enrolment.member) {
+        return Err(refuse_member_id(enrolment.member));
+    }
+    let (_, token) = enrol_inner(
+        db,
+        enrolment.member,
+        enrolment.display_name,
+        enrolment.source,
+        enrolment.why,
+        pending_max,
+        Some((enrolment.agent, enrolment.os, enrolment.host)),
+    )
+    .await?;
+    Ok((member_or_missing(db, enrolment.member).await?, token))
 }
 
 /// Approve a pending member, optionally renaming it. Participants, cursors and
@@ -1333,22 +1545,26 @@ pub async fn approve_member(
     new_display_name: Option<&str>,
     projects: Option<&[String]>,
 ) -> Result<Member> {
-    let _ = (db, current_id, new_id, new_display_name, projects);
-    Err(super::unbuilt("identity::approve_member"))
+    if let Some(target) = new_id
+        && target != current_id
+        && !valid_new_member_id(target)
+    {
+        return Err(refuse_member_id(target));
+    }
+    let approved = approve_enrolment(db, current_id, new_id, new_display_name, projects).await?;
+    member_or_missing(db, &approved.id).await
 }
 
 /// Issue a member a new token, revoking the old. Returns the token and the
 /// hashes it revoked, which the caller sends on `AppState::revocations`.
 pub async fn issue_member_token(db: &Database, member: &str) -> Result<(IssuedToken, Vec<String>)> {
-    let _ = (db, member);
-    Err(super::unbuilt("identity::issue_member_token"))
+    issue_token_inner(db, member).await
 }
 
 /// Revoke a member's live token. Returns the revoked hashes, which the caller
 /// sends on `AppState::revocations`.
 pub async fn revoke_member_token(db: &Database, member: &str) -> Result<Vec<String>> {
-    let _ = (db, member);
-    Err(super::unbuilt("identity::revoke_member_token"))
+    revoke_token_inner(db, member).await
 }
 
 #[cfg(test)]

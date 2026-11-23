@@ -59,6 +59,10 @@ pub struct Artifact {
     pub live_session: Option<String>,
     pub comments_count: i64,
     pub comments_open: i64,
+    /// Who wrote it.
+    pub author: crate::author::AuthorView,
+    /// `hub` for the hub's own act, null for a call.
+    pub origin: Option<String>,
 }
 
 /// One immutable version of an artifact.
@@ -73,6 +77,11 @@ pub struct ArtifactVersion {
     pub envelope: Option<serde_json::Value>,
     pub size_bytes: i64,
     pub created_at: String,
+    /// Who wrote this version. A version from before authors were kept is
+    /// legacy with no label.
+    pub author: crate::author::AuthorView,
+    /// `hub` for the hub's own act, null for a call.
+    pub origin: Option<String>,
 }
 
 /// A new artifact to publish.
@@ -224,6 +233,10 @@ pub async fn publish_for_principal_capped(
     let protected = envelope_json.is_some();
 
     let mut created_rel: Option<String> = None;
+    let writer = match principal {
+        Some(p) => p.writer(artifact.session_id),
+        None => crate::author::Writer::from(artifact.actor),
+    };
 
     let write = async {
         let tx = super::begin_write(db).await?;
@@ -249,6 +262,12 @@ pub async fn publish_for_principal_capped(
         if let Some(p) = principal {
             crate::policy::authorize_in_tx(&tx, p, artifact.project_id, crate::policy::Access::Write).await?;
         }
+        // A write in a session lands only while the session is writable;
+        // the caller holds its gate shared, so an end or prune cannot pass
+        // this check and the commit.
+        if let Some(session_id) = artifact.session_id {
+            crate::store::sessions::refuse_closed_in_tx(&tx, session_id).await?;
+        }
 
         if let Some(key) = idempotency_key
             && let Some(entry) =
@@ -271,7 +290,13 @@ pub async fn publish_for_principal_capped(
             id: id.clone(),
             project_id: artifact.project_id.to_string(),
             session_id: artifact.session_id.map(str::to_string),
-            actor: Some(artifact.actor.to_string()),
+            actor: Some(writer.actor().to_string()),
+            author: writer
+                .author
+                .clone()
+                .in_session(artifact.session_id.map(str::to_string))
+                .view(None),
+            origin: writer.origin.as_column().map(str::to_string),
             title: title.clone(),
             description: description.clone(),
             label: label.clone(),
@@ -291,8 +316,9 @@ pub async fn publish_for_principal_capped(
         };
 
         tx.execute(
-            "INSERT INTO artifacts(id, project_id, title, description, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at, session_id, actor)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?10, ?11, ?12)",
+            "INSERT INTO artifacts(id, project_id, title, description, label, kind, current_ver, envelope, path, size_bytes, created_at, updated_at, session_id, actor,
+                author_kind, member_id, agent, origin)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             vec![
                 Value::Text(id.clone()),
                 Value::Text(artifact.project_id.to_string()),
@@ -305,13 +331,18 @@ pub async fn publish_for_principal_capped(
                 Value::Integer(artifact.content.len() as i64),
                 Value::Text(created_at.clone()),
                 optional_text(artifact.session_id),
-                Value::Text(artifact.actor.to_string()),
+                Value::Text(writer.actor().to_string()),
+                Value::Text(writer.author.kind().as_str().to_string()),
+                optional_text(writer.author.member()),
+                optional_text(writer.author.agent()),
+                optional_text(writer.origin.as_column()),
             ],
         )
         .await
         .map_err(engine)?;
         insert_version(
             &tx,
+            &writer,
             &id,
             1,
             &title,
@@ -342,7 +373,7 @@ pub async fn publish_for_principal_capped(
         let event_id = append_event(
             &tx,
             ceiling,
-            artifact.actor,
+            &writer,
             artifact.project_id,
             "published",
             &id,
@@ -394,7 +425,7 @@ pub async fn publish_for_principal_capped(
 pub async fn update(
     db: &Database,
     data_dir: &Path,
-    actor: &str,
+    actor: impl Into<crate::author::Writer>,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
@@ -425,7 +456,7 @@ pub async fn update_capped(
     db: &Database,
     data_dir: &Path,
     ceiling: i64,
-    actor: &str,
+    actor: impl Into<crate::author::Writer>,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
@@ -452,7 +483,7 @@ pub async fn update_for_principal(
     db: &Database,
     data_dir: &Path,
     principal: Option<&crate::principal::Principal>,
-    actor: &str,
+    actor: impl Into<crate::author::Writer>,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
@@ -480,13 +511,14 @@ pub async fn update_for_principal_capped(
     data_dir: &Path,
     principal: Option<&crate::principal::Principal>,
     ceiling: i64,
-    actor: &str,
+    actor: impl Into<crate::author::Writer>,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
     opts: UpdateOptions<'_>,
     idempotency_key: Option<&str>,
 ) -> Result<Artifact> {
+    let writer: crate::author::Writer = actor.into();
     limits::check_artifact(content.len())?;
     if let Some(Some(l)) = opts.label {
         check_label(Some(l))?;
@@ -556,6 +588,12 @@ pub async fn update_for_principal_capped(
 
         if let Some(p) = principal {
             crate::policy::authorize_in_tx(&tx, p, &existing.project_id, crate::policy::Access::Write).await?;
+        }
+        // A write in a session lands only while the session is writable;
+        // the caller holds its gate shared, so an end or prune cannot pass
+        // this check and the commit.
+        if let Some(session_id) = opts.session_id {
+            crate::store::sessions::refuse_closed_in_tx(&tx, session_id).await?;
         }
 
         if let Some(key) = idempotency_key
@@ -665,6 +703,7 @@ pub async fn update_for_principal_capped(
         } else {
             insert_version(
                 &tx,
+                &writer,
                 artifact_id,
                 version,
                 &existing.title,
@@ -700,7 +739,7 @@ pub async fn update_for_principal_capped(
         let event_id = append_event(
             &tx,
             ceiling,
-            actor,
+            &writer,
             &existing.project_id,
             "updated",
             artifact_id,
@@ -730,6 +769,8 @@ pub async fn update_for_principal_capped(
             project_id: existing.project_id,
             session_id: existing.session_id,
             actor: existing.actor,
+            author: existing.author,
+            origin: existing.origin,
             title: existing.title,
             description: existing.description,
             label,
@@ -780,7 +821,7 @@ pub async fn update_for_principal_capped(
 pub async fn draft(
     db: &Database,
     data_dir: &Path,
-    actor: &str,
+    actor: impl Into<crate::author::Writer>,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
@@ -823,12 +864,13 @@ pub async fn draft_for_principal_capped(
     data_dir: &Path,
     principal: Option<&crate::principal::Principal>,
     ceiling: i64,
-    actor: &str,
+    actor: impl Into<crate::author::Writer>,
     artifact_id: &str,
     content: &[u8],
     envelope: EnvelopeUpdate,
     opts: LiveOptions<'_>,
 ) -> Result<Artifact> {
+    let writer: crate::author::Writer = actor.into();
     limits::check_artifact(content.len())?;
 
     let conn = super::connect(db)?;
@@ -876,6 +918,12 @@ pub async fn draft_for_principal_capped(
 
         if let Some(p) = principal {
             crate::policy::authorize_in_tx(&tx, p, &current.project_id, crate::policy::Access::Write).await?;
+        }
+        // A write in a session lands only while the session is writable;
+        // the caller holds its gate shared, so an end or prune cannot pass
+        // this check and the commit.
+        if let Some(session_id) = opts.session_id {
+            crate::store::sessions::refuse_closed_in_tx(&tx, session_id).await?;
         }
 
         let existing = row_on(&tx, artifact_id)
@@ -946,6 +994,7 @@ pub async fn draft_for_principal_capped(
             } else {
                 insert_version(
                     &tx,
+                    &writer,
                     artifact_id,
                     version,
                     &existing.title,
@@ -963,7 +1012,7 @@ pub async fn draft_for_principal_capped(
             append_event(
                 &tx,
                 ceiling,
-                actor,
+                &writer,
                 &existing.project_id,
                 "live",
                 artifact_id,
@@ -999,6 +1048,8 @@ pub async fn draft_for_principal_capped(
             project_id: existing.project_id,
             session_id: existing.session_id,
             actor: existing.actor,
+            author: existing.author,
+            origin: existing.origin,
             title: existing.title,
             description: existing.description,
             label: existing.label,
@@ -1067,9 +1118,10 @@ pub async fn clear_idle_live(db: &Database, since: &str) -> Result<()> {
 pub async fn delete(
     db: &Database,
     data_dir: &Path,
-    actor: &str,
+    actor: impl Into<crate::author::Writer>,
     artifact_id: &str,
 ) -> Result<Artifact> {
+    let writer: crate::author::Writer = actor.into();
     let tx = super::begin_write(db).await?;
     let existing = row_on(&tx, artifact_id)
         .await?
@@ -1120,7 +1172,7 @@ pub async fn delete(
     append_event(
         &tx,
         0,
-        actor,
+        &writer,
         &existing.project_id,
         "deleted",
         artifact_id,
@@ -1203,7 +1255,8 @@ pub async fn get_at_version(
                     a.session_id, a.actor,
                     (SELECT COUNT(*) FROM comments WHERE artifact_id = ?1) AS comments_count,
                     (SELECT COUNT(*) FROM comments WHERE artifact_id = ?1 AND done = 0) AS comments_open,
-                    a.live_version, a.live_rev, a.live_session
+                    a.live_version, a.live_rev, a.live_session,
+                    a.author_kind, a.member_id, a.agent, a.origin
              FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
              WHERE v.artifact_id = ?1 AND v.version = ?2",
             vec![
@@ -1243,6 +1296,15 @@ pub async fn get_at_version(
     let live_version = opt_int_at(&row, 14)?;
     let live_rev = int_at(&row, 15)?;
     let live_session = text_at(&row, 16)?;
+    let author = crate::author::Author::from_columns(
+        text_at(&row, 17)?.as_deref(),
+        text_at(&row, 18)?.as_deref(),
+        text_at(&row, 19)?.as_deref(),
+        session_id.as_deref(),
+        actor.as_deref().unwrap_or_default(),
+    )
+    .view(None);
+    let origin = text_at(&row, 20)?;
     let bytes = blob::read_named(
         data_dir,
         &path,
@@ -1254,6 +1316,8 @@ pub async fn get_at_version(
             project_id,
             session_id,
             actor,
+            author,
+            origin,
             title,
             description,
             label,
@@ -1293,7 +1357,8 @@ pub async fn list_versions(db: &Database, artifact_id: &str) -> Result<Vec<Artif
     }
     let mut rows = conn
         .query(
-            "SELECT version, title, description, kind, label, encrypted, envelope, size_bytes, created_at
+            "SELECT version, title, description, kind, label, encrypted, envelope, size_bytes, created_at,
+                    author_kind, member_id, agent, session_id, actor, origin
              FROM artifact_versions WHERE artifact_id = ?1 ORDER BY version ASC",
             vec![Value::Text(artifact_id.to_string())],
         )
@@ -1431,7 +1496,8 @@ pub async fn list_with_session(
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
                     COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open,
-                    a.live_version, a.live_rev, a.live_session
+                    a.live_version, a.live_rev, a.live_session,
+                    a.author_kind, a.member_id, a.agent, a.origin
              FROM artifacts a
              LEFT JOIN comments c ON c.artifact_id = a.id
              WHERE a.project_id = ?1 AND a.session_id = ?2
@@ -1444,7 +1510,8 @@ pub async fn list_with_session(
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
                     COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open,
-                    a.live_version, a.live_rev, a.live_session
+                    a.live_version, a.live_rev, a.live_session,
+                    a.author_kind, a.member_id, a.agent, a.origin
              FROM artifacts a
              LEFT JOIN comments c ON c.artifact_id = a.id
              WHERE a.project_id = ?1
@@ -1477,7 +1544,8 @@ pub async fn list_for_session(db: &Database, session_id: &str) -> Result<Vec<Art
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
                     COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open,
-                    a.live_version, a.live_rev, a.live_session
+                    a.live_version, a.live_rev, a.live_session,
+                    a.author_kind, a.member_id, a.agent, a.origin
              FROM artifacts a
              LEFT JOIN comments c ON c.artifact_id = a.id
              WHERE a.session_id = ?1
@@ -1511,7 +1579,8 @@ async fn row_on(conn: &turso::Connection, artifact_id: &str) -> Result<Option<Ar
                     a.current_ver, a.envelope, a.size_bytes, a.created_at, a.updated_at, a.path, a.session_id, a.actor,
                     COUNT(c.id) AS comments_count,
                     COUNT(CASE WHEN c.done = 0 THEN 1 END) AS comments_open,
-                    a.live_version, a.live_rev, a.live_session
+                    a.live_version, a.live_rev, a.live_session,
+                    a.author_kind, a.member_id, a.agent, a.origin
              FROM artifacts a
              LEFT JOIN comments c ON c.artifact_id = a.id
              WHERE a.id = ?1
@@ -1592,6 +1661,7 @@ async fn update_version(
 #[allow(clippy::too_many_arguments)]
 async fn insert_version(
     tx: &crate::store::WriteTx,
+    writer: &crate::author::Writer,
     artifact_id: &str,
     version: i64,
     title: &str,
@@ -1605,8 +1675,9 @@ async fn insert_version(
     created_at: &str,
 ) -> Result<()> {
     tx.execute(
-        "INSERT INTO artifact_versions(artifact_id, version, title, description, kind, label, encrypted, envelope, size_bytes, path, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT INTO artifact_versions(artifact_id, version, title, description, kind, label, encrypted, envelope, size_bytes, path, created_at,
+            author_kind, member_id, agent, session_id, actor, origin)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         vec![
             Value::Text(artifact_id.to_string()),
             Value::Integer(version),
@@ -1619,6 +1690,12 @@ async fn insert_version(
             Value::Integer(size_bytes),
             Value::Text(path.to_string()),
             Value::Text(created_at.to_string()),
+            Value::Text(writer.author.kind().as_str().to_string()),
+            optional_text(writer.author.member()),
+            optional_text(writer.author.agent()),
+            optional_text(writer.author.session()),
+            Value::Text(writer.actor().to_string()),
+            optional_text(writer.origin.as_column()),
         ],
     )
     .await
@@ -1630,7 +1707,7 @@ async fn insert_version(
 async fn append_event(
     tx: &crate::store::WriteTx,
     events_per_project: i64,
-    actor: &str,
+    writer: &crate::author::Writer,
     project_id: &str,
     action: &str,
     artifact_id: &str,
@@ -1644,7 +1721,7 @@ async fn append_event(
     events::append_in_tx(
         tx,
         events_per_project,
-        actor,
+        writer,
         None,
         NewEvent {
             project_id: project_id.to_string(),
@@ -1803,6 +1880,15 @@ fn artifact_from_row(row: &Row) -> Result<Artifact> {
         live_version: opt_int_at(row, 16)?,
         live_rev: int_at(row, 17)?,
         live_session: text_at(row, 18)?,
+        author: crate::author::Author::from_columns(
+            text_at(row, 19)?.as_deref(),
+            text_at(row, 20)?.as_deref(),
+            text_at(row, 21)?.as_deref(),
+            text_at(row, 12)?.as_deref(),
+            &text_at(row, 13)?.unwrap_or_default(),
+        )
+        .view(None),
+        origin: text_at(row, 22)?,
     })
 }
 
@@ -1824,6 +1910,18 @@ fn version_from_row(row: &Row) -> Result<ArtifactVersion> {
         envelope,
         size_bytes: int_at(row, 7)?,
         created_at: required_text(row, 8)?,
+        author: match text_at(row, 13)? {
+            None => crate::author::AuthorView::unrecorded(),
+            Some(actor) => crate::author::Author::from_columns(
+                text_at(row, 9)?.as_deref(),
+                text_at(row, 10)?.as_deref(),
+                text_at(row, 11)?.as_deref(),
+                text_at(row, 12)?.as_deref(),
+                &actor,
+            )
+            .view(None),
+        },
+        origin: text_at(row, 14)?,
     })
 }
 

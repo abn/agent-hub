@@ -13,7 +13,7 @@ async fn live_tokens(db: &turso::Database, agent_id: &str) -> i64 {
     let conn = db.connect().expect("connect");
     let mut rows = conn
         .query(
-            "SELECT COUNT(*) FROM agent_tokens WHERE agent_id = ?1 AND revoked_at IS NULL",
+            "SELECT COUNT(*) FROM member_tokens WHERE member_id = ?1 AND revoked_at IS NULL",
             [agent_id],
         )
         .await
@@ -295,7 +295,7 @@ async fn grants_carry_no_access_level() {
         columns.push(row.get::<String>(1).expect("column name"));
     }
     assert!(
-        columns.iter().any(|c| c == "agent_id") && columns.iter().any(|c| c == "project_id"),
+        columns.iter().any(|c| c == "member_id") && columns.iter().any(|c| c == "project_id"),
         "the grant table keeps its key: {columns:?}"
     );
     assert!(
@@ -339,14 +339,14 @@ async fn expiring_a_pending_enrolment_removes_its_event_and_search_row() {
         "the approval event is indexed before expiry"
     );
 
-    let expired = identity::expire_pending(&db, std::time::Duration::from_secs(0))
+    let (expired, _) = identity::expire_pending(&db, std::time::Duration::from_secs(0))
         .await
         .expect("expire");
     assert_eq!(expired, 1, "the pending enrolment expires");
 
     let agents: i64 = {
         let mut rows = conn
-            .query("SELECT COUNT(*) FROM agents WHERE id = 'waiter'", ())
+            .query("SELECT COUNT(*) FROM members WHERE id = 'waiter'", ())
             .await
             .expect("count");
         rows.next().await.unwrap().unwrap().get(0).unwrap()

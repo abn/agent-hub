@@ -145,13 +145,13 @@ async fn an_anchor_refuses_a_source_from_another_project() {
 }
 
 #[tokio::test]
-async fn another_agent_cannot_anchor_someone_elses_session() {
+async fn any_participant_anchors_a_shared_session_but_not_an_ended_one() {
     let db = open().await;
     let session = sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("session");
 
-    let err = anchors::append_anchor(
+    let anchor = anchors::append_anchor(
         &db,
         0,
         &other_agent(),
@@ -160,9 +160,27 @@ async fn another_agent_cannot_anchor_someone_elses_session() {
         anchor_request(Vec::new()),
     )
     .await
-    .expect_err("an anchor belongs to the session owner");
+    .expect("a session has no owner, so another participant anchors it");
+    assert_eq!(anchor.owner, "agent-two");
 
-    assert_eq!(err.code(), agent_hub::error::ErrorCode::Forbidden);
+    sessions::end(&db, &session.id, "agent-one", None, None)
+        .await
+        .expect("end");
+    let ended = sessions::get(&db, &session.id)
+        .await
+        .expect("get")
+        .expect("row");
+    let err = anchors::append_anchor(
+        &db,
+        0,
+        &other_agent(),
+        None,
+        &ended,
+        anchor_request(Vec::new()),
+    )
+    .await
+    .expect_err("an ended session takes no anchor");
+    assert_eq!(err.code(), agent_hub::error::ErrorCode::Conflict);
 }
 
 #[tokio::test]

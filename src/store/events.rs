@@ -41,6 +41,12 @@ pub struct Event {
     /// entered the inbox. An action is open while this is `action` or
     /// `waiting`, and closed once it is `resolved`.
     pub inbox_status: Option<String>,
+    /// Who wrote it.
+    #[serde(default = "crate::author::AuthorView::unrecorded")]
+    pub author: crate::author::AuthorView,
+    /// `hub` for the hub's own act, null for a call.
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 /// A new event to append.
@@ -107,7 +113,7 @@ impl Default for FeedQuery {
 pub async fn append(
     db: &Database,
     events_per_project: i64,
-    actor: &str,
+    writer: impl Into<crate::author::Writer>,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
@@ -115,7 +121,7 @@ pub async fn append(
         db,
         None,
         events_per_project,
-        actor,
+        writer,
         idempotency_key,
         event,
         None,
@@ -136,7 +142,7 @@ pub async fn append_action(
     db: &Database,
     caps: &crate::limits::InboxCaps,
     events_per_project: i64,
-    actor: &str,
+    writer: impl Into<crate::author::Writer>,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
@@ -144,7 +150,7 @@ pub async fn append_action(
         db,
         caps,
         events_per_project,
-        actor,
+        writer,
         idempotency_key,
         event,
         None,
@@ -167,7 +173,7 @@ pub async fn append_action_outcome(
     db: &Database,
     caps: &crate::limits::InboxCaps,
     events_per_project: i64,
-    actor: &str,
+    writer: impl Into<crate::author::Writer>,
     idempotency_key: Option<&str>,
     event: NewEvent,
     deadline: Option<&crate::store::inbox::Deadline>,
@@ -176,7 +182,7 @@ pub async fn append_action_outcome(
         db,
         Some(caps),
         events_per_project,
-        actor,
+        writer,
         idempotency_key,
         event,
         deadline,
@@ -193,7 +199,7 @@ pub async fn append_action_with_deadline(
     db: &Database,
     caps: &crate::limits::InboxCaps,
     events_per_project: i64,
-    actor: &str,
+    writer: impl Into<crate::author::Writer>,
     idempotency_key: Option<&str>,
     event: NewEvent,
     deadline: Option<&crate::store::inbox::Deadline>,
@@ -202,7 +208,7 @@ pub async fn append_action_with_deadline(
         db,
         caps,
         events_per_project,
-        actor,
+        writer,
         idempotency_key,
         event,
         deadline,
@@ -257,14 +263,21 @@ async fn append_with_caps(
     db: &Database,
     caps: Option<&crate::limits::InboxCaps>,
     events_per_project: i64,
-    actor: &str,
+    writer: impl Into<crate::author::Writer>,
     idempotency_key: Option<&str>,
     event: NewEvent,
     deadline: Option<&crate::store::inbox::Deadline>,
 ) -> Result<Appended> {
     let tx = super::begin_write(db).await?;
-    let appended =
-        append_in_tx_capped(&tx, caps, events_per_project, actor, idempotency_key, event).await?;
+    let appended = append_in_tx_capped(
+        &tx,
+        caps,
+        events_per_project,
+        writer,
+        idempotency_key,
+        event,
+    )
+    .await?;
     if !appended.replayed
         && let Some(deadline) = deadline
     {
@@ -291,11 +304,12 @@ async fn append_with_caps_and_principal(
         crate::policy::Access::Write,
     )
     .await?;
+    let writer = principal.writer(event.session_id.as_deref());
     let appended = append_in_tx_capped(
         &tx,
         caps,
         events_per_project,
-        &principal.actor,
+        writer,
         idempotency_key,
         event,
     )
@@ -318,11 +332,11 @@ async fn append_with_caps_and_principal(
 pub(crate) async fn append_in_tx(
     tx: &crate::store::WriteTx,
     events_per_project: i64,
-    actor: &str,
+    writer: impl Into<crate::author::Writer>,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<String> {
-    append_in_tx_capped(tx, None, events_per_project, actor, idempotency_key, event)
+    append_in_tx_capped(tx, None, events_per_project, writer, idempotency_key, event)
         .await
         .map(|appended| appended.id)
 }
@@ -333,10 +347,12 @@ async fn append_in_tx_capped(
     tx: &crate::store::WriteTx,
     caps: Option<&crate::limits::InboxCaps>,
     events_per_project: i64,
-    actor: &str,
+    writer: impl Into<crate::author::Writer>,
     idempotency_key: Option<&str>,
     event: NewEvent,
 ) -> Result<Appended> {
+    let writer: crate::author::Writer = writer.into();
+    let actor = writer.actor();
     validate_kind(&event.kind)?;
     let payload_text = event.payload.as_ref().map(|value| value.to_string());
     limits::check_event(
@@ -448,9 +464,14 @@ async fn append_in_tx_capped(
             event.thread_id.clone()
         };
 
+    let session_id = event
+        .session_id
+        .clone()
+        .or_else(|| writer.author.session().map(str::to_string));
     tx.execute(
-        "INSERT INTO events(id, project_id, kind, actor, summary, payload, thread_id, needs_action, created_at, session_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO events(id, project_id, kind, actor, summary, payload, thread_id, needs_action,
+            created_at, session_id, author_kind, member_id, agent, origin)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         vec![
             Value::Text(id.clone()),
             Value::Text(event.project_id.clone()),
@@ -461,7 +482,11 @@ async fn append_in_tx_capped(
             optional_text(thread_id.as_deref()),
             Value::Integer(i64::from(needs_action)),
             Value::Text(created_at.clone()),
-            optional_text(event.session_id.as_deref()),
+            optional_text(session_id.as_deref()),
+            Value::Text(writer.author.kind().as_str().to_string()),
+            optional_text(writer.author.member()),
+            optional_text(writer.author.agent()),
+            optional_text(writer.origin.as_column()),
         ],
     )
     .await
@@ -792,13 +817,27 @@ async fn agent_cursor_on(
     project_id: &str,
     agent: &str,
 ) -> Result<Option<String>> {
+    feed_cursor_on(
+        conn,
+        project_id,
+        &crate::author::ParticipantKey::from_label(agent),
+    )
+    .await
+}
+
+async fn feed_cursor_on(
+    conn: &Connection,
+    project_id: &str,
+    key: &crate::author::ParticipantKey,
+) -> Result<Option<String>> {
     let mut rows = conn
         .query(
-            "SELECT last_seen_event_id FROM agent_feed_cursors
-             WHERE project_id = ?1 AND agent = ?2",
+            "SELECT last_seen_event_id FROM feed_cursors
+             WHERE project_id = ?1 AND member_id = ?2 AND agent = ?3",
             vec![
                 Value::Text(project_id.to_string()),
-                Value::Text(agent.to_string()),
+                Value::Text(key.member.clone()),
+                Value::Text(key.agent.clone()),
             ],
         )
         .await
@@ -839,12 +878,14 @@ pub async fn advance_agent_cursor(
         });
     }
 
+    let key = crate::author::ParticipantKey::from_label(agent);
     tx.execute(
-        "INSERT OR REPLACE INTO agent_feed_cursors(project_id, agent, last_seen_event_id, updated_at)
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT OR REPLACE INTO feed_cursors(project_id, member_id, agent, last_seen_event_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
         vec![
             Value::Text(project_id.to_string()),
-            Value::Text(agent.to_string()),
+            Value::Text(key.member),
+            Value::Text(key.agent),
             Value::Text(event_id.to_string()),
             Value::Text(crate::store::now_rfc3339()),
         ],
@@ -868,7 +909,7 @@ pub(crate) async fn forget_agent_cursors_in_tx(
     project_id: &str,
 ) -> Result<()> {
     tx.execute(
-        "DELETE FROM agent_feed_cursors WHERE project_id = ?1",
+        "DELETE FROM feed_cursors WHERE project_id = ?1",
         vec![Value::Text(project_id.to_string())],
     )
     .await
@@ -995,7 +1036,7 @@ pub async fn brief_events(
     params.push(Value::Integer(limit.clamp(1, FEED_LIMIT_MAX)));
     let sql = format!(
         "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id,
-                e.needs_action, e.created_at, i.status
+                e.needs_action, e.created_at, i.status, e.author_kind, e.member_id, e.agent, e.session_id, e.origin, (SELECT s.session_name FROM sessions s WHERE s.id = e.session_id)
          {clause} ORDER BY e.id DESC LIMIT ?{}",
         params.len()
     );
@@ -1057,7 +1098,7 @@ pub async fn latest_for_session(db: &Database, session_id: &str) -> Result<Optio
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status
+            "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status, e.author_kind, e.member_id, e.agent, e.session_id, e.origin, (SELECT s.session_name FROM sessions s WHERE s.id = e.session_id)
              FROM events e LEFT JOIN inbox i ON i.event_id = e.id
              WHERE e.session_id = ?1 ORDER BY e.id DESC LIMIT 1",
             vec![Value::Text(session_id.to_string())],
@@ -1096,7 +1137,7 @@ pub(crate) async fn get_in_tx(conn: &Connection, event_id: &str) -> Result<Optio
 async fn get_on(conn: &Connection, event_id: &str) -> Result<Option<Event>> {
     let mut rows = conn
         .query(
-            "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status
+            "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status, e.author_kind, e.member_id, e.agent, e.session_id, e.origin, (SELECT s.session_name FROM sessions s WHERE s.id = e.session_id)
              FROM events e LEFT JOIN inbox i ON i.event_id = e.id WHERE e.id = ?1",
             vec![Value::Text(event_id.to_string())],
         )
@@ -1149,6 +1190,7 @@ pub async fn comment_event(
     author: &str,
 ) -> Result<NewEvent> {
     let conn = super::connect(db)?;
+    let mut reached: Vec<Reached> = Vec::new();
     let (project_id, summary, mut audience, payload) = match target {
         CommentTarget::Artifact {
             project_id,
@@ -1178,6 +1220,32 @@ pub async fn comment_event(
                 )
                 .await?,
             );
+            reached.extend(
+                reached_by(
+                    &conn,
+                    "SELECT actor, session_id, member_id, agent FROM events
+                      WHERE project_id = ?1 AND kind = 'artifact'
+                        AND json_extract(payload, '$.action') IN ('published', 'updated')
+                        AND json_extract(payload, '$.artifact_id') = ?2",
+                    vec![
+                        Value::Text(project_id.to_string()),
+                        Value::Text(artifact_id.to_string()),
+                    ],
+                )
+                .await?,
+            );
+            reached.extend(
+                reached_by(
+                    &conn,
+                    "SELECT author, session_id, member_id, agent FROM comments
+                      WHERE artifact_id = ?1 AND id < ?2",
+                    vec![
+                        Value::Text(artifact_id.to_string()),
+                        Value::Text(comment_id.to_string()),
+                    ],
+                )
+                .await?,
+            );
             (
                 project_id,
                 format!("comment on {title}"),
@@ -1197,11 +1265,28 @@ pub async fn comment_event(
                 ],
             )
             .await?;
-            audience.extend(
-                newest_page_event(&conn, project_id, path)
-                    .await?
-                    .map(|written| written.actor),
+            reached.extend(
+                reached_by(
+                    &conn,
+                    "SELECT author, session_id, member_id, agent FROM kb_comments
+                      WHERE project_id = ?1 AND path = ?2 AND id < ?3",
+                    vec![
+                        Value::Text(project_id.to_string()),
+                        Value::Text(path.to_string()),
+                        Value::Text(comment_id.to_string()),
+                    ],
+                )
+                .await?,
             );
+            if let Some(written) = newest_page_event(&conn, project_id, path).await? {
+                reached.push(Reached {
+                    actor: written.actor.clone(),
+                    session: written.session.clone(),
+                    member: written.member.clone(),
+                    agent: written.agent.clone(),
+                });
+                audience.push(written.actor);
+            }
             (
                 project_id,
                 format!("comment on {path}"),
@@ -1217,6 +1302,10 @@ pub async fn comment_event(
     payload["comment_id"] = serde_json::json!(comment_id);
     payload["author"] = serde_json::json!(author);
     payload["audience"] = serde_json::json!(audience);
+    reached.retain(|row| row.actor != author);
+    let (sessions, participants) = audience_of(&reached);
+    payload["audience_sessions"] = serde_json::json!(sessions);
+    payload["audience_participants"] = serde_json::json!(participants);
     Ok(NewEvent {
         project_id: project_id.to_string(),
         kind: "comment".to_string(),
@@ -1237,11 +1326,12 @@ pub async fn record_comment(
     events_per_project: i64,
     target: CommentTarget<'_>,
     comment_id: &str,
-    author: &str,
+    author: impl Into<crate::author::Writer>,
 ) {
+    let writer: crate::author::Writer = author.into();
     let appended = async {
-        let event = comment_event(db, target, comment_id, author).await?;
-        append(db, events_per_project, author, None, event).await
+        let event = comment_event(db, target, comment_id, writer.actor()).await?;
+        append(db, events_per_project, &writer, None, event).await
     }
     .await;
     if let Err(err) = appended {
@@ -1276,6 +1366,18 @@ pub async fn page_event(
         return Ok(None);
     }
     let audience: Vec<&str> = prev_actor.into_iter().collect();
+    // The previous writer's session and participant, when the newest page
+    // event is theirs.
+    let previous = newest_page_event(&conn, project_id, path)
+        .await?
+        .filter(|written| Some(written.actor.as_str()) == prev_actor)
+        .map(|written| Reached {
+            actor: written.actor,
+            session: written.session,
+            member: written.member,
+            agent: written.agent,
+        });
+    let (sessions, participants) = audience_of(previous.as_slice());
     Ok(Some(NewEvent {
         project_id: project_id.to_string(),
         kind: "page".to_string(),
@@ -1288,6 +1390,8 @@ pub async fn page_event(
             "action": if created { "created" } else { "updated" },
             "prev_actor": prev_actor,
             "audience": audience,
+            "audience_sessions": sessions,
+            "audience_participants": participants,
         })),
         needs_action: false,
         thread_id: None,
@@ -1298,6 +1402,53 @@ pub async fn page_event(
 struct PageEvent {
     actor: String,
     created_at: String,
+    session: Option<String>,
+    member: Option<String>,
+    agent: Option<String>,
+}
+
+/// A row that puts its writer in a comment or page audience.
+struct Reached {
+    actor: String,
+    session: Option<String>,
+    member: Option<String>,
+    agent: Option<String>,
+}
+
+async fn reached_by(conn: &Connection, sql: &str, params: Vec<Value>) -> Result<Vec<Reached>> {
+    let mut rows = conn.query(sql, params).await.map_err(engine)?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        out.push(Reached {
+            actor: required_text_at(&row, 0)?,
+            session: text_at(&row, 1)?,
+            member: text_at(&row, 2)?,
+            agent: text_at(&row, 3)?,
+        });
+    }
+    Ok(out)
+}
+
+/// The sessions and participants a set of writers names, deduplicated.
+fn audience_of(reached: &[Reached]) -> (Vec<String>, Vec<serde_json::Value>) {
+    let mut sessions: Vec<String> = reached.iter().filter_map(|r| r.session.clone()).collect();
+    sessions.sort();
+    sessions.dedup();
+    let mut keys: Vec<(String, String)> = reached
+        .iter()
+        .filter_map(|r| {
+            r.member
+                .clone()
+                .map(|member| (member, r.agent.clone().unwrap_or_default()))
+        })
+        .collect();
+    keys.sort();
+    keys.dedup();
+    let participants = keys
+        .into_iter()
+        .map(|(member, agent)| serde_json::json!({"member": member, "agent": agent}))
+        .collect();
+    (sessions, participants)
 }
 
 async fn newest_page_event(
@@ -1307,7 +1458,7 @@ async fn newest_page_event(
 ) -> Result<Option<PageEvent>> {
     let mut rows = conn
         .query(
-            "SELECT actor, created_at FROM events
+            "SELECT actor, created_at, session_id, member_id, agent FROM events
               WHERE project_id = ?1 AND kind = 'page'
                 AND json_extract(payload, '$.path') = ?2
               ORDER BY id DESC LIMIT 1",
@@ -1324,6 +1475,9 @@ async fn newest_page_event(
     Ok(Some(PageEvent {
         actor: required_text_at(&row, 0)?,
         created_at: required_text_at(&row, 1)?,
+        session: text_at(&row, 2)?,
+        member: text_at(&row, 3)?,
+        agent: text_at(&row, 4)?,
     }))
 }
 
@@ -1355,7 +1509,7 @@ pub async fn recent(db: &Database, limit: i64) -> Result<Vec<Event>> {
     let limit = limit.clamp(1, FEED_LIMIT_MAX);
     let mut rows = conn
         .query(
-            "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status
+            "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status, e.author_kind, e.member_id, e.agent, e.session_id, e.origin, (SELECT s.session_name FROM sessions s WHERE s.id = e.session_id)
              FROM events e LEFT JOIN inbox i ON i.event_id = e.id
              WHERE e.kind <> 'system'
                AND e.kind NOT IN ('comment', 'page')
@@ -1393,7 +1547,7 @@ pub async fn read_feed_scoped(
     let limit = query.limit.clamp(1, FEED_LIMIT_MAX);
 
     let mut sql = String::from(
-        "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status
+        "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload, e.thread_id, e.needs_action, e.created_at, i.status, e.author_kind, e.member_id, e.agent, e.session_id, e.origin, (SELECT s.session_name FROM sessions s WHERE s.id = e.session_id)
          FROM events e LEFT JOIN inbox i ON i.event_id = e.id WHERE 1=1",
     );
     let mut params: Vec<Value> = Vec::new();
@@ -1403,18 +1557,17 @@ pub async fn read_feed_scoped(
         sql.push_str(&format!(" AND e.project_id = ?{}", params.len()));
     }
     if let Some(session_id) = &query.session_id {
-        let is_valid = match crate::store::sessions::get(db, session_id).await? {
-            Some(s) => s.deleted_at.is_none(),
-            None => false,
+        let resolved = match crate::store::sessions::lookup_id(db, session_id).await? {
+            Some(s) if s.deleted_at.is_none() => s.id,
+            _ => {
+                return Ok(FeedPage {
+                    events: Vec::new(),
+                    next_since: None,
+                    next_before: None,
+                });
+            }
         };
-        if !is_valid {
-            return Ok(FeedPage {
-                events: Vec::new(),
-                next_since: None,
-                next_before: None,
-            });
-        }
-        params.push(Value::Text(session_id.clone()));
+        params.push(Value::Text(resolved));
         sql.push_str(&format!(" AND e.session_id = ?{}", params.len()));
     }
     if let Some(kinds) = query.kinds.as_ref().filter(|kinds| !kinds.is_empty()) {
@@ -1424,6 +1577,26 @@ pub async fn read_feed_scoped(
             placeholders.push(format!("?{}", params.len()));
         }
         sql.push_str(&format!(" AND e.kind IN ({})", placeholders.join(", ")));
+    }
+    let author = &query.author;
+    if let Some(member) = &author.member {
+        params.push(Value::Text(member.clone()));
+        sql.push_str(&format!(" AND e.member_id = ?{}", params.len()));
+    }
+    if let Some(agent) = &author.agent {
+        params.push(Value::Text(agent.clone()));
+        sql.push_str(&format!(" AND e.agent = ?{}", params.len()));
+    }
+    if let Some(kind) = author.kind {
+        params.push(Value::Text(kind.as_str().to_string()));
+        sql.push_str(&format!(" AND e.author_kind = ?{}", params.len()));
+    }
+    if let Some(label) = &author.label {
+        params.push(Value::Text(label.clone()));
+        sql.push_str(&format!(
+            " AND e.author_kind = 'legacy' AND e.actor = ?{}",
+            params.len()
+        ));
     }
     if !query.include_audit {
         params.push(Value::Text(AUDIT_KIND.to_string()));
@@ -1527,7 +1700,22 @@ fn event_from_row(row: &Row) -> Result<Event> {
         needs_action,
         created_at: required_text(row, 8)?,
         inbox_status: text_at(row, 9)?,
+        author: author_at(row, 10, 3)?.view(text_at(row, 15)?.as_deref()),
+        origin: text_at(row, 14)?,
     })
+}
+
+/// The author record of a row whose author columns start at `first`
+/// (`author_kind, member_id, agent, session_id`), with its `actor` column at
+/// `actor`.
+pub(crate) fn author_at(row: &Row, first: usize, actor: usize) -> Result<crate::author::Author> {
+    Ok(crate::author::Author::from_columns(
+        text_at(row, first)?.as_deref(),
+        text_at(row, first + 1)?.as_deref(),
+        text_at(row, first + 2)?.as_deref(),
+        text_at(row, first + 3)?.as_deref(),
+        &text_at(row, actor)?.unwrap_or_default(),
+    ))
 }
 
 fn required_text(row: &Row, index: usize) -> Result<String> {
@@ -1563,8 +1751,8 @@ pub async fn feed_cursor(
     project_id: &str,
     key: &crate::author::ParticipantKey,
 ) -> Result<Option<String>> {
-    let _ = (db, project_id, key);
-    Err(super::unbuilt("events::feed_cursor"))
+    let conn = super::connect(db)?;
+    feed_cursor_on(&conn, project_id, key).await
 }
 
 /// Move a participant's feed cursor from `from` to `to`. False when another
@@ -1576,6 +1764,27 @@ pub async fn advance_feed_cursor(
     from: Option<&str>,
     to: &str,
 ) -> Result<bool> {
-    let _ = (db, project_id, key, from, to);
-    Err(super::unbuilt("events::advance_feed_cursor"))
+    let tx = super::begin_write(db).await?;
+    let current = feed_cursor_on(&tx, project_id, key).await?;
+    if current.as_deref() != from {
+        return Ok(false);
+    }
+    if from.is_some_and(|from| to <= from) {
+        return Ok(true);
+    }
+    tx.execute(
+        "INSERT OR REPLACE INTO feed_cursors(project_id, member_id, agent, last_seen_event_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        vec![
+            Value::Text(project_id.to_string()),
+            Value::Text(key.member.clone()),
+            Value::Text(key.agent.clone()),
+            Value::Text(to.to_string()),
+            Value::Text(crate::store::now_rfc3339()),
+        ],
+    )
+    .await
+    .map_err(engine)?;
+    tx.commit().await.map_err(engine)?;
+    Ok(true)
 }

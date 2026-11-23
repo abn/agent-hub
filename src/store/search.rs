@@ -134,6 +134,13 @@ pub struct SearchHit {
     pub session_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_status: Option<String>,
+    /// For a feed or artifact hit, the author of the row it found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author: Option<crate::author::AuthorView>,
+    /// For a feed or artifact hit, `hub` when the hub wrote the row; absent
+    /// for a call.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// The corpus columns a hit is built from, in the order `hit_from_row` reads.
@@ -287,13 +294,15 @@ async fn enrich(conn: &Connection, hits: &mut [SearchHit]) -> Result<()> {
 
     let events = related(
         conn,
-        "SELECT id, project_id, kind, actor, summary, payload FROM events WHERE id IN",
+        "SELECT id, project_id, kind, actor, summary, payload,
+                author_kind, member_id, agent, session_id, origin FROM events WHERE id IN",
         ids_of(hits, "feed", |hit| Some(hit.ref_id.as_str())),
     )
     .await?;
     let artifacts = related(
         conn,
-        "SELECT id, project_id, current_ver, size_bytes FROM artifacts WHERE id IN",
+        "SELECT id, project_id, current_ver, size_bytes,
+                author_kind, member_id, agent, session_id, actor, origin FROM artifacts WHERE id IN",
         ids_of(hits, "artifact", |hit| Some(hit.ref_id.as_str())),
     )
     .await?;
@@ -318,12 +327,16 @@ async fn enrich(conn: &Connection, hits: &mut [SearchHit]) -> Result<()> {
                     let summary = row.text(2);
                     let body = row.text(3).and_then(|payload| written_body(&payload));
                     hit.snippet = snippet(summary.as_deref(), body.as_deref().unwrap_or(""));
+                    hit.author = Some(row.author(4, 1));
+                    hit.origin = row.text(8);
                 }
             }
             "artifact" => {
                 if let Some(row) = own(artifacts.get(&hit.ref_id), &hit.project_id) {
                     hit.version = row.integer(0);
                     hit.size_bytes = row.integer(1);
+                    hit.author = Some(row.author(2, 6));
+                    hit.origin = row.text(7);
                 }
             }
             "brain" => {
@@ -366,6 +379,19 @@ impl Related {
             Some(Value::Text(text)) => Some(text.clone()),
             _ => None,
         }
+    }
+
+    /// The author record from four columns (`author_kind, member_id, agent,
+    /// session_id`) starting at `first`, with the `actor` column at `actor`.
+    fn author(&self, first: usize, actor: usize) -> crate::author::AuthorView {
+        crate::author::Author::from_columns(
+            self.text(first).as_deref(),
+            self.text(first + 1).as_deref(),
+            self.text(first + 2).as_deref(),
+            self.text(first + 3).as_deref(),
+            &self.text(actor).unwrap_or_default(),
+        )
+        .view(None)
     }
 
     fn integer(&self, at: usize) -> Option<i64> {
@@ -543,6 +569,8 @@ fn hit_from_row(row: &Row) -> Result<SearchHit> {
         size_bytes: None,
         session_name: None,
         session_status: None,
+        author: None,
+        origin: None,
     })
 }
 
