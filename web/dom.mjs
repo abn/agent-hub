@@ -196,7 +196,7 @@ export function groupedEvents(events, row) {
 
 // One persistent, visually hidden polite region tells a screen reader what
 // the glyph's change says to the eye.
-function announce(text) {
+function copyStatusRegion() {
   let region = document.getElementById("copy-status");
   if (!region) {
     region = document.createElement("div");
@@ -206,6 +206,15 @@ function announce(text) {
     region.setAttribute("aria-live", "polite");
     document.body.append(region);
   }
+  return region;
+}
+
+// Mounted at startup: a live region added at the moment of the first message is
+// often not announced, so the region exists before anything is copied.
+if (typeof document !== "undefined" && document.body) copyStatusRegion();
+
+function announce(text) {
+  const region = copyStatusRegion();
   region.textContent = "";
   requestAnimationFrame(() => { region.textContent = text; });
 }

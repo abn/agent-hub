@@ -367,14 +367,12 @@ test("a Tab walk over a project feed shows one ring per stop", async ({ hub, pag
   for (const theme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme: theme });
     await page.evaluate(() => document.activeElement?.blur());
+    expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
     const stops = [];
+    // Focus starts wherever the route left it, so the walk runs until it has
+    // gone round the page: it ends at the second wrap to the document.
     let wraps = 0;
-    const first = await page.evaluate(() => {
-      document.body.dataset.walkStart = "1";
-      return document.activeElement === document.body;
-    });
-    expect(first).toBe(true);
-    for (let i = 0; i < 400; i += 1) {
+    for (let i = 0; i < 400 && wraps < 2; i += 1) {
       await page.keyboard.press("Tab");
       const stop = await page.evaluate(() => {
         const root = getComputedStyle(document.documentElement);
@@ -386,30 +384,34 @@ test("a Tab walk over a project feed shows one ring per stop", async ({ hub, pag
         const active = document.activeElement;
         if (!active || active === document.body || active === document.documentElement) return { wrapped: true };
         // A ring is a spread shadow with no offset, or the splitter's accent
-        // bar; an offset edge such as the rail's current mark is not one.
-        const ringed = new RegExp(`${rgb.replace(/[()]/g, "\\$&")} 0px 0px 0px \\d+px`);
-        const rings = [...document.querySelectorAll("body *")]
-          .filter((el) => el.getClientRects().length && (ringed.test(getComputedStyle(el).boxShadow) || getComputedStyle(el).backgroundImage.includes(rgb)))
-          .map(describe);
+        // bar; an offset edge such as the rail's current mark is not one. Every
+        // shadow layer and every opaque outline counts, so two rings drawn by
+        // one element are two.
+        const spread = new RegExp(`${rgb.replace(/[()]/g, "\\$&")} 0px 0px 0px \\d+px`, "g");
+        const layers = [];
+        for (const el of document.querySelectorAll("body *")) {
+          if (!el.getClientRects().length) continue;
+          const cs = getComputedStyle(el);
+          const n = (cs.boxShadow.match(spread) || []).length + (cs.backgroundImage.includes(rgb) ? 1 : 0);
+          for (let k = 0; k < n; k += 1) layers.push(`${describe(el)} shadow`);
+          const outline = cs.outlineStyle !== "none" && parseFloat(cs.outlineWidth) > 0 && !/,\s*0\)$/.test(cs.outlineColor) && cs.outlineColor !== "transparent";
+          if (outline) layers.push(`${describe(el)} outline`);
+        }
         const label = `${describe(active)} ${active.getAttribute("aria-current") || active.getAttribute("aria-selected") || ""}`;
-        return { wrapped: false, visible: active.matches(":focus-visible"), active: label, rings };
+        return { wrapped: false, visible: active.matches(":focus-visible"), active: label, rings: layers };
       });
-      // Focus starts wherever the route left it, so the walk runs until it has
-      // gone round the page once: it ends at the second wrap to the document.
-      if (stop.wrapped) {
-        wraps += 1;
-        if (wraps === 2) break;
-        continue;
-      }
-      if (stop.visible) stops.push(stop);
+      if (stop.wrapped) wraps += 1;
+      else stops.push(stop);
     }
+    expect(wraps, `${theme}: focus never completed a round of the page`).toBe(2);
     const names = stops.map((stop) => stop.active).join("\n");
     expect(names, `${theme}: the walk never met the current rail item`).toMatch(/rail-item[^\n]* (page|true)/);
     expect(names, `${theme}: the walk never met a selected segment`).toMatch(/^a (true|page)$/m);
     expect(names, `${theme}: the walk never met a feed link`).toMatch(/feed-link/);
     expect(stops.length, `${theme}: the walk reached no control`).toBeGreaterThan(3);
-    for (const stop of stops) {
-      expect(stop.rings, `${theme}: ${stop.active} shows ${stop.rings.length} rings`).toHaveLength(1);
-    }
+    const unseen = stops.filter((stop) => !stop.visible).map((stop) => stop.active);
+    expect(unseen, `${theme}: stops focused without :focus-visible`).toEqual([]);
+    const doubled = stops.filter((stop) => stop.rings.length !== 1).map((stop) => `${stop.active}: ${stop.rings.join(" + ") || "none"}`);
+    expect(doubled, `${theme}: stops that do not show exactly one ring`).toEqual([]);
   }
 });
