@@ -7,11 +7,15 @@
 
 use std::path::PathBuf;
 
-use agent_hub::client::hook::input::{Event, Harness};
+use agent_hub::client::Failure;
+use agent_hub::client::hook::child::{self, Starter};
+use agent_hub::client::hook::input::{self, Event, Harness};
 use agent_hub::client::hook::render::{
     ContextInput, Item, Output, WakeMode, context_block, notices, wire,
 };
 use agent_hub::client::hook::resolve::{ResolveInput, resolve_context};
+use agent_hub::client::hook::session_input;
+use agent_hub::client::hook::state::State;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -171,4 +175,109 @@ fn claude_fixtures() {
 #[test]
 fn antigravity_fixtures() {
     wire_family("antigravity", 6);
+}
+
+#[test]
+fn pretool_fixtures() {
+    let cases = family("pretool");
+    assert!(cases.len() >= 10, "found {} pretool cases", cases.len());
+    for case in cases {
+        let state: State = serde_json::from_value(case.input["state"].clone())
+            .unwrap_or_else(|err| panic!("{}: state: {err}", case.name));
+        let stdin = case.input["stdin"].to_string();
+        let parsed = input::parse(Harness::Claude, &stdin);
+        let output = Output {
+            updated_input: session_input(&state, &parsed),
+            ..Output::default()
+        };
+        let printed = wire(Harness::Claude, Event::PreToolUse, &output);
+        let got: Value = serde_json::from_str(&printed)
+            .unwrap_or_else(|err| panic!("{}: stdout is JSON ({err}): {printed:?}", case.name));
+        assert_eq!(case.expected["exit_code"], 0, "{}: exit code", case.name);
+        assert_eq!(got, case.expected["stdout_json"], "{}", case.name);
+        assert!(
+            got.pointer("/hookSpecificOutput/permissionDecision")
+                .is_none(),
+            "{}: the hook never decides the permission",
+            case.name
+        );
+    }
+}
+
+/// Answers `session_start` from the replies a fixture recorded, and notes each
+/// call.
+struct Recorded {
+    replies: std::vec::IntoIter<Value>,
+    calls: Vec<Value>,
+}
+
+impl Starter for Recorded {
+    async fn start(&mut self, session_name: &str, exclusive: bool) -> Result<Value, Failure> {
+        self.calls
+            .push(serde_json::json!({"session_name": session_name, "exclusive": exclusive}));
+        let reply = self
+            .replies
+            .next()
+            .expect("a reply is recorded for the call");
+        match (reply.get("ok"), reply.get("error")) {
+            (Some(ok), _) => Ok(ok.clone()),
+            (_, Some(error)) => Err(Failure::Tool(error.clone())),
+            _ => panic!("a reply is ok or error: {reply}"),
+        }
+    }
+}
+
+#[test]
+fn subagent_fixtures() {
+    let cases = family("subagent");
+    assert!(cases.len() >= 10, "found {} subagent cases", cases.len());
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("a runtime");
+    for case in cases {
+        let text = |key: &str| case.input[key].as_str().map(str::to_string);
+        let replies = case.input["replies"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let mut starter = Recorded {
+            replies: replies.into_iter(),
+            calls: Vec::new(),
+        };
+        let parent = text("parent").expect("a parent");
+        let agent_id = text("agent_id").expect("an agent id");
+        let started = runtime.block_on(async {
+            match text("mapped") {
+                Some(name) => {
+                    let known = agent_hub::client::hook::state::Child {
+                        name,
+                        session_id: None,
+                    };
+                    child::resume(&mut starter, &known).await
+                }
+                None => {
+                    child::start_new(
+                        &mut starter,
+                        &parent,
+                        text("agent_type").as_deref(),
+                        &agent_id,
+                    )
+                    .await
+                }
+            }
+        });
+        assert_eq!(
+            Value::Array(starter.calls),
+            case.expected["calls"],
+            "{}: calls",
+            case.name
+        );
+        let got = started.ok().map(|child| Value::String(child.name));
+        assert_eq!(
+            got.unwrap_or(Value::Null),
+            case.expected["child"],
+            "{}: child",
+            case.name
+        );
+    }
 }

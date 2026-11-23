@@ -16,7 +16,7 @@ mod hook_support;
 
 use common::hub::{ADMIN_TOKEN, PROJECT};
 use common::wire::rest;
-use hook_support::{ChildGuard, Rig, claude_context, printed_json, spawn_with_stdin};
+use hook_support::{CLAUDE, ChildGuard, Rig, claude_context, printed_json, spawn_with_stdin};
 
 const SESSION: &str = "7c1e0d52-1111-2222-3333-444455556666";
 
@@ -182,7 +182,7 @@ fn an_ambient_item_does_not_wake_the_watcher_and_stays_pending_for_the_prompt() 
         "signal_append",
         &json!({"project_id": PROJECT, "kind": "signal", "summary": "build finished"}),
         &poster,
-        "claude",
+        CLAUDE,
     );
     let (output, elapsed) = child.finish(Duration::from_secs(10));
 
@@ -256,7 +256,7 @@ fn all_wakes_on_an_ambient_item_and_never_does_not_watch() {
         "signal_append",
         &json!({"project_id": PROJECT, "kind": "signal", "summary": "deploy done"}),
         &poster,
-        "claude",
+        CLAUDE,
     );
     let (output, _) = all.finish(Duration::from_secs(8));
     assert_eq!(output.status.code(), Some(2), "{output:?}");
@@ -521,7 +521,10 @@ fn a_watcher_whose_hub_session_has_ended_stops_and_forgets_it() {
         .as_str()
         .expect("a hub session id")
         .to_string();
-    rig.call_as_claude("session_end", &json!({"session_id": hub_session}));
+    rig.call_as_claude(
+        "session_end",
+        &json!({"session": {"session_id": hub_session}}),
+    );
 
     let child = watch(&rig, &["--max-seconds", "30"]);
     let (output, took) = child.finish(Duration::from_secs(8));

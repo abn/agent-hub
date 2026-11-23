@@ -3,10 +3,7 @@
     "agent-hub": {
       "type": "http",
       "url": "${user_config.hub_url}/mcp",
-      "headers": {
-        "Authorization": "Bearer ${user_config.hub_token}",
-        "X-Agent-Id": "${user_config.agent_name}"
-      }
+      "headersHelper": "${CLAUDE_PLUGIN_ROOT}/bin/agent-hub-launcher token --headers --agent claude-code"
     }
   }
 }

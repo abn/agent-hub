@@ -1,0 +1,54 @@
+{
+  "name": "pretool-subagent-gets-its-child",
+  "input": {
+    "state": {
+      "project_id": "homelab",
+      "session_name": "feat-x",
+      "session_id": "01J8Z3K4M5N6P7Q8R9S0T1V2W3",
+      "member": "laptop",
+      "agent": "claude-code",
+      "prompts": 1,
+      "children": {
+        "af9c57a04aa308f01": {
+          "name": "feat-x/general-purpose-af9c57a0",
+          "session_id": "01J8Z3K9A1B2C3D4E5F6G7H8J9"
+        }
+      }
+    },
+    "stdin": {
+      "session_id": "70ce4ccd-5b1e-4c6f-9a2d-3e8f7a1b0c94",
+      "prompt_id": "89e28a63-1d4c-4f7b-b6a0-52c9d8e3f1a7",
+      "permission_mode": "default",
+      "agent_id": "af9c57a04aa308f01",
+      "agent_type": "general-purpose",
+      "effort": {
+        "level": "low"
+      },
+      "hook_event_name": "PreToolUse",
+      "tool_name": "mcp__plugin_agent-hub_agent-hub__feed_read",
+      "tool_input": {
+        "project_id": "homelab"
+      },
+      "tool_use_id": "toolu_01LaQ8mVx2nRzY5pK7tWc3Hd",
+      "mcp_server": {
+        "name": "plugin:agent-hub:agent-hub",
+        "source": "plugin"
+      }
+    }
+  },
+  "expected": {
+    "stdout_json": {
+      "hookSpecificOutput": {
+        "hookEventName": "PreToolUse",
+        "updatedInput": {
+          "project_id": "homelab",
+          "session": {
+            "project_id": "homelab",
+            "name": "feat-x/general-purpose-af9c57a0"
+          }
+        }
+      }
+    },
+    "exit_code": 0
+  }
+}

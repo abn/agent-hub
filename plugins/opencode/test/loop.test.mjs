@@ -22,7 +22,7 @@ const until = async (check, ms = 2000) => {
 async function setup({ wake = "direct", clock = () => 1_000_000, deliverFails = false } = {}) {
   fake = await startFakeHub({ pollMs: 40 });
   controller = new AbortController();
-  const hub = createHub({ url: fake.url, token: "t", agentName: "opencode" });
+  const hub = createHub({ url: fake.url, token: "t" });
   const store = {};
   const delivered = [];
   const loop = createLoop({

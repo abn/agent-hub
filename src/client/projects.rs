@@ -190,7 +190,7 @@ fn refusal(text: &str, status: StatusCode, endpoint: &str) -> Failure {
             "code": code,
             "message": message,
             "retryable": code == "unavailable",
-            "details": {},
+            "details": body.get("details").filter(|d| d.is_object()).cloned().unwrap_or_else(|| json!({})),
         }
     });
     match code {

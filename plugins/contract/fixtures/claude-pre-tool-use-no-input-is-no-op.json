@@ -1,0 +1,15 @@
+{
+  "name": "claude-pre-tool-use-no-input-is-no-op",
+  "input": {
+    "harness": "claude",
+    "event": "pre-tool-use",
+    "output": {
+      "context": "ignored",
+      "compaction_instructions": null
+    }
+  },
+  "expected": {
+    "stdout_json": {},
+    "exit_code": 0
+  }
+}

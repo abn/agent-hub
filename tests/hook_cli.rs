@@ -19,7 +19,9 @@ mod hook_support;
 
 use common::hub::{AGENT, PROJECT};
 use common::temp::TempDir;
-use hook_support::{Rig, claude_context, printed_json, run_with_stdin, spawn_holding_stdin};
+use hook_support::{
+    CLAUDE, Rig, claude_context, printed_json, run_with_stdin, spawn_holding_stdin, today,
+};
 
 /// What a failure case does to the command it runs.
 type Adjust = fn(&mut std::process::Command);
@@ -54,17 +56,18 @@ fn session_start_prints_the_block_and_keeps_state_under_the_state_directory() {
 
     assert!(block.starts_with("<agent-hub>\n"), "{block}");
     assert!(block.ends_with("\n</agent-hub>"), "{block}");
+    let name = format!("claude-code-{}", today());
     assert!(
-        block.contains(&format!("project {PROJECT} | session claude-3f9a1c27 (")),
+        block.contains(&format!("project {PROJECT} | session {name} (")),
         "the header names the project and the session: {block}"
     );
     assert!(
-        block.contains(&format!("| you are {AGENT}/claude-code")),
-        "the agent is recorded under the harness: {block}"
+        block.contains(&format!("| you are {AGENT} \u{b7} claude-code")),
+        "the member and the agent the hub knows the hooks by: {block}"
     );
     assert!(
         block.contains(&format!(
-            "session_start(project_id: \"{PROJECT}\", session_name: \"claude-3f9a1c27\")"
+            "Pass session: {{\"project_id\": \"{PROJECT}\", \"name\": \"{name}\"}} on hub calls (the plugin adds it)."
         )),
         "{block}"
     );
@@ -79,7 +82,7 @@ fn session_start_prints_the_block_and_keeps_state_under_the_state_directory() {
 
     let state = rig.state("claude", SESSION);
     assert_eq!(state["project_id"], PROJECT);
-    assert_eq!(state["session_name"], "claude-3f9a1c27");
+    assert_eq!(state["session_name"], name.as_str());
     let id = state["session_id"].as_str().expect("a hub session id");
     assert!(block.contains(&format!("({id})")), "{block}");
     assert!(
@@ -159,7 +162,9 @@ fn every_hub_failure_still_prints_valid_output_and_exits_zero() {
     let rig = Rig::start("hook-failures");
     start_claude(&rig);
 
-    // The hub is not there, the token is wrong, and nothing is configured.
+    // The hub is not there, the token is wrong, and nothing is configured. A
+    // failure the hub or the network explains is said to the model in one line;
+    // nothing configured has nothing to say it to.
     let dead: Adjust = |command| {
         command.env("HUB_URL", "http://127.0.0.1:1");
     };
@@ -169,13 +174,21 @@ fn every_hub_failure_still_prints_valid_output_and_exits_zero() {
     let nothing: Adjust = |command| {
         command.env_remove("HUB_URL").env_remove("HUB_TOKEN");
     };
-    let cases: [(&str, Adjust); 3] = [
-        ("hub down", dead),
-        ("bad token", bad_token),
-        ("no config", nothing),
+    let cases: [(&str, Adjust, Option<&str>); 3] = [
+        (
+            "hub down",
+            dead,
+            Some("<agent-hub>\nHub unreachable; working without it.\n</agent-hub>"),
+        ),
+        (
+            "bad token",
+            bad_token,
+            Some("<agent-hub>\nThe token is not for this hub.\n</agent-hub>"),
+        ),
+        ("no config", nothing, None),
     ];
 
-    for (name, adjust) in cases {
+    for (name, adjust, expected) in cases {
         for (harness, events) in [
             (
                 "claude",
@@ -183,7 +196,9 @@ fn every_hub_failure_still_prints_valid_output_and_exits_zero() {
                     "session-start",
                     "prompt",
                     "pre-compact",
+                    "pre-tool-use",
                     "subagent-start",
+                    "subagent-stop",
                     "session-end",
                 ],
             ),
@@ -193,7 +208,9 @@ fn every_hub_failure_still_prints_valid_output_and_exits_zero() {
                     "session-start",
                     "prompt",
                     "pre-compact",
+                    "pre-tool-use",
                     "subagent-start",
+                    "subagent-stop",
                     "session-end",
                 ],
             ),
@@ -226,18 +243,16 @@ fn every_hub_failure_still_prints_valid_output_and_exits_zero() {
                     });
                     assert!(parsed.is_object(), "{name}: {parsed}");
                 }
-                // An Antigravity event the harness never raises answers before
-                // any work, so it has nothing to say on stderr.
                 if event == "prompt" || (event == "session-start" && harness == "claude") {
-                    assert_eq!(
-                        printed_json(&output),
-                        json!({}),
-                        "{name}: {harness} {event} injects nothing it does not have"
-                    );
                     assert!(
                         !String::from_utf8_lossy(&output.stderr).trim().is_empty(),
                         "{name}: {harness} {event} says why on stderr"
                     );
+                }
+                if harness == "claude" && matches!(event, "prompt" | "session-start") {
+                    // What the model reads says why, in the words of the hub's states.
+                    let said = claude_context(&output);
+                    assert_eq!(said.as_deref(), expected, "{name}: {event}");
                 }
             }
         }
@@ -289,7 +304,10 @@ fn antigravity_starts_with_the_full_block_then_a_pointer_with_a_paced_peek() {
         block.contains("Do not call session_brief; this block is the brief."),
         "{block}"
     );
-    assert!(block.contains("session antigravity-9d0c5e1a ("), "{block}");
+    assert!(
+        block.contains(&format!("session antigravity-{} (", today())),
+        "{block}"
+    );
 
     rig.answered_question_as("antigravity", "Ship it?");
     let before = rig.counts();
@@ -298,10 +316,7 @@ fn antigravity_starts_with_the_full_block_then_a_pointer_with_a_paced_peek() {
     let pointer =
         message(&later).unwrap_or_else(|| panic!("a later call gets the pointer: {later:?}"));
     assert!(!pointer.contains("Do not call session_brief"), "{pointer}");
-    assert!(
-        pointer.contains("Bind your hub connection now"),
-        "{pointer}"
-    );
+    assert!(pointer.contains("Pass session: {"), "{pointer}");
     assert!(
         pointer.contains("Pending:\n- [question_answered] answered: Ship it?"),
         "the notice rides on the pointer: {pointer}"
@@ -330,7 +345,7 @@ fn precompact_saved(rig: &Rig, session_id: &str) -> Option<Value> {
             &json!({"store": "session", "path": "/kv/harness/precompact", "session": {"session_id": session_id}})
                 .to_string(),
         ])
-        .env("HUB_AGENT_ID", "claude")
+        .env("HUB_AGENT_ID", CLAUDE)
         .stdin(Stdio::null())
         .output()
         .expect("run the call");
@@ -391,7 +406,8 @@ fn pre_compact_saves_a_transcript_tail_and_asks_the_harness_to_keep_the_session(
     assert_eq!(
         stdout.trim_end_matches('\n'),
         format!(
-            "Keep: hub project {PROJECT}, session claude-3f9a1c27 (id {id}), the current phase and open hub items."
+            "Keep: hub project {PROJECT}, session claude-code-{} (id {id}), the current phase and open hub items.",
+            today()
         ),
         "plain instructions, not JSON"
     );
@@ -481,39 +497,40 @@ fn pre_compact_refuses_a_transcript_outside_the_harness_directory_or_not_a_plain
 }
 
 #[test]
-fn a_subagent_gets_the_parents_session_and_no_session_of_its_own() {
+fn a_subagent_gets_a_child_session_of_its_own_under_the_parents() {
     let rig = Rig::start("hook-subagent");
     start_claude(&rig);
-    let id = rig.state("claude", SESSION)["session_id"]
-        .as_str()
-        .expect("id")
-        .to_string();
-    let before = rig.counts();
+    let parent = format!("claude-code-{}", today());
+    let child = format!("{parent}/explore-af9c57a0");
 
-    // With no hub to reach: the hook needs none.
-    let output = rig.hook_with(
+    let output = rig.hook(
         "claude",
         "subagent-start",
-        &json!({"session_id": SESSION, "cwd": rig.work_dir(), "agent_type": "Explore"}),
-        |command| {
-            command.env_remove("HUB_URL").env_remove("HUB_TOKEN");
-        },
+        &json!({"session_id": SESSION, "cwd": rig.work_dir(),
+                "agent_id": "af9c57a04aa308f01", "agent_type": "Explore"}),
     );
 
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let context = claude_context(&output).expect("context for the subagent");
-    assert!(context.contains(&format!("session {id}")), "{context}");
-    assert!(context.contains("Do not call session_start"), "{context}");
+    assert!(
+        context.starts_with(&format!(
+            "You work in hub session {child} (project {PROJECT})."
+        )),
+        "{context}"
+    );
     assert_eq!(
         printed_json(&output)["hookSpecificOutput"]["hookEventName"],
         "SubagentStart"
     );
-    let after = rig.counts();
-    assert_eq!(after.post, before.post, "no hub session was opened");
+    let listed = rig.call_as_claude("session_list", &json!({"project_id": PROJECT}));
+    assert!(
+        listed.to_string().contains(&child),
+        "the hub holds the child session: {listed}"
+    );
 }
 
 #[test]
-fn session_end_ends_the_hub_session_and_removes_the_state() {
+fn session_end_leaves_the_hub_session_open_and_removes_the_state() {
     let rig = Rig::start("hook-end");
     start_claude(&rig);
     let id = rig.state("claude", SESSION)["session_id"]
@@ -533,15 +550,11 @@ fn session_end_ends_the_hub_session_and_removes_the_state() {
         !rig.state_file("claude", SESSION).exists(),
         "the state is gone"
     );
-    let session = rig.call_as_claude("session_list", &json!({"project_id": PROJECT}));
-    let row = session["sessions"]
-        .as_array()
-        .and_then(|rows| {
-            rows.iter()
-                .find(|row| row["session_id"] == id.as_str() || row["id"] == id.as_str())
-        })
-        .unwrap_or_else(|| panic!("the session is listed: {session}"));
-    assert_eq!(row["status"], "ended", "{row}");
+    assert_eq!(
+        hub_session_status(&rig, &id),
+        "active",
+        "the harness closing is not the work being done: the session is left, not ended"
+    );
 }
 
 #[test]
@@ -565,7 +578,11 @@ fn a_session_resolves_by_branch_and_a_project_by_the_pinned_file() {
             .expect("run git");
         assert!(status.success(), "git {args:?}");
     }
-    std::fs::write(repo.join(".agent-hub"), format!("{PROJECT}\n")).expect("write the pin");
+    std::fs::write(
+        repo.join(".agent-hub.toml"),
+        format!("project = \"{PROJECT}\"\n"),
+    )
+    .expect("write the pin");
 
     let output = rig.hook_with(
         "claude",
@@ -587,115 +604,184 @@ fn a_session_resolves_by_branch_and_a_project_by_the_pinned_file() {
     );
 }
 
+/// An environment lookup over `pairs`, with `HUB_CONFIG` naming `config`.
+fn lookup(
+    config: &std::path::Path,
+    pairs: Vec<(&'static str, &'static str)>,
+) -> impl Fn(&str) -> Option<String> {
+    let config = config.to_string_lossy().into_owned();
+    move |key: &str| -> Option<String> {
+        if key == "HUB_CONFIG" {
+            return Some(config.clone());
+        }
+        pairs
+            .iter()
+            .find(|(name, _)| *name == key)
+            .map(|(_, value)| (*value).to_string())
+    }
+}
+
 #[test]
-fn settings_resolve_env_then_plugin_options_then_the_config_file_and_a_token_stays_with_its_url() {
+fn settings_come_from_the_credential_resolver_and_a_token_stays_with_its_url() {
+    use agent_hub::client::credential::State;
     let dir = TempDir::new("hook-settings");
     let config = dir.join("config.toml");
     std::fs::write(
         &config,
-        "[client]\nurl = \"http://file.example\"\ntoken = \"file-token\"\nagent_id = \"from-file\"\n",
+        "[client]\nurl = \"http://file.example\"\ntoken = \"file-token\"\n",
     )
     .expect("write the config");
-    let lookup = |pairs: Vec<(&'static str, &'static str)>| {
-        let config = config.to_string_lossy().into_owned();
-        move |key: &str| -> Option<String> {
-            if key == "HUB_CONFIG" {
-                return Some(config.clone());
-            }
-            pairs
-                .iter()
-                .find(|(name, _)| *name == key)
-                .map(|(_, value)| (*value).to_string())
-        }
-    };
 
-    let env = lookup(vec![
-        ("HUB_URL", "http://env.example/"),
-        ("HUB_TOKEN", "env-token"),
-    ]);
-    let settings = resolve_settings(Harness::Claude, &env).expect("settings");
+    let env = lookup(
+        &config,
+        vec![
+            ("HUB_URL", "http://env.example/"),
+            ("HUB_TOKEN", "env-token"),
+        ],
+    );
+    let settings = resolve_settings(Harness::Claude, &env, "").expect("settings");
     assert_eq!(
         (
             settings.url.as_str(),
             settings.token.as_deref(),
-            settings.agent_name.as_str()
+            settings.state
         ),
-        ("http://env.example", Some("env-token"), "claude"),
-        "the environment wins, without a trailing slash, and the file names no agent"
+        ("http://env.example", Some("env-token"), State::Ok),
+        "the environment wins, without a trailing slash"
     );
+    assert_eq!(settings.agent, "claude-code");
 
-    let options = lookup(vec![
-        ("CLAUDE_PLUGIN_OPTION_HUB_URL", "http://option.example"),
-        ("CLAUDE_PLUGIN_OPTION_HUB_TOKEN", "option-token"),
-        ("CLAUDE_PLUGIN_OPTION_AGENT_NAME", "named"),
-    ]);
-    let settings = resolve_settings(Harness::Claude, &options).expect("settings");
-    assert_eq!(
-        (
-            settings.url.as_str(),
-            settings.token.as_deref(),
-            settings.agent_name.as_str()
-        ),
-        ("http://option.example", Some("option-token"), "named")
+    let options = lookup(
+        &config,
+        vec![
+            ("CLAUDE_PLUGIN_OPTION_HUB_URL", "http://option.example"),
+            ("HUB_URL", "http://env.example"),
+            ("HUB_TOKEN", "env-token"),
+        ],
     );
-    let settings = resolve_settings(Harness::Antigravity, &options).expect("settings");
+    let settings = resolve_settings(Harness::Claude, &options, "").expect("settings");
     assert_eq!(
-        settings.url, "http://file.example",
+        settings.url, "http://option.example",
+        "the plugin's option pins the hub"
+    );
+    assert_eq!(
+        (settings.token, settings.state),
+        (None, State::Tokenless),
+        "a token written for another url is never sent to this one"
+    );
+    let settings = resolve_settings(Harness::Antigravity, &options, "").expect("settings");
+    assert_eq!(
+        (settings.url.as_str(), settings.agent.as_str()),
+        ("http://env.example", "antigravity"),
         "plugin options are Claude's alone"
     );
-    assert_eq!(settings.token.as_deref(), Some("file-token"));
+
+    let file = lookup(&config, vec![]);
+    let settings = resolve_settings(Harness::Claude, &file, "").expect("settings");
     assert_eq!(
-        settings.agent_name, "antigravity",
-        "the Antigravity plugin's MCP entry fixes the name, so a config file's agent_id is not read"
+        (settings.url.as_str(), settings.token.as_deref()),
+        ("http://file.example", Some("file-token")),
+        "the config file's own token goes with its own url"
     );
 
-    let mixed = lookup(vec![
-        ("HUB_URL", "http://env.example"),
-        ("CLAUDE_PLUGIN_OPTION_HUB_TOKEN", "option-token"),
-    ]);
-    let settings = resolve_settings(Harness::Claude, &mixed).expect("settings");
-    assert_eq!(
-        settings.token, None,
-        "a token from another layer is never sent to this url"
-    );
-
-    let empty = lookup(vec![("HUB_URL", ""), ("HUB_TOKEN", "")]);
-    let settings = resolve_settings(Harness::Claude, &empty).expect("settings");
+    let empty = lookup(&config, vec![("HUB_URL", ""), ("HUB_TOKEN", "")]);
+    let settings = resolve_settings(Harness::Claude, &empty, "").expect("settings");
     assert_eq!(
         settings.url, "http://file.example",
         "an empty value is unset"
     );
-    assert_eq!(settings.agent_name, "claude");
-    let antigravity = resolve_settings(Harness::Antigravity, &empty).expect("settings");
-    assert_eq!(antigravity.agent_name, "antigravity");
-    assert_eq!(antigravity.reported_name.as_deref(), Some("antigravity"));
-    assert_eq!(antigravity.name_note(), None);
+
+    let named = lookup(
+        &config,
+        vec![
+            ("HUB_AGENT_ID", "from-env"),
+            ("CLAUDE_PLUGIN_OPTION_AGENT_NAME", "named"),
+        ],
+    );
+    assert_eq!(
+        resolve_settings(Harness::Claude, &named, "")
+            .expect("settings")
+            .agent,
+        "claude-code",
+        "the hooks and the MCP connection are one agent, which no setting renames"
+    );
+    assert_eq!(
+        resolve_settings(Harness::Antigravity, &named, "")
+            .expect("settings")
+            .agent,
+        "antigravity"
+    );
 
     let bare = |key: &str| {
         (key == "HUB_CONFIG").then(|| dir.join("missing.toml").to_string_lossy().into_owned())
     };
     assert!(
-        resolve_settings(Harness::Claude, &bare).is_err(),
+        resolve_settings(Harness::Claude, &bare, "").is_err(),
         "no url names no hub"
     );
+}
 
-    let plain = dir.join("plain.toml");
-    std::fs::write(&plain, "[client]\nurl = \"http://plain.example\"\n").expect("write the config");
-    let plain_path = plain.to_string_lossy().into_owned();
-    let unnamed = |key: &str| (key == "HUB_CONFIG").then(|| plain_path.clone());
-    assert_eq!(
-        resolve_settings(Harness::Claude, &unnamed)
-            .expect("settings")
-            .agent_name,
-        "claude",
-        "the harness names the agent by default"
+#[test]
+fn the_member_and_the_trust_a_project_file_needs_are_decided_by_the_resolver() {
+    use agent_hub::client::credential::State;
+    let dir = TempDir::new("hook-settings-members");
+    let repo = dir.join("repo");
+    std::fs::create_dir_all(repo.join(".git")).expect("a git marker");
+    let config = dir.join("config.toml");
+    let entry = |member: &str| {
+        format!(
+            "[[credential]]\nurl = \"http://hub.example\"\nmember = \"{member}\"\ntoken = \"t-{member}\"\n"
+        )
+    };
+    std::fs::write(&config, format!("{}\n{}", entry("laptop"), entry("desk"))).expect("write");
+    let cwd = repo.to_string_lossy().into_owned();
+
+    let none = lookup(&config, vec![]);
+    let settings = resolve_settings(Harness::Claude, &none, &cwd).expect("settings");
+    assert_eq!(settings.state, State::SeveralMembers, "{settings:?}");
+    assert!(
+        settings
+            .refusal()
+            .expect("a line")
+            .starts_with("Several members for http://hub.example;")
     );
+
+    let member = lookup(&config, vec![("HUB_MEMBER", "desk")]);
+    let settings = resolve_settings(Harness::Claude, &member, &cwd).expect("settings");
     assert_eq!(
-        resolve_settings(Harness::Antigravity, &unnamed)
-            .expect("settings")
-            .agent_name,
-        "antigravity"
+        (
+            settings.member.as_deref(),
+            settings.token.as_deref(),
+            settings.state
+        ),
+        (Some("desk"), Some("t-desk"), State::Ok)
     );
+
+    std::fs::write(repo.join(".agent-hub.toml"), "member = \"laptop\"\n").expect("project file");
+    let asked = resolve_settings(Harness::Claude, &none, &cwd).expect("settings");
+    assert_eq!(
+        (asked.token.as_deref(), asked.state),
+        (None, State::NeedsTrust)
+    );
+
+    std::fs::write(
+        &config,
+        format!(
+            "{}\n[trust]\npairings = [ {{ path = \"{}\", url = \"http://hub.example\", member = \"laptop\" }} ]\n",
+            entry("laptop"),
+            repo.display()
+        ),
+    )
+    .expect("write");
+    let trusted = resolve_settings(Harness::Claude, &none, &cwd).expect("settings");
+    assert_eq!(
+        (trusted.token.as_deref(), trusted.state),
+        (Some("t-laptop"), State::Ok)
+    );
+
+    std::fs::write(repo.join(".agent-hub.toml"), "token = \"x\"\n").expect("project file");
+    let error = resolve_settings(Harness::Claude, &none, &cwd).expect_err("a shared token file");
+    assert!(error.contains("must not hold a token"), "{error}");
 }
 
 #[cfg(unix)]
@@ -802,7 +888,7 @@ fn a_git_that_never_answers_is_killed_and_the_start_still_finishes() {
 }
 
 #[test]
-fn a_pin_file_that_is_a_fifo_is_not_waited_on_and_a_long_one_is_cut() {
+fn a_project_file_that_is_a_fifo_is_not_waited_on_and_a_long_one_is_cut() {
     let rig = Rig::start("hook-pin");
     let repo = rig.work_dir().join("repo");
     std::fs::create_dir_all(&repo).expect("the repository directory");
@@ -819,7 +905,7 @@ fn a_pin_file_that_is_a_fifo_is_not_waited_on_and_a_long_one_is_cut() {
     };
     git(&["init", "-q", "-b", "main"]);
     let made = std::process::Command::new("mkfifo")
-        .arg(repo.join(".agent-hub"))
+        .arg(repo.join(".agent-hub.toml"))
         .status()
         .expect("run mkfifo");
     assert!(made.success(), "mkfifo");
@@ -841,10 +927,10 @@ fn a_pin_file_that_is_a_fifo_is_not_waited_on_and_a_long_one_is_cut() {
     );
     assert!(block.contains("no project matched"), "{block}");
 
-    std::fs::remove_file(repo.join(".agent-hub")).expect("remove the fifo");
-    let mut long = format!("{PROJECT}\n");
+    std::fs::remove_file(repo.join(".agent-hub.toml")).expect("remove the fifo");
+    let mut long = format!("project = \"{PROJECT}\"\n");
     long.push_str(&"#".repeat(1 << 20));
-    std::fs::write(repo.join(".agent-hub"), long).expect("write the pin");
+    std::fs::write(repo.join(".agent-hub.toml"), long).expect("write the pin");
     let output = rig.hook_with(
         "claude",
         "session-start",
@@ -856,7 +942,7 @@ fn a_pin_file_that_is_a_fifo_is_not_waited_on_and_a_long_one_is_cut() {
     let block = claude_context(&output).unwrap_or_else(|| panic!("a block: {output:?}"));
     assert!(
         block.contains(&format!("project {PROJECT} |")),
-        "the first line of a long file still pins: {block}"
+        "the start of a long file still pins: {block}"
     );
 }
 
@@ -901,7 +987,7 @@ fn state_changes_from_many_processes_of_one_session_are_serialised() {
 }
 
 #[test]
-fn the_first_config_source_with_a_url_wins_with_its_own_token_and_a_broken_file_is_skipped() {
+fn a_broken_config_file_is_skipped_and_a_token_stays_with_its_own_url() {
     let dir = TempDir::new("hook-config-sources");
     let user_dir = dir.join("xdg/agent-hub");
     std::fs::create_dir_all(&user_dir).expect("the user config directory");
@@ -930,7 +1016,7 @@ fn the_first_config_source_with_a_url_wins_with_its_own_token_and_a_broken_file_
 
     std::fs::write(&user, "[client\nurl =").expect("write a broken user config");
     let env = lookup(vec![]);
-    let settings = resolve_settings(Harness::Claude, &env).expect("the system file answers");
+    let settings = resolve_settings(Harness::Claude, &env, "").expect("the system file answers");
     assert_eq!(
         (settings.url.as_str(), settings.token.as_deref()),
         ("http://system.example", Some("system-token"))
@@ -940,7 +1026,7 @@ fn the_first_config_source_with_a_url_wins_with_its_own_token_and_a_broken_file_
         ("HUB_URL", "http://env.example".to_string()),
         ("HUB_TOKEN", "env-token".to_string()),
     ]);
-    let settings = resolve_settings(Harness::Claude, &complete).expect("env is complete");
+    let settings = resolve_settings(Harness::Claude, &complete, "").expect("env is complete");
     assert_eq!(
         (settings.url.as_str(), settings.token.as_deref()),
         ("http://env.example", Some("env-token")),
@@ -949,7 +1035,7 @@ fn the_first_config_source_with_a_url_wins_with_its_own_token_and_a_broken_file_
 
     std::fs::write(&user, "[client]\nurl = \"http://user.example\"\n")
         .expect("write the user config");
-    let settings = resolve_settings(Harness::Claude, &env).expect("the user file answers");
+    let settings = resolve_settings(Harness::Claude, &env, "").expect("the user file answers");
     assert_eq!(
         (settings.url.as_str(), settings.token.as_deref()),
         ("http://user.example", None),
@@ -959,14 +1045,14 @@ fn the_first_config_source_with_a_url_wins_with_its_own_token_and_a_broken_file_
     std::fs::remove_file(&user).expect("remove the user config");
     std::fs::remove_file(&system).expect("remove the system config");
     std::fs::write(&system, "[client\n").expect("write a broken system config");
-    let error = resolve_settings(Harness::Claude, &env).expect_err("nothing is configured");
+    let error = resolve_settings(Harness::Claude, &env, "").expect_err("nothing is configured");
     assert!(error.contains("no hub URL configured"), "{error}");
 }
 
 #[test]
 fn a_complete_hook_json_is_used_even_when_the_harness_never_closes_stdin() {
     let rig = Rig::start("hook-open-stdin");
-    let command = rig.command(&["hook", "subagent-start", "--harness", "claude"]);
+    let command = rig.command(&["hook", "session-start", "--harness", "claude"]);
     let (child, mut stdin) = spawn_holding_stdin(command);
     stdin
         .write_all(
@@ -1079,134 +1165,15 @@ fn a_config_file_that_is_not_a_regular_file_is_never_read() {
                 _ => None,
             }
         };
-        sender.send(resolve_settings(Harness::Claude, &env)).ok();
+        sender
+            .send(resolve_settings(Harness::Claude, &env, ""))
+            .ok();
     });
     let settings = receiver
         .recv_timeout(Duration::from_secs(5))
         .expect("resolution did not wait on the FIFO")
         .expect("the environment is complete");
     assert_eq!(settings.url, "http://env.example");
-}
-
-#[test]
-fn claude_plugin_options_win_over_the_environment_and_antigravity_names_itself() {
-    let dir = TempDir::new("hook-settings-order");
-    let config = dir.join("config.toml");
-    std::fs::write(
-        &config,
-        "[client]\nurl = \"http://file.example\"\ntoken = \"file-token\"\nagent_id = \"from-file\"\n",
-    )
-    .expect("write the config");
-    let config = config.to_string_lossy().into_owned();
-    let lookup = |pairs: Vec<(&'static str, &'static str)>| {
-        let config = config.clone();
-        move |key: &str| -> Option<String> {
-            if key == "HUB_CONFIG" {
-                return Some(config.clone());
-            }
-            pairs
-                .iter()
-                .find(|(name, _)| *name == key)
-                .map(|(_, value)| (*value).to_string())
-        }
-    };
-    let shared = vec![
-        ("CLAUDE_PLUGIN_OPTION_HUB_URL", "http://option.example"),
-        ("CLAUDE_PLUGIN_OPTION_HUB_TOKEN", "option-token"),
-        ("CLAUDE_PLUGIN_OPTION_AGENT_NAME", "named"),
-        ("HUB_URL", "http://env.example"),
-        ("HUB_TOKEN", "env-token"),
-        ("HUB_AGENT_ID", "from-env"),
-    ];
-
-    let settings = resolve_settings(Harness::Claude, &lookup(shared.clone())).expect("settings");
-    assert_eq!(
-        (
-            settings.url.as_str(),
-            settings.token.as_deref(),
-            settings.agent_name.as_str()
-        ),
-        ("http://option.example", Some("option-token"), "named"),
-        "the plugin options are what the plugin's MCP entry uses, so they come first"
-    );
-    assert_eq!(settings.name_note(), None);
-
-    let options_unset: Vec<_> = shared
-        .iter()
-        .copied()
-        .filter(|(key, _)| !key.starts_with("CLAUDE_PLUGIN_OPTION"))
-        .collect();
-    let settings = resolve_settings(Harness::Claude, &lookup(options_unset)).expect("settings");
-    assert_eq!(
-        (
-            settings.url.as_str(),
-            settings.token.as_deref(),
-            settings.agent_name.as_str()
-        ),
-        ("http://env.example", Some("env-token"), "from-env"),
-        "the environment applies only where the option is empty"
-    );
-
-    let mut empty_options = shared.clone();
-    for pair in &mut empty_options {
-        if pair.0.starts_with("CLAUDE_PLUGIN_OPTION") {
-            pair.1 = "";
-        }
-    }
-    let settings = resolve_settings(Harness::Claude, &lookup(empty_options)).expect("settings");
-    assert_eq!(
-        (settings.url.as_str(), settings.agent_name.as_str()),
-        ("http://env.example", "from-env"),
-        "an empty option is unset"
-    );
-
-    let settings = resolve_settings(Harness::Antigravity, &lookup(shared)).expect("settings");
-    assert_eq!(
-        settings.agent_name, "from-env",
-        "HUB_AGENT_ID still overrides"
-    );
-    assert_eq!(
-        settings.name_note().as_deref(),
-        Some(
-            "Note: the hooks run as agent name from-env, this harness's MCP connection as antigravity."
-        )
-    );
-}
-
-#[test]
-fn the_block_says_when_the_hooks_run_under_another_name_than_the_mcp_connection() {
-    let rig = Rig::start("hook-name-note");
-    let conversation = "5b6c7d8e-aaaa-bbbb-cccc-0123456789ab";
-    let stdin = json!({"conversationId": conversation, "workspacePaths": [rig.work_dir()], "invocationNum": 0});
-    let block = |output: &std::process::Output| {
-        printed_json(output)
-            .pointer("/injectSteps/0/ephemeralMessage")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| panic!("a block: {output:?}"))
-    };
-
-    let overridden = block(&rig.hook_with("antigravity", "prompt", &stdin, |command| {
-        command.env("HUB_AGENT_ID", "other-name");
-    }));
-    assert!(
-        overridden.contains(
-            "Note: the hooks run as agent name other-name, this harness's MCP connection as antigravity."
-        ),
-        "{overridden}"
-    );
-    assert!(
-        overridden.contains(&format!("you are {AGENT}/other-name")),
-        "the hook really acted under the overriding name: {overridden}"
-    );
-
-    let other = json!({"conversationId": "6c7d8e9f-aaaa-bbbb-cccc-0123456789ab", "workspacePaths": [rig.work_dir()], "invocationNum": 0});
-    let plain = block(&rig.hook("antigravity", "prompt", &other));
-    assert!(!plain.contains("Note: the hooks run as"), "{plain}");
-    assert!(
-        plain.contains(&format!("you are {AGENT}/antigravity")),
-        "{plain}"
-    );
 }
 
 /// The status of one hub session, from the session list.
@@ -1235,14 +1202,14 @@ fn a_prompt_after_another_instance_ended_the_shared_session_starts_it_again() {
         .as_str()
         .expect("id")
         .to_string();
-    rig.call_as_claude("session_end", &json!({"session_id": id}));
+    rig.call_as_claude("session_end", &json!({"session": {"session_id": id}}));
     assert_eq!(hub_session_status(&rig, &id), "ended");
 
     let output = rig.hook("claude", "prompt", &prompt_input(SESSION, &rig));
 
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let block = claude_context(&output).unwrap_or_else(|| panic!("a new block: {output:?}"));
-    assert!(block.contains("Bind your hub connection now"), "{block}");
+    assert!(block.contains("Pass session: {"), "{block}");
     let state = rig.state("claude", SESSION);
     let again = state["session_id"].as_str().expect("a session id again");
     assert_eq!(hub_session_status(&rig, again), "active");
@@ -1267,7 +1234,7 @@ fn a_restart_after_an_ended_session_waits_out_a_start_that_just_failed() {
         .as_str()
         .expect("id")
         .to_string();
-    rig.call_as_claude("session_end", &json!({"session_id": id}));
+    rig.call_as_claude("session_end", &json!({"session": {"session_id": id}}));
     let mut state = rig.state("claude", SESSION);
     state["start_failed_ms"] = json!(
         std::time::SystemTime::now()
@@ -1316,7 +1283,7 @@ fn end_claude(rig: &Rig, conversation: &str) {
 }
 
 #[test]
-fn session_end_leaves_the_hub_session_open_while_another_instance_shares_it() {
+fn two_instances_on_one_session_name_share_it_and_closing_both_ends_nothing() {
     let rig = Rig::start("hook-end-shared");
     let other = "11112222-3333-4444-5555-666677778888";
     let id = start_shared(&rig, SESSION, "feat-shared");
@@ -1325,51 +1292,20 @@ fn session_end_leaves_the_hub_session_open_while_another_instance_shares_it() {
     end_claude(&rig, SESSION);
 
     assert!(!rig.state_file("claude", SESSION).exists());
-    assert_eq!(
-        hub_session_status(&rig, &id),
-        "active",
-        "the other instance still uses the session"
-    );
+    assert_eq!(hub_session_status(&rig, &id), "active");
     let peeked = rig.hook("claude", "prompt", &prompt_input(other, &rig));
     assert_eq!(printed_json(&peeked), json!({}), "its prompts still work");
 
     end_claude(&rig, other);
     assert_eq!(
         hub_session_status(&rig, &id),
-        "ended",
-        "the last one ends it"
+        "active",
+        "leaving is not ending: the session waits for whoever resumes it"
     );
 }
 
 #[test]
-fn session_end_ignores_an_old_state_file_and_one_for_another_session() {
-    let rig = Rig::start("hook-end-stale");
-    let old = "22223333-4444-5555-6666-777788889999";
-    let apart = "33334444-5555-6666-7777-88889999aaaa";
-    let id = start_shared(&rig, SESSION, "feat-stale");
-    assert_eq!(start_shared(&rig, old, "feat-stale"), id);
-    let elsewhere = start_shared(&rig, apart, "feat-apart");
-    assert_ne!(elsewhere, id);
-    let day_and_a_bit = Duration::from_secs(25 * 60 * 60);
-    std::fs::OpenOptions::new()
-        .write(true)
-        .open(rig.state_file("claude", old))
-        .expect("open the old state")
-        .set_modified(std::time::SystemTime::now() - day_and_a_bit)
-        .expect("age the old state");
-
-    end_claude(&rig, SESSION);
-
-    assert_eq!(
-        hub_session_status(&rig, &id),
-        "ended",
-        "a state file a day old is a crashed instance's leftover"
-    );
-    assert_eq!(hub_session_status(&rig, &elsewhere), "active");
-}
-
-#[test]
-fn claude_hooks_use_the_plugin_agent_name_over_the_environment() {
+fn claude_hooks_name_themselves_claude_code_whatever_the_environment_says() {
     let rig = Rig::start("hook-plugin-name");
     let output = rig.hook_with(
         "claude",
@@ -1383,8 +1319,7 @@ fn claude_hooks_use_the_plugin_agent_name_over_the_environment() {
     );
     let block = claude_context(&output).unwrap_or_else(|| panic!("a block: {output:?}"));
     assert!(
-        block.contains(&format!("you are {AGENT}/plugin-name")),
+        block.contains(&format!("you are {AGENT} \u{b7} claude-code")),
         "{block}"
     );
-    assert!(!block.contains("Note: the hooks run as"), "{block}");
 }

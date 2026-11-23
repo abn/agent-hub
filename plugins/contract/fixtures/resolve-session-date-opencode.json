@@ -1,0 +1,29 @@
+{
+  "name": "resolve-session-date-opencode",
+  "input": {
+    "agent": "opencode",
+    "date": "2026-11-23",
+    "cwd": "/work/agent-hub",
+    "env": {},
+    "git": {
+      "is_repo": false,
+      "top_level": null,
+      "origin_url": null,
+      "branch": null,
+      "detached": false,
+      "linked_worktree": false
+    },
+    "files": {},
+    "known_projects": [
+      "agent-hub"
+    ],
+    "personal_project": "dev-claude"
+  },
+  "expected": {
+    "project_id": "dev-claude",
+    "project_source": "personal",
+    "session_name": "opencode-2026-11-23",
+    "session_source": "date",
+    "context_line": "no project matched; write `.agent-hub.toml` to pin one"
+  }
+}

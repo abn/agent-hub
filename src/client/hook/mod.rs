@@ -11,6 +11,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 pub mod bundle;
+pub mod child;
+pub mod helper;
 pub mod hub;
 pub mod input;
 pub mod render;
@@ -19,29 +21,28 @@ pub mod setup;
 pub mod state;
 pub mod watch;
 
-use hub::{HOOK_BUDGET, Hub};
+use hub::{HOOK_BUDGET, Hub, OFFLINE, reason};
 use input::{Event, Harness, HookInput};
-use render::{ContextInput, Output, notice_line, pending_block, pointer_block};
-use state::{State, Store, now_millis};
+use render::{ContextInput, Output, notice_block, notice_line, pending_block, pointer_block};
+use state::{Leave, Leaves, State, Store, now_millis};
 
 /// What `agent-hub hook` takes on its command line.
 pub const HOOK_USAGE: &str = "\
 usage:
   agent-hub hook <event> --harness claude|antigravity
 
-  event            session-start, prompt, pre-compact, subagent-start or
-                   session-end
+  event            session-start, prompt, pre-compact, pre-tool-use,
+                   subagent-start, subagent-stop or session-end
 
 The harness's hook JSON is read on stdin and its hook output is printed on
 stdout. The command always exits 0 and always prints valid output: on any
 failure it prints the harness's no-op and one line on stderr.
 
-The hub, the token and the agent name come, for claude, from
-CLAUDE_PLUGIN_OPTION_HUB_URL, CLAUDE_PLUGIN_OPTION_HUB_TOKEN and
-CLAUDE_PLUGIN_OPTION_AGENT_NAME, which the plugin's MCP entry uses too, then
-from HUB_URL, HUB_TOKEN and HUB_AGENT_ID, then from config.toml. For
-antigravity the agent name is HUB_AGENT_ID or antigravity. The name defaults to
-the harness. HUB_PROJECT and HUB_SESSION pin the project and the session name.
+The hub, the member and the token come from the credential resolver, as for
+agent-hub mcp: HUB_URL, HUB_MEMBER and HUB_TOKEN, the project's
+.agent-hub.toml, then config.toml. For claude the plugin's hub URL option pins
+the hub. The agent is the harness's own name: claude-code or antigravity.
+HUB_PROJECT and HUB_SESSION pin the project and the session name.
 ";
 
 /// Peeks on an Antigravity prompt are at least this many milliseconds apart.
@@ -50,14 +51,22 @@ const ANTIGRAVITY_PEEK_GAP_MS: u64 = 5_000;
 const START_RETRY_GAP_MS: u64 = 60_000;
 /// The whole of a session start, from the process start to its last byte.
 const START_DEADLINE: Duration = Duration::from_secs(15);
-/// A state file untouched for this long is a crashed instance's leftover, not
-/// another live instance of the session.
-const SHARED_SESSION_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 /// The whole of every other event.
 const HOOK_DEADLINE: Duration = Duration::from_secs(10);
+/// The whole of an event the harness cuts off at 5 s (the plugin's hook
+/// timeout), so that with the grace the run ends under it.
+const SHORT_DEADLINE: Duration = Duration::from_secs(3);
 /// How far past its deadline the process lets the run finish before it gives
 /// up on it.
 const DEADLINE_GRACE: Duration = Duration::from_secs(1);
+/// A leave the hub did not take is tried again no sooner than this after the
+/// last try, and given up on after this many tries.
+const LEAVE_RETRY_GAP_MS: u64 = 5_000;
+const LEAVE_ATTEMPTS: u32 = 5;
+/// The most a hook spends on retrying leaves it owes.
+const LEAVE_RETRY_BUDGET: Duration = Duration::from_secs(2);
+/// The state file that holds the leaves a harness still owes the hub.
+const LEAVES_FILE: &str = "_pending_leaves";
 /// The most of the hook JSON that is read from stdin.
 const STDIN_MAX: u64 = 4 * 1024 * 1024;
 /// The most of a transcript's end that pre-compact reads.
@@ -128,15 +137,23 @@ struct Run<'a> {
     input: HookInput,
     env: &'a dyn Fn(&str) -> Option<String>,
     store: Store,
+    /// The leaves this harness owes the hub, across its sessions.
+    leaves: Store,
     now_ms: u64,
     deadline: Instant,
 }
 
 impl Run<'_> {
-    fn hub(&self) -> Result<(Hub, String), String> {
-        let settings = hub::resolve_settings(self.harness, self.env)?;
-        let name = settings.agent_name.clone();
-        Ok((Hub::new(settings, Some(self.deadline)), name))
+    fn hub(&self) -> Result<Hub, String> {
+        let settings = hub::resolve_settings(self.harness, self.env, &self.cwd())?;
+        Ok(Hub::new(settings, Some(self.deadline)))
+    }
+
+    /// The member the resolver selected, for a line that names it.
+    fn settings_member(&self) -> Option<String> {
+        hub::resolve_settings(self.harness, self.env, &self.cwd())
+            .ok()
+            .and_then(|settings| settings.member)
     }
 
     fn cwd(&self) -> String {
@@ -156,7 +173,9 @@ impl Run<'_> {
             project_id: state.project_id.clone()?,
             session_name: state.session_name.clone()?,
             session_id: state.session_id.clone(),
-            actor: state.actor.clone()?,
+            member: state.member.clone()?,
+            agent: state.agent.clone()?,
+            plugin_adds_session: self.harness == Harness::Claude,
             context_lines: Vec::new(),
             brief: Vec::new(),
             anchor: None,
@@ -269,10 +288,10 @@ fn execute(
             return Ok(no_op(Some(parsed_event), Some(parsed_harness)));
         }
         let deadline = started
-            + if parsed_event == Event::SessionStart {
-                START_DEADLINE
-            } else {
-                HOOK_DEADLINE
+            + match parsed_event {
+                Event::SessionStart => START_DEADLINE,
+                Event::PreToolUse | Event::SubagentStop | Event::SessionEnd => SHORT_DEADLINE,
+                _ => HOOK_DEADLINE,
             };
         let text = stdin(deadline.saturating_duration_since(Instant::now()));
         let input = input::parse(parsed_harness, &text);
@@ -363,68 +382,122 @@ pub async fn handle(
     if input.harness_session_id.is_empty() {
         return Err("no session id on stdin".to_string());
     }
-    let store = Store::new(
-        &state::state_dir(harness, env),
-        &input.harness_session_id,
-        deadline,
-    );
+    let dir = state::state_dir(harness, env);
+    let store = Store::new(&dir, &input.harness_session_id, deadline);
     let run = Run {
         harness,
         input,
         env,
         store,
+        leaves: Store::new(&dir, LEAVES_FILE, deadline),
         now_ms,
         deadline,
     };
+    // Before the event, so a leave that was owed goes ahead of any join this
+    // event makes under the same name. A pre-tool-use is a state read and waits
+    // for nothing.
+    if event != Event::PreToolUse {
+        retry_leaves(&run).await;
+    }
+    dispatch(&run, event).await
+}
+
+async fn dispatch(run: &Run<'_>, event: Event) -> Result<Output, String> {
     match event {
-        Event::SessionStart => start(&run).await,
-        Event::Prompt => prompt(&run).await,
-        Event::PreCompact => pre_compact(&run).await,
-        Event::SubagentStart => Ok(Output {
-            context: Some(bundle::subagent_text(
-                run.store.read().session_id.as_deref(),
-            )),
-            compaction_instructions: None,
-        }),
-        Event::SessionEnd => session_end(&run).await,
+        Event::SessionStart => start(run).await,
+        Event::Prompt => prompt(run).await,
+        Event::PreCompact => pre_compact(run).await,
+        Event::SubagentStart => subagent_start(run).await,
+        Event::SubagentStop => subagent_stop(run).await,
+        Event::PreToolUse => Ok(pre_tool_use(run)),
+        Event::SessionEnd => session_end(run).await,
     }
 }
 
 /// Start or resume the hub session and record what came of it. A start that
 /// fails, for whatever reason, stamps the time the retry gap is counted from.
 async fn start(run: &Run<'_>) -> Result<Output, String> {
-    let started = begin(run).await;
-    run.store.update(|state| match &started {
-        Ok(started) => {
-            state.project_id = Some(started.project_id.clone());
-            state.session_name = Some(started.session_name.clone());
-            state.session_id = started.session_id.clone();
-            state.actor = Some(started.actor.clone());
-            state.start_failed_ms = None;
+    let begun = begin(run).await;
+    match begun {
+        Ok(bundle::Bundle::Session(started)) => {
+            run.store.update(|state| {
+                state.project_id = Some(started.project_id.clone());
+                state.session_name = Some(started.session_name.clone());
+                state.session_id = started.session_id.clone();
+                state.member = Some(started.member.clone());
+                state.agent = Some(started.agent.clone());
+                state.start_failed_ms = None;
+                state.notice = None;
+            });
+            Ok(Output {
+                context: Some(started.block),
+                ..Output::default()
+            })
         }
-        Err(_) => state.start_failed_ms = Some(run.now_ms),
-    });
-    started.map(|started| Output {
-        context: Some(started.block),
-        compaction_instructions: None,
-    })
+        Ok(bundle::Bundle::Notice(line)) => {
+            run.store
+                .update(|state| state.start_failed_ms = Some(run.now_ms));
+            Ok(announce(run, &line))
+        }
+        Err(failure) => {
+            run.store
+                .update(|state| state.start_failed_ms = Some(run.now_ms));
+            let Some(line) = connection_line(&failure, run.settings_member().as_deref()) else {
+                return Err(describe(&failure));
+            };
+            warn("hook", &describe(&failure));
+            Ok(announce(run, &line))
+        }
+    }
 }
 
-async fn begin(run: &Run<'_>) -> Result<bundle::Started, String> {
-    let (hub, agent_name) = run.hub()?;
+/// The block for a line about the connection, once: a line that is already the
+/// last one said is not said again.
+fn announce(run: &Run<'_>, line: &str) -> Output {
+    let mut fresh = false;
+    run.store.update(|state| {
+        fresh = state.notice.as_deref() != Some(line);
+        state.notice = Some(line.to_string());
+    });
+    Output {
+        context: fresh.then(|| notice_block(line)),
+        ..Output::default()
+    }
+}
+
+/// The line the model reads for a failure the hub or the network explains, or
+/// `None` for one it does not.
+fn connection_line(failure: &crate::client::Failure, member: Option<&str>) -> Option<String> {
+    use crate::client::Failure;
+    match failure {
+        Failure::Unavailable(_) => Some(OFFLINE.to_string()),
+        Failure::Denied(_) => match reason(failure)? {
+            "token_revoked" => Some("This member's token was revoked.".to_string()),
+            "token_unknown" => Some("The token is not for this hub.".to_string()),
+            "token_missing" => Some(hub::NOT_A_MEMBER.to_string()),
+            "token_pending" => Some(format!("Waiting for approval as {}.", member.unwrap_or(""))),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+async fn begin(run: &Run<'_>) -> Result<bundle::Bundle, crate::client::Failure> {
+    use crate::client::Failure;
+    let hub = run.hub().map_err(Failure::Config)?;
+    if let Some(line) = hub.settings().refusal() {
+        return Ok(bundle::Bundle::Notice(line));
+    }
     let cwd = run.cwd();
     let request = bundle::Request {
         hub: &hub,
-        harness_name: run.harness.name(),
-        agent_name: &agent_name,
-        name_note: hub.settings().name_note(),
-        harness_session_id: &run.input.harness_session_id,
+        harness: run.harness,
         cwd: &cwd,
         env: run.env,
         now_secs: i64::try_from(run.now_ms / 1000).unwrap_or_default(),
         deadline: run.deadline,
     };
-    bundle::start(&request).await.map_err(|f| describe(&f))
+    bundle::start(&request).await
 }
 
 fn describe(failure: &crate::client::Failure) -> String {
@@ -457,23 +530,13 @@ impl From<String> for Unread {
 /// Whether the hub refused because the session has ended, which another
 /// instance sharing the session may have done.
 pub(crate) fn session_ended(failure: &crate::client::Failure) -> bool {
-    let crate::client::Failure::Tool(error) = failure else {
-        return false;
-    };
-    error
-        .pointer("/error/code")
-        .and_then(serde_json::Value::as_str)
-        == Some("conflict")
-        && error
-            .pointer("/error/message")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|message| message.contains("has ended"))
+    reason(failure) == Some("session_ended")
 }
 
 /// Peek at what is waiting for the session and, only when something is,
 /// deliver it once. The lines are the notices, in the order the hub gave them.
 async fn peek_and_drain(run: &Run<'_>, session_id: &str) -> Result<Vec<String>, Unread> {
-    let (hub, _) = run.hub()?;
+    let hub = run.hub()?;
     let waiting = hub
         .peek(Some(session_id), 0, None)
         .await
@@ -548,7 +611,7 @@ async fn prompt(run: &Run<'_>) -> Result<Output, String> {
             } else {
                 None
             },
-            compaction_instructions: None,
+            ..Output::default()
         });
     }
 
@@ -576,7 +639,7 @@ async fn prompt(run: &Run<'_>) -> Result<Output, String> {
     };
     Ok(Output {
         context,
-        compaction_instructions: None,
+        ..Output::default()
     })
 }
 
@@ -586,18 +649,18 @@ async fn pre_compact(run: &Run<'_>) -> Result<Output, String> {
         return Ok(Output::default());
     };
     let output = Output {
-        context: None,
         compaction_instructions: Some(bundle::keep_instruction(
             project_id,
             session_name,
             state.session_id.as_deref(),
         )),
+        ..Output::default()
     };
     if let (Some(session_id), Some(path)) = (&state.session_id, &run.input.transcript_path)
         && let Some(content) = transcript_excerpt(path, &run.transcript_roots())
     {
         let saved = async {
-            let (hub, _) = run.hub()?;
+            let hub = run.hub()?;
             let mut conn = hub.open(HOOK_BUDGET).await.map_err(|f| describe(&f))?;
             let result = conn
                 .call(
@@ -741,11 +804,239 @@ fn message_text(entry: &serde_json::Value) -> Option<String> {
     (!text.is_empty()).then(|| render::clip(text, TRANSCRIPT_TEXT_MAX))
 }
 
-/// End the hub session. The state goes first: a watcher of the session reads
-/// its absence as the order to stop, so it stops even when the hub is not
-/// answering. When the state lock cannot be taken the state stays and the
-/// watcher stops at its own time. The hub session is left open when another
-/// live instance of the harness shares it, as two on one branch do.
+/// Give a subagent its own hub session under the parent's, and tell it so. A
+/// subagent the hook already started resumes its own name. A parent with no
+/// session, or a hub that does not answer, leaves the subagent on the parent's.
+async fn subagent_start(run: &Run<'_>) -> Result<Output, String> {
+    let state = run.store.read();
+    let (Some(project_id), Some(parent), Some(agent_id)) = (
+        state.project_id.as_deref(),
+        state.session_name.as_deref(),
+        run.input.agent_id.as_deref(),
+    ) else {
+        return Ok(Output::default());
+    };
+    let hub = run.hub()?;
+    if hub.settings().refusal().is_some() {
+        return Ok(Output::default());
+    }
+    let mut conn = hub.open(HOOK_BUDGET).await.map_err(|f| describe(&f))?;
+    let mut starter = child::OnConn {
+        conn: &mut conn,
+        project_id,
+    };
+    let child = match state.children.get(agent_id) {
+        Some(known) => child::resume(&mut starter, known).await,
+        None => {
+            child::start_new(
+                &mut starter,
+                parent,
+                run.input.agent_type.as_deref(),
+                agent_id,
+            )
+            .await
+        }
+    };
+    conn.close().await;
+    let child = child.map_err(|f| describe(&f))?;
+    run.store.update(|state| {
+        state.children.insert(agent_id.to_string(), child.clone());
+    });
+    Ok(Output {
+        context: Some(bundle::subagent_text(project_id, &child.name)),
+        ..Output::default()
+    })
+}
+
+/// The session `name` as the argument every hub tool takes.
+fn session_arg(project_id: &str, name: &str) -> serde_json::Value {
+    serde_json::json!({"project_id": project_id, "name": name})
+}
+
+/// A subagent finished: leave its session, which stays for whoever is still in
+/// it. Its mapping goes only once the hub has taken the leave; until then it
+/// stays, and the leave is owed.
+async fn subagent_stop(run: &Run<'_>) -> Result<Output, String> {
+    let Some(agent_id) = run.input.agent_id.as_deref() else {
+        return Ok(Output::default());
+    };
+    let state = run.store.read();
+    let (Some(child), Some(project_id)) = (state.children.get(agent_id), state.project_id) else {
+        return Ok(Output::default());
+    };
+    let owed = Leave {
+        project_id,
+        name: child.name.clone(),
+        cwd: run.cwd(),
+        harness_session_id: Some(run.input.harness_session_id.clone()),
+        agent_id: Some(agent_id.to_string()),
+        attempts: 0,
+        tried_ms: 0,
+    };
+    leave(run, vec![owed]).await?;
+    Ok(Output::default())
+}
+
+/// Leave each session in `owed` on one connection. A leave is recorded as owed
+/// before it is tried and forgotten only when the hub has taken it, so one that
+/// fails is retried by a later hook. The sessions end only when the work is
+/// done for everyone, which a harness closing is not.
+async fn leave(run: &Run<'_>, owed: Vec<Leave>) -> Result<(), String> {
+    run.leaves.update_as(|leaves: &mut Leaves| {
+        for entry in &owed {
+            if !leaves
+                .pending
+                .iter()
+                .any(|held| (&held.project_id, &held.name) == (&entry.project_id, &entry.name))
+            {
+                let mut entry = entry.clone();
+                entry.tried_ms = run.now_ms;
+                leaves.pending.push(entry);
+            }
+        }
+    });
+    let hub = run.hub()?;
+    if hub.settings().refusal().is_some() {
+        // No hub to leave: nothing is owed.
+        owed.iter().for_each(|entry| settled(run, entry));
+        return Ok(());
+    }
+    let mut conn = hub.open(HOOK_BUDGET).await.map_err(|f| describe(&f))?;
+    let mut failed = None;
+    for entry in &owed {
+        match conn.call("session_leave", leave_args(entry)).await {
+            Ok(_) => settled(run, entry),
+            Err(failure) => {
+                failed.get_or_insert_with(|| describe(&failure));
+                tried(run, entry);
+            }
+        }
+    }
+    conn.close().await;
+    failed.map_or(Ok(()), Err)
+}
+
+fn leave_args(entry: &Leave) -> serde_json::Value {
+    serde_json::json!({"session": session_arg(&entry.project_id, &entry.name)})
+}
+
+/// A leave the hub did not take: counted, and given up on after a few tries.
+fn tried(run: &Run<'_>, entry: &Leave) {
+    run.leaves.update_as(|leaves: &mut Leaves| {
+        for held in &mut leaves.pending {
+            if (&held.project_id, &held.name) == (&entry.project_id, &entry.name) {
+                held.attempts += 1;
+                held.tried_ms = run.now_ms;
+            }
+        }
+        leaves.pending.retain(|held| held.attempts < LEAVE_ATTEMPTS);
+    });
+}
+
+/// The hub took a leave: it is no longer owed, and a subagent's mapping, which
+/// was kept until now, goes.
+fn settled(run: &Run<'_>, entry: &Leave) {
+    run.leaves.update_as(|leaves: &mut Leaves| {
+        leaves
+            .pending
+            .retain(|held| (&held.project_id, &held.name) != (&entry.project_id, &entry.name));
+    });
+    let (Some(session), Some(agent_id)) = (&entry.harness_session_id, &entry.agent_id) else {
+        return;
+    };
+    let dir = state::state_dir(run.harness, run.env);
+    Store::new(&dir, session, run.deadline).update_existing(|state| {
+        state.children.remove(agent_id);
+    });
+}
+
+/// Try again the leaves an earlier hook could not make: at most once every few
+/// seconds each, within a short budget, and no more than a few times in all. A
+/// hub that does not answer ends the pass, so a down hub costs one wait, not
+/// one per leave.
+async fn retry_leaves(run: &Run<'_>) {
+    let owed: Leaves = run.leaves.read_as();
+    let due: Vec<Leave> = owed
+        .pending
+        .into_iter()
+        .filter(|entry| {
+            run.now_ms.saturating_sub(entry.tried_ms) >= LEAVE_RETRY_GAP_MS
+                && entry.attempts < LEAVE_ATTEMPTS
+        })
+        .collect();
+    // Only inside what is left of the run: a pass that cannot have its whole
+    // budget would eat the time the event's own leave needs.
+    if due.is_empty() || run.deadline.saturating_duration_since(Instant::now()) < LEAVE_RETRY_BUDGET
+    {
+        return;
+    }
+    let pass = async {
+        for entry in &due {
+            let attempt = async {
+                let settings = hub::resolve_settings(run.harness, run.env, &entry.cwd).ok()?;
+                if settings.refusal().is_some() {
+                    return Some(());
+                }
+                let hub = Hub::new(settings, Some(run.deadline));
+                let mut conn = hub.open(LEAVE_RETRY_BUDGET).await.ok()?;
+                let left = conn.call("session_leave", leave_args(entry)).await;
+                conn.close().await;
+                left.ok().map(|_| ())
+            }
+            .await;
+            if attempt.is_some() {
+                settled(run, entry);
+                continue;
+            }
+            tried(run, entry);
+            return;
+        }
+    };
+    tokio::time::timeout(LEAVE_RETRY_BUDGET, pass).await.ok();
+}
+
+/// The input a hub call the model makes without a session is rewritten to:
+/// the subagent's own session when the call is a mapped subagent's, the harness
+/// session's when it is the main thread's. `None` leaves the call as it is:
+/// nothing is started yet, the call names a session already, it starts one, or
+/// it is a subagent's with no confirmed child, which is never put under the
+/// parent's. The state is all
+/// it reads, so the call costs the model nothing.
+pub fn session_input(state: &State, input: &HookInput) -> Option<serde_json::Value> {
+    let (project_id, parent) = (state.project_id.as_deref()?, state.session_name.as_deref()?);
+    let tool = input.tool_name.as_deref().unwrap_or_default();
+    if tool == "session_start" || tool.ends_with("__session_start") {
+        return None;
+    }
+    let serde_json::Value::Object(mut call) = input.tool_input.clone()? else {
+        return None;
+    };
+    if call
+        .get("session")
+        .is_some_and(|session| !session.is_null())
+    {
+        return None;
+    }
+    let name = match input.agent_id.as_deref() {
+        Some(id) => state.children.get(id)?.name.as_str(),
+        None => parent,
+    };
+    call.insert("session".to_string(), session_arg(project_id, name));
+    Some(serde_json::Value::Object(call))
+}
+
+fn pre_tool_use(run: &Run<'_>) -> Output {
+    Output {
+        updated_input: session_input(&run.store.read(), &run.input),
+        ..Output::default()
+    }
+}
+
+/// Leave the hub session and forget it. The state goes first: a watcher of the
+/// session reads its absence as the order to stop, so it stops even when the
+/// hub is not answering. When the state lock cannot be taken the state stays
+/// and the watcher stops at its own time. The session is left, never ended: it
+/// stays live for whoever else is in it, and its brain is the next run's.
 async fn session_end(run: &Run<'_>) -> Result<Output, String> {
     let state = run.store.read();
     if run.store.remove() {
@@ -756,25 +1047,27 @@ async fn session_end(run: &Run<'_>) -> Result<Output, String> {
             "the session state is locked; the watcher stops on its own",
         );
     }
-    let Some(session_id) = &state.session_id else {
+    let (Some(project_id), Some(session_name)) = (&state.project_id, &state.session_name) else {
         return Ok(Output::default());
     };
-    if run
-        .store
-        .shared_with_another(session_id, SHARED_SESSION_WINDOW)
-    {
-        return Ok(Output::default());
-    }
-    let (hub, _) = run.hub()?;
-    let mut conn = hub.open(HOOK_BUDGET).await.map_err(|f| describe(&f))?;
-    let result = conn
-        .call(
-            "session_end",
-            serde_json::json!({"session": {"session_id": session_id}}),
-        )
-        .await;
-    conn.close().await;
-    result.map(|_| Output::default()).map_err(|f| describe(&f))
+    // A subagent that never stopped is left with its parent.
+    let owed = |name: &str| Leave {
+        project_id: project_id.clone(),
+        name: name.to_string(),
+        cwd: run.cwd(),
+        harness_session_id: None,
+        agent_id: None,
+        attempts: 0,
+        tried_ms: 0,
+    };
+    let owed: Vec<Leave> = state
+        .children
+        .values()
+        .map(|child| owed(&child.name))
+        .chain(std::iter::once(owed(session_name)))
+        .collect();
+    leave(run, owed).await?;
+    Ok(Output::default())
 }
 
 #[cfg(test)]

@@ -137,10 +137,7 @@ write the literal URL, token and name.
     "agent-hub": {
       "type": "http",
       "url": "${user_config.hub_url}/mcp",
-      "headers": {
-        "Authorization": "Bearer ${user_config.hub_token}",
-        "X-Agent-Id": "${user_config.agent_name}"
-      }
+      "headersHelper": "${CLAUDE_PLUGIN_ROOT}/bin/agent-hub-launcher token --headers --agent claude-code"
     }
   }
 }
@@ -170,8 +167,7 @@ write the literal URL, token and name.
   "mcpServers": {
     "agent-hub": {
       "command": "agent-hub",
-      "args": ["mcp", "--proxy"],
-      "env": { "HUB_AGENT_ID": "antigravity" }
+      "args": ["mcp"]
     }
   }
 }

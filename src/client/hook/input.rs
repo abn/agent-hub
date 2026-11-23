@@ -19,10 +19,20 @@ impl Harness {
         }
     }
 
-    /// The name used for the agent id, the state directory and session names.
+    /// The name used for the `--harness` flag and the state directory.
     pub fn name(self) -> &'static str {
         match self {
             Self::Claude => "claude",
+            Self::Antigravity => "antigravity",
+        }
+    }
+
+    /// The canonical agent name the hub knows this harness by, sent as
+    /// `X-Agent-Id` so the hooks and the harness's own MCP connection act as
+    /// one agent.
+    pub fn agent(self) -> &'static str {
+        match self {
+            Self::Claude => "claude-code",
             Self::Antigravity => "antigravity",
         }
     }
@@ -35,6 +45,8 @@ pub enum Event {
     Prompt,
     PreCompact,
     SubagentStart,
+    SubagentStop,
+    PreToolUse,
     SessionEnd,
 }
 
@@ -46,6 +58,8 @@ impl Event {
             "prompt" => Some(Self::Prompt),
             "pre-compact" => Some(Self::PreCompact),
             "subagent-start" => Some(Self::SubagentStart),
+            "subagent-stop" => Some(Self::SubagentStop),
+            "pre-tool-use" => Some(Self::PreToolUse),
             "session-end" => Some(Self::SessionEnd),
             _ => None,
         }
@@ -62,6 +76,10 @@ pub struct HookInput {
     pub prompt: Option<String>,
     pub invocation_num: Option<u64>,
     pub agent_type: Option<String>,
+    /// The subagent a Claude event belongs to. The main thread has none.
+    pub agent_id: Option<String>,
+    pub tool_name: Option<String>,
+    pub tool_input: Option<Value>,
 }
 
 fn text(value: &Value, keys: &[&str]) -> Option<String> {
@@ -86,6 +104,9 @@ pub fn parse(harness: Harness, stdin: &str) -> HookInput {
             prompt: text(&value, &["prompt"]),
             invocation_num: None,
             agent_type: text(&value, &["agent_type"]),
+            agent_id: text(&value, &["agent_id"]),
+            tool_name: text(&value, &["tool_name"]),
+            tool_input: value.get("tool_input").filter(|v| v.is_object()).cloned(),
         },
         Harness::Antigravity => HookInput {
             harness_session_id: text(&value, &["conversationId", "conversation_id"])
@@ -104,6 +125,9 @@ pub fn parse(harness: Harness, stdin: &str) -> HookInput {
                 .or_else(|| value.get("invocation_num"))
                 .and_then(Value::as_u64),
             agent_type: None,
+            agent_id: None,
+            tool_name: None,
+            tool_input: None,
         },
     }
 }

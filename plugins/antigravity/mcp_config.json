@@ -2,10 +2,7 @@
   "mcpServers": {
     "agent-hub": {
       "command": "agent-hub",
-      "args": ["mcp", "--proxy"],
-      "env": {
-        "HUB_AGENT_ID": "antigravity"
-      }
+      "args": ["mcp"]
     }
   }
 }

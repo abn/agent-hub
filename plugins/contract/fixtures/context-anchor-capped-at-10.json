@@ -4,7 +4,8 @@
     "project_id": "agent-hub",
     "session_name": "feat-login-flow",
     "session_id": "s_01J8",
-    "actor": "dev/claude",
+    "member": "dev",
+    "agent": "claude-code",
     "brief": [],
     "anchor": {
       "phase": "p",
@@ -30,7 +31,7 @@
     "pending": []
   },
   "expected": {
-    "text": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-login-flow\").\nDo not call session_brief; this block is the brief.\nLast anchor (phase \"p\", 1h ago):\nanchor line 01\nanchor line 02\nanchor line 03\nanchor line 04\nanchor line 05\nanchor line 06\nanchor line 07\nanchor line 08\nanchor line 09\nanchor line 10\n</agent-hub>",
+    "text": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev · claude-code\nPass session: {\"project_id\": \"agent-hub\", \"name\": \"feat-login-flow\"} on hub calls (the plugin adds it).\nDo not call session_brief; this block is the brief.\nLast anchor (phase \"p\", 1h ago):\nanchor line 01\nanchor line 02\nanchor line 03\nanchor line 04\nanchor line 05\nanchor line 06\nanchor line 07\nanchor line 08\nanchor line 09\nanchor line 10\n</agent-hub>",
     "truncated": false
   }
 }

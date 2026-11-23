@@ -1,0 +1,29 @@
+{
+  "name": "subagent-nested-parent",
+  "input": {
+    "project_id": "homelab",
+    "parent": "feat-x/review",
+    "agent_type": "Explore",
+    "agent_id": "c0ffee1234567890",
+    "mapped": null,
+    "replies": [
+      {
+        "ok": {
+          "session_id": "s1",
+          "project_id": "homelab",
+          "status": "active",
+          "outcome": "created"
+        }
+      }
+    ]
+  },
+  "expected": {
+    "calls": [
+      {
+        "session_name": "feat-x/review/explore-c0ffee12",
+        "exclusive": true
+      }
+    ],
+    "child": "feat-x/review/explore-c0ffee12"
+  }
+}

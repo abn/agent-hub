@@ -20,20 +20,6 @@
       "title": "Hub URL",
       "description": "Base URL of your Agent Hub node, without a trailing slash, for example https://hub.example.net",
       "required": true
-    },
-    "hub_token": {
-      "type": "string",
-      "title": "Hub token",
-      "description": "Agent token for the hub. Stored in the system keychain.",
-      "sensitive": true,
-      "required": true
-    },
-    "agent_name": {
-      "type": "string",
-      "title": "Agent name",
-      "description": "Name this agent reports to the hub.",
-      "default": "claude",
-      "required": false
     }
   }
 }

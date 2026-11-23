@@ -4,6 +4,15 @@
 
 import { createServer } from "node:http";
 
+// A refusal the way the hub sends one: a JSON-RPC error whose data holds the
+// hub's own error object.
+class RpcFail extends Error {
+  constructor(code, reason, message, extra = {}) {
+    super(message);
+    this.error = { code, message, retryable: false, details: { reason, ...extra } };
+  }
+}
+
 export async function startFakeHub({ sse = false, pollMs = 60 } = {}) {
   const hub = {
     sse,
@@ -26,6 +35,21 @@ export async function startFakeHub({ sse = false, pollMs = 60 } = {}) {
     projects: ["proj"],
     brief: { answers: { items: [], more: 0 }, events: { items: [], more: 0 }, stale_pages: { items: [], more: 0 } },
     sessionStart: { session_id: "s_01TEST", handoff: "", anchor: null },
+    sessionNames: new Set(),
+    left: [],
+    whoami: {
+      state: "active",
+      member: "tester",
+      agent: "opencode",
+      kind: "participant",
+      default_project: "tester-space",
+      suggested_session: "opencode-2026-11-23",
+      personal_project: "tester-space",
+      admin: false,
+      actor: "tester",
+    },
+    enrolStatus: { status: "pending", member: "tester" },
+    statusRequests: [],
   };
 
   const drainTrailer = () => {
@@ -34,9 +58,19 @@ export async function startFakeHub({ sse = false, pollMs = 60 } = {}) {
   };
 
   const tools = {
-    whoami: () => ({ actor: "tester/opencode", agent: "tester", personal_project: "tester-opencode" }),
+    whoami: () => ({ ...hub.whoami }),
     session_brief: () => hub.brief,
-    session_start: () => ({ ...hub.sessionStart, ...(hub.sessionIds.length ? { session_id: hub.sessionIds.shift() } : {}) }),
+    session_start: (args) => {
+      if (args.exclusive && hub.sessionNames.has(args.session_name)) {
+        throw new RpcFail("conflict", "session_name_taken", `session '${args.session_name}' already exists`, { session_id: "s_OLD" });
+      }
+      hub.sessionNames.add(args.session_name);
+      return { ...hub.sessionStart, ...(hub.sessionIds.length ? { session_id: hub.sessionIds.shift() } : {}) };
+    },
+    session_leave: (args) => {
+      hub.left.push(args.session);
+      return { ok: true };
+    },
     brain_get: () => ({ content: "# Index\n- page.md" }),
     notify_subscribe: () => ({ subscription_id: "sub_1" }),
     notify_wait: drainTrailer,
@@ -53,6 +87,11 @@ export async function startFakeHub({ sse = false, pollMs = 60 } = {}) {
     hub.requests.push({ method: req.method, path: url.pathname, headers: req.headers });
     if (req.method === "GET" && url.pathname === "/api/v1/projects") {
       return send(res, 200, { projects: hub.projects.map((id) => ({ id })) });
+    }
+    if (req.method === "GET" && url.pathname === "/api/v1/enrol/status") {
+      hub.statusRequests.push({ search: url.search, headers: req.headers });
+      if (hub.enrolStatus === null) return send(res, 401, { error: { code: "unauthenticated" } });
+      return send(res, 200, hub.enrolStatus);
     }
     if (req.method === "GET" && url.pathname === "/api/v1/me/pending") {
       const after = url.searchParams.get("after");
@@ -129,7 +168,17 @@ export async function startFakeHub({ sse = false, pollMs = 60 } = {}) {
           const handler = tools[name];
           if (!handler) return reply({ isError: true, content: [{ type: "text", text: `no tool ${name}` }] });
           const run = () => {
-            const structuredContent = handler(args);
+            let structuredContent;
+            try {
+              structuredContent = handler(args);
+            } catch (failure) {
+              if (!(failure instanceof RpcFail)) throw failure;
+              return send(res, 200, {
+                jsonrpc: "2.0",
+                id: message.id,
+                error: { code: -32602, message: failure.message, data: { error: failure.error } },
+              });
+            }
             if (hub.trailerFor[name]) structuredContent.notifications = { pending: hub.trailerFor[name] };
             reply({ content: [], structuredContent });
           };

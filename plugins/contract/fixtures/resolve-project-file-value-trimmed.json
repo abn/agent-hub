@@ -1,0 +1,29 @@
+{
+  "name": "resolve-project-file-value-trimmed",
+  "input": {
+    "agent": "claude-code",
+    "date": "2026-11-23",
+    "cwd": "/work/agent-hub",
+    "env": {},
+    "git": {
+      "is_repo": true,
+      "top_level": "/work/agent-hub",
+      "origin_url": "git@github.com:agync/agent-hub.git",
+      "branch": "fix/y",
+      "detached": false,
+      "linked_worktree": false
+    },
+    "files": {
+      "/work/agent-hub/.agent-hub.toml": "project = \"  pinned  \"\n# a comment\n"
+    },
+    "known_projects": [],
+    "personal_project": "dev-claude"
+  },
+  "expected": {
+    "project_id": "pinned",
+    "project_source": "file",
+    "session_name": "fix-y",
+    "session_source": "branch",
+    "context_line": null
+  }
+}
