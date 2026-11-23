@@ -381,10 +381,56 @@ describe("lock-dir protocol", () => {
     mkdirSync(`${lockDir()}.break`);
     expect(() => withLock(target(), () => {}, opts(c, { budgetMs: 200, isAlive: () => false }))).toThrow(/locked/u);
     expect(existsSync(lockDir())).toBe(true);
-    const old = new Date(Date.now() - 60_000);
+    const old = new Date(Date.now() - 61_000);
     utimesSync(`${lockDir()}.break`, old, old);
     expect(withLock(target(), () => "ran", opts(c, { isAlive: () => false }))).toBe("ran");
     expect(existsSync(`${lockDir()}.break`)).toBe(false);
+  });
+
+  it("a guard whose owner lives is not reaped, even past 60 s on this host", () => {
+    const c = clock(Date.now());
+    plant(`999 h1 ${c.now() - 60_000}`);
+    mkdirSync(`${lockDir()}.break`);
+    writeFileSync(join(`${lockDir()}.break`, "owner"), `222 h1 ${c.now() - 120_000}\n`);
+    const isAlive = (pid) => pid === 222;
+    expect(() => withLock(target(), () => {}, opts(c, { budgetMs: 200, isAlive }))).toThrow(/locked/u);
+    expect(existsSync(lockDir())).toBe(true);
+    expect(readFileSync(join(`${lockDir()}.break`, "owner"), "utf8")).toMatch(/^222 h1 /u);
+  });
+
+  it("a guard whose owner is dead is reaped", () => {
+    const c = clock(Date.now());
+    plant(`999 h1 ${c.now() - 60_000}`);
+    mkdirSync(`${lockDir()}.break`);
+    writeFileSync(join(`${lockDir()}.break`, "owner"), `222 h1 ${c.now()}\n`);
+    expect(withLock(target(), () => "ran", opts(c, { isAlive: () => false }))).toBe("ran");
+    expect(existsSync(`${lockDir()}.break`)).toBe(false);
+  });
+
+  it("an ownerless guard is reaped past 60 s and left before", () => {
+    const c = clock(Date.now());
+    plant(`999 h1 ${c.now() - 60_000}`);
+    mkdirSync(`${lockDir()}.break`);
+    const age = (ms) => utimesSync(`${lockDir()}.break`, new Date(Date.now() - ms), new Date(Date.now() - ms));
+    age(30_000);
+    expect(() => withLock(target(), () => {}, opts(c, { budgetMs: 200, isAlive: () => false }))).toThrow(/locked/u);
+    expect(existsSync(`${lockDir()}.break`)).toBe(true);
+    age(61_000);
+    expect(withLock(target(), () => "ran", opts(c, { isAlive: () => false }))).toBe("ran");
+  });
+
+  it("a breaker that lost its guard aborts without touching the lock", () => {
+    const c = clock();
+    plant(`999 h1 ${c.now() - 60_000}`);
+    let calls = 0;
+    const isAlive = () => {
+      // the second check runs while the guard is held: another breaker reaps it
+      if (++calls === 2) writeFileSync(join(`${lockDir()}.break`, "owner"), `333 h1 ${c.now()}\n`);
+      return false;
+    };
+    expect(() => withLock(target(), () => {}, opts(c, { budgetMs: 100, isAlive: (p) => (p === 333 ? true : isAlive()) }))).toThrow(/locked/u);
+    expect(readFileSync(join(lockDir(), "owner"), "utf8")).toMatch(/^999 h1 /u);
+    expect(readFileSync(join(`${lockDir()}.break`, "owner"), "utf8")).toMatch(/^333 h1 /u);
   });
 
   it("release leaves a lock another holder took over", () => {
