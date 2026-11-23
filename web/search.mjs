@@ -220,6 +220,10 @@ function resultsNode(state) {
   const box = el("div", "search-results");
   if (!state.term) {
     box.appendChild(emptyState(EMPTY_COPY.search));
+  } else if (state.failed) {
+    const failure = el("p", "error", "Search failed. Try again.");
+    failure.setAttribute("role", "alert");
+    box.appendChild(failure);
   } else if (!state.data.count) {
     box.appendChild(emptyState(NO_MATCH, { term: `“${state.term}”` }));
   } else {
@@ -249,8 +253,9 @@ async function find(term, type, project) {
     state.data = await api(`/api/v1/search?q=${encodeURIComponent(trimmed)}${scope}${proj}`);
     state.line = resultsLine(state.data);
   } catch {
-    // A query the hub could not run is a query that found nothing. The reader
-    // is told that, not what the engine said.
+    // A request that failed is said to have failed, not to have found nothing.
+    // The reader is told that, not what the engine said.
+    state.failed = true;
     state.line = "No results";
   }
   return state;

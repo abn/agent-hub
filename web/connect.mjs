@@ -120,7 +120,7 @@ const CONNECT_STYLE = `<style>
 .connect-error {
   margin: 0;
   font-size: var(--t-13);
-  color: var(--danger);
+  color: var(--ink);
   line-height: 1.4;
 }
 /* A button is as wide as its label, and a form action is --ctl-form on a fine
