@@ -16,7 +16,7 @@ tested way to put it back. The store's shape is in
 
 | Thing | Why |
 |---|---|
-| The data directory | `hub.db` and its write-ahead log, one brain file per session, one knowledge file per project, and the artifact blobs all live in it |
+| The data directory | `hub.db` and its write-ahead log, one brain file per session, one knowledge file per project, the artifact blobs, and after the identity upgrade a `merged/` folder of archived session brains all live in it |
 | A destination outside that directory | a backup written into the tree it copies is refused |
 | The `agent-hub` binary on the host | the container image is built without the client, so run the binary or `curl` from the host against the published port |
 
@@ -106,6 +106,7 @@ already running is a `409`, and a missing backup directory is a `503`.
   and then finish), so none of those blobs can go or change before it is copied,
   and each one holds the bytes its row describes. The hub reads the copied store
   back and refuses to finish a backup that names a blob it lacks.
+- **`merged/` is part of the set.** Backup, restore and check carry the archived brains that the identity upgrade merged. An archive is never open in the hub, so an online backup copies it through its own handle.
 - **The set is not one instant across files.** The brain, knowledge, and blob
   files are copied after `hub.db`, so they can hold writes the store snapshot
   does not: a page written to a brain moments after the snapshot, a blob whose

@@ -32,7 +32,7 @@ agent-hub service uninstall [--yes]
                                stop and unregister the service, keep binary, config, data
 agent-hub uninstall [--purge] [--keep-binary] [--yes]
                                remove the service and the binary; --purge also the data
-agent-hub mcp [--proxy]        bridge stdio MCP to the hub named by HUB_URL
+agent-hub mcp [--embedded]     bridge stdio MCP to the hub the credential names
 agent-hub call <tool> [json]   call one tool and print its JSON result
 agent-hub tools                list the hub's tools
 agent-hub kb <command>         read and write the project knowledge base
@@ -42,6 +42,9 @@ agent-hub watch                wait for items that may wake an idle agent
 agent-hub setup <harness>      install the hub plugin into a harness
 agent-hub config [flags]       inspect and validate configuration
 agent-hub enrol [why]          request enrolment and wait for operator approval
+agent-hub token [--headers]    show which credential would be used
+agent-hub trust [--path DIR]   trust the pairing a project file selects
+agent-hub migrate --check      preflight an upgrade against a store, read only
 agent-hub backup --out DIR     back up the store while no hub serves it
 agent-hub backup --url URL     ask a running hub to back itself up
 agent-hub restore --from DIR   restore the store from a backup
@@ -59,8 +62,9 @@ agent-hub health [--url URL]   GET /readyz and exit non-zero when not ready
 | 2 | usage: an unknown subcommand, a missing argument, or a bad flag |
 | 3 | `status` only: no hub is running |
 | 69 | the hub is unreachable; for `service install` and the lifecycle commands, no service manager is reachable |
+| 75 | `migrate --check` only: a serving hub holds the store; run it on a copy or a stopped hub |
 | 77 | the token itself was refused, the code a hook re-enrols on |
-| 78 | nothing names a hub, or no admin token is set |
+| 78 | nothing names a hub, or no admin token is set; for `migrate --check`, a stop condition was found |
 
 In the lifecycle commands 0 also means the hub is already in the state asked
 for, 1 means the operation failed or was only partly done, and 2 includes a
@@ -169,33 +173,37 @@ the Windows task runs: it supervises one `serve` process and is not for
 interactive use. [Run the hub as a native service](/operate/native-service.md)
 walks through all of it.
 
-`mcp` serves MCP on stdio. With `HUB_URL` set it bridges stdio to that hub and
-holds one connection for the life of the process, which is what keeps a session
-active across calls. It serves a client on either protocol revision. A client
-that negotiates `2026-07-28` receives that revision's result shape, and one on
-an older revision keeps the older shape. Because the link to the hub is legacy,
-the proxy fills in the `resultType`, `ttlMs` and `cacheScope` a modern client
-requires, which the hub does not send over that link. With no `HUB_URL` it
-serves the local data directory
-standalone as the human admin, and says so on stderr; that mode opens the data
-directory itself, so pointing it at a directory a hub is already serving fails
-at startup with `a hub is already serving <data> (pid N, ...); use agent-hub stop,
-or set HUB_URL to reach it`.
+`mcp` serves MCP on stdio. It resolves the credential (url, member and token)
+the same way the plugin hooks do, and with a hub named it bridges stdio to that
+hub and holds one connection for the life of the process. It does not connect
+before the client does: it waits for the client's `initialize`, opens the
+connection with that handshake, and answers with the hub's result, so the hub
+learns the agent from the client's own `clientInfo`. It serves a client on either
+protocol revision. A client that negotiates `2026-07-28` receives that revision's
+result shape, and one on an older revision keeps the older shape. Because the
+link to the hub is legacy, the proxy fills in the `resultType`, `ttlMs` and
+`cacheScope` a modern client requires, which the hub does not send over that
+link. The proxy sends `X-Agent-Id` only when `HUB_AGENT_ID` is set.
 
-`mcp --proxy`, or `HUB_MODE=proxy` in the environment, never falls back to the
-local data directory. With no hub configured it prints `no hub configured: set
-HUB_URL or [client].url`, exits 78 and creates nothing, which suits a harness
-that must not open a second store by accident.
+With no hub configured, `mcp` prints `no hub configured: set HUB_URL, run
+agent-hub enrol --url <hub>, or pass --embedded for the local store`, exits 78 and
+creates nothing, so a harness never opens a second store by accident.
+`mcp --embedded` serves the local data directory standalone as the human admin,
+and says so on stderr; that mode opens the data directory itself, so pointing it
+at a directory a hub is already serving fails at startup with `a hub is already
+serving <data> (pid N, ...); use agent-hub stop, or set HUB_URL to reach it`.
+`--proxy` and `HUB_MODE=proxy` are accepted and ignored: the proxy is the default
+now.
 
-If the hub restarts, it forgets which session a connection was on. A call that
-needs a session is refused with the reason `no_active_session`, and the proxy
-then resumes the last session the agent started, by project and name, and
-retries the call once. Only calls refused with the reason `no_active_session`
-are replayed; a project-store call without `project_id` fails with
-`invalid_argument` and is not. If the resume fails, or lands in another
-session than the one held, the original refusal is returned. A session ended with `session_end` is not resumed. A write that needs no
-session, such as `signal_append`, may land without session attribution after a
-restart, until the next call that does need one replays the session.
+A tokenless or refused connection still answers `initialize`, with `serverInfo`
+named `agent-hub` and one local tool, `whoami`, that reports the reason (or
+`offline`) and the hub URL. The proxy keeps polling: when the human approves an
+enrolment it re-keys the stored credential to the approved name, opens the
+upstream connection with the stored handshake, swaps to it, and sends
+`notifications/tools/list_changed`, with no restart. A token revoked while the
+process runs makes tool calls return the reason (`token_revoked`,
+`token_unknown`) while stdio stays open. The proxy holds no session: a session is
+named on each call, so a hub restart loses nothing to replay.
 
 ## `call`
 
@@ -209,28 +217,25 @@ arguments needs neither, so a hook is not left reading a stdin nobody closes.
 The tool name and its JSON are the whole interface; there is no `session` or
 `brain` shorthand.
 
-Each call is its own connection and holds no session, so `session_start` in one
-call is not active in the next. A call reaches a session by naming it: start it,
-then read or write that session with the `session` argument. The named `agent`
-is the token's actor: the agent id for an agent token, and `human` for the admin
-token.
+Each call is its own connection and holds no session. A call reaches a session by
+naming it with the `session` argument, and a write to a session that does not
+exist creates it, so no start call is needed first. The call's member is the
+token's member and its agent is `cli`, unless `HUB_AGENT_ID` is set; the admin
+token is the human, with neither.
 
 ```sh
-agent-hub call session_start \
-  '{"project_id":"homelab","session_name":"hook"}'
 agent-hub call session_anchor \
-  '{"phase":"implement","summary":"Plan done, tests green.","next_steps":["open review"],"session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
+  '{"phase":"implement","summary":"Plan done, tests green.","next_steps":["open review"],"session":{"name":"hook","project_id":"homelab"}}'
 agent-hub call session_resume \
-  '{"session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
+  '{"session":{"name":"hook","project_id":"homelab"}}'
 agent-hub call brain_get \
-  '{"path":"/fs/RECOVERY.md","store":"session","session":{"agent":"my-agent","name":"hook","project_id":"homelab"}}'
+  '{"path":"/fs/RECOVERY.md","store":"session","session":{"name":"hook","project_id":"homelab"}}'
 ```
 
-`session_anchor` is the owner's write. It stores the anchor event and renders it
-to `RECOVERY.md`, which `brain_get` reads. `session_resume` reads the latest
-anchor, the scores that cite it, and the events after it. A score is the
-human's, written in the app, so it has no CLI verb. `agent-hub tools` lists both
-tools with their schemas.
+`session_anchor` stores the anchor event and renders it to `RECOVERY.md`, which
+`brain_get` reads. `session_resume` reads the latest anchor, the scores that cite
+it, and the events after it. A score is the human's, written in the app, so it
+has no CLI verb. `agent-hub tools` lists both tools with their schemas.
 
 ## `tools`
 
@@ -354,18 +359,58 @@ agent-hub config --check    # parse and validate, exit non-zero on a problem
 agent-hub enrol [why]
 ```
 
-Request enrolment with the hub and wait for operator approval. The flags are
-`--name <name>` (the display name to register, defaulting to the agent id),
-`--id <id>` (the suggested agent id, defaulting to a slug of the name),
-`--url <url>` (overriding `HUB_URL`), `--why <why>` (a one-line reason for the
-operator, at most 200 characters), and `--force` (enrol again even when a token
-is already configured).
+Ask the hub to let this machine in as a member, and wait for operator approval.
+The flags are `--url <url>` (overriding `HUB_URL`), `--member <name>` (the member
+to ask for, defaulting to a slug of the host name), `--display-name <name>`,
+`--why <why>` (a one-line reason for the operator, at most 200 characters), and
+`--force` (enrol again even when a credential for the pair already exists). The
+request carries `agent=cli`, the operating system and the host name.
 
-A successful enrolment saves the hub URL and the token to the client config, so
-the next command reaches the hub with no environment set. That file is per user,
-so a second agent on one machine keeps its own by naming the file with
-`HUB_CONFIG=<path>`. Enrolling over the token already configured is refused;
-`--force` replaces it.
+A successful enrolment writes the hub URL, the member and the token as a
+`[[credential]]` in the user's `config.toml`, so the next command reaches the hub
+with no environment set. When the operator renames the member on approval, the
+stored credential takes the approved name. Every agent on the machine then uses
+the same member, so there is no per-agent file. Enrolling over a credential for
+the same pair is refused; `--force` replaces it.
+
+## `token`
+
+```sh
+agent-hub token [--url U] [--member M] [--reveal]
+agent-hub token --headers [--agent A] [--url U]
+```
+
+The first form prints `{url, member, source, state}`: which hub and member the
+resolver chose, where each came from, and the state (`ok`, `tokenless`, `no_hub`,
+`several_members` or `needs_trust`). It prints the token only with `--reveal`.
+
+`--headers` prints the JSON headers an MCP client needs, for a client that can run
+a command to get them: `{"Authorization":"Bearer <token>","X-Agent-Id":"<A>"}`.
+It leaves out `Authorization` unless the state is `ok`, and always exits 0, so a
+tokenless client still connects to the enrol surface. With no `--url`, the hub is
+read from `CLAUDE_CODE_MCP_SERVER_URL`, with a trailing `/mcp` removed.
+
+## `trust`
+
+```sh
+agent-hub trust [--path DIR]
+```
+
+Record the pairing that the `.agent-hub.toml` at `DIR` (default: the current
+directory) selects, a hub URL and a member, under `[trust]` in `config.toml`.
+Until a pairing is trusted, a client sends no token for it.
+
+## `migrate`
+
+```sh
+agent-hub migrate --check [--data-dir DIR]
+```
+
+Preflight an upgrade against a store without changing it: where each legacy owner
+would be placed, which sessions would merge, and any condition that would stop the
+upgrade. It exits 0 when clean and 78 on a stop. A store that a serving hub holds
+exits 75; run it on a copy or a stopped hub. [Upgrade and roll
+back](/operate/upgrade-and-rollback.md) has the procedure.
 
 ## Offline data operations
 

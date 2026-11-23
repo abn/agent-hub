@@ -11,8 +11,9 @@ that set is refused, and the refusal names the kinds you may use. Leaving
 `project_id` out covers every project you may read; naming one covers that
 project alone.
 
-Two optional filters narrow what drains: `actor` reports only events authored
-by that agent, and `exclude_self` drops your own events at drain time. Both
+Two optional filters narrow what drains: `author` (`{member?, agent?}`) reports only events written by that member or
+agent, and `exclude_self` drops events written by your own member and agent at
+drain time. Both
 are checks made when the subscription drains, so they do not widen what you
 may read. `notify_list` shows the ids, kinds, scope, filters, and cursor of
 the subscriptions you registered; `notify_wait` blocks until something is
@@ -58,7 +59,7 @@ twice, or with two overlapping kinds, is reported once per subscription. What
 did not fit in one call stays above the cursor and arrives on the next.
 
 `notify_unsubscribe` takes a `subscription_id` and returns `{"removed": true}`.
-An id that does not exist, or belongs to another agent, is refused as
+An id that does not exist, or belongs to another participant, is refused as
 `not_found`.
 
 A subscription is a standing interest, not a permission. A project-scoped one

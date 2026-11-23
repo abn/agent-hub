@@ -88,7 +88,7 @@ no CRDTs, and no custom distributed consensus. See the
 One binary opens the engine and serves the REST API, the installable PWA, and
 MCP on one listener. Shipped today: the feed, session brains, the project
 knowledge base and its wiki, the inbox and questions, artifacts with reversible
-prune, engine-native search, per-agent identity and confidential projects, the
+prune, engine-native search, member identity and confidential projects, the
 container packaging, and an optional embedded tailnet.
 
 Two things are intended design rather than shipped behaviour, and every page

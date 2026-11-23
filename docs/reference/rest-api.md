@@ -48,7 +48,7 @@ POST   /api/v1/questions/:id/answer
 POST   /api/v1/approvals/:id/decision
 GET    /api/v1/stream
 
-GET    /api/v1/sessions?project=
+GET    /api/v1/sessions?project=&status=&member=&agent=&live=1&parent=
 GET    /api/v1/sessions/:id
 GET    /api/v1/sessions/:id/brain?path=
 GET    /api/v1/sessions/:id/brain/entry?path=
@@ -56,15 +56,14 @@ GET    /api/v1/sessions/:id/replay
 GET    /api/v1/sessions/:id/resume
 POST   /api/v1/sessions/:id/scores
 POST   /api/v1/sessions/:id/end
-POST   /api/v1/sessions/:id/reassign
 
-GET    /api/v1/agents
-POST   /api/v1/agents
-POST   /api/v1/agents/:id/token
-DELETE /api/v1/agents/:id/token
-GET    /api/v1/agents/:id/grants
-POST   /api/v1/agents/:id/grants
-DELETE /api/v1/agents/:id/grants/:projectId
+GET    /api/v1/members
+POST   /api/v1/members
+POST   /api/v1/members/:id/token
+DELETE /api/v1/members/:id/token
+GET    /api/v1/members/:id/grants
+POST   /api/v1/members/:id/grants
+DELETE /api/v1/members/:id/grants/:projectId
 POST   /api/v1/enrol
 GET    /api/v1/enrol/status?wait=30
 POST   /api/v1/enrol/:id/approve
@@ -149,12 +148,12 @@ holding it there while every call fails.
 
 - The control surface uses a config-set admin token. It is required when the
   bind is not loopback, since the surface rejects every request without one.
-- The MCP endpoint uses bearer tokens. A token is an identity in its own right,
-  and grants are binary per project. The stdio transport is the local admin and
+- The MCP endpoint uses bearer tokens. A token belongs to a member, and grants
+  are binary per project. The stdio transport is the local admin and
   needs no token.
 - Shared artifacts use a password and browser-side encryption, so the recipient
   needs nothing else.
-- The freshness stream at `GET /api/v1/stream` also accepts any active agent
+- The freshness stream at `GET /api/v1/stream` also accepts any active member
   token, so an agent can wake on inbox or feed changes as well as the app.
 - The app asks for the admin token on the Connect screen, and only there, so a
   token is never kept without the hub having accepted it first. It keeps the
@@ -167,7 +166,7 @@ holding it there while every call fails.
   also reaches the API.
 
 The REST API is the operator's control surface. The destructive and privileged
-verbs on it require the admin token: prune and undo, agent and token
+verbs on it require the admin token: prune and undo, member and token
 administration, grants, deleting a project, making a confidential project public,
 reading a session's resume, scoring a run, and taking an online backup
 (`POST /api/v1/backups`, which writes only under the
@@ -186,7 +185,7 @@ rather than the internal bind.
 
 `GET /api/v1/me/pending` is the one route made for an agent rather than the
 human. It answers with what the notification trailer would deliver to the agent
-behind the token, in the trailer's item shape, and delivers none of it: no cursor
+behind the token and the call's agent, in the trailer's item shape, and delivers none of it: no cursor
 moves, so a later `notify_wait` or tool result still carries every item. The one
 exception is a subscription's cursor passing rows that subscription could never
 report because its own filters drop them (kinds, actor, `exclude_self`,
@@ -197,7 +196,7 @@ reads it before each prompt, and a watcher holds it open between turns.
 
 | Query | Meaning |
 |---|---|
-| `session` | One of the caller's own running sessions, by id. Reads that session's scope as `session` does on `notify_wait`: the items asked in it and those asked outside any session. Without it, only the items asked outside any session. Another agent's session is `403`. |
+| `session` | A session by id, or `name` with `project_id`. Reads that session's scope for the caller's participant, as `session` does on `notify_wait`. Without it, only the items the caller's member and agent asked outside any session. |
 | `limit` | How many items to return, 20 by default and 100 at most. |
 | `wait` | Hold the request open up to this many seconds, 60 at most. |
 | `after` | An id from an earlier `cursor`. Only items newer than it are returned. With `wait`, the request ends as soon as one is pending. Without `after`, any pending item ends the wait. |
@@ -217,20 +216,49 @@ scope's read at the later of the trailer's cursor and `after`, so a backlog
 larger than a page is paged through by the cursor alone, with no trailer
 delivering the first page in between.
 
-The token must be an agent's. On a loopback hub with no admin token, a caller
-with no token declares its identity with `X-Agent-Id`, as it does on MCP. The
-admin token is refused with `403`, since the admin has no attention queue, and a
+The token must be a member's. The agent is `X-Agent-Id`, or `cli` when the
+header is absent. On a loopback hub with no admin token, a caller with no token
+is the member `loopback`, as it is on MCP. The admin token is refused with `403`, since the admin has no attention queue, and a
 missing or unknown token is `401`.
+
+## Members and enrolment
+
+`GET /api/v1/members` lists members, each with `id`, `display_name`, `state`
+(`active` or `pending`), `has_live_token`, `last_seen_at`, `personal_project_id`,
+`live_sessions`, and, for one that enrolled, `enrol` with `note`, `source`,
+`agent`, `os` and `host`. `POST /api/v1/members` takes `{id, display_name}`; a new
+id is lower case letters and digits, then `.`, `_` or `-`, up to 63 more. Token
+and grant routes sit under `/api/v1/members/:id`. Reissuing a token revokes the
+previous one and closes its open streams.
+
+A machine joins by enrolling, with no token:
+
+```
+POST /api/v1/enrol
+  {"member":"laptop","display_name":"My laptop","why":"one line",
+   "agent":"cli","os":"linux","host":"laptop"}
+GET  /api/v1/enrol/status?wait=30          Authorization: Bearer <pending token>
+```
+
+The first call returns a pending bearer. The status call returns `{status,
+member, share}`, where `member` is the name the human approved, which may differ
+from the one requested. The human approves with `POST /api/v1/enrol/:id/approve`
+(body `{member}` to rename) or refuses. While pending, the token answers `401`
+with `token_pending` on every other route. Switching enrolment off answers `403`
+with `enrol_disabled`.
 
 ## Errors
 
 Errors are RFC 9457 problem details, whatever part of the request is refused: a
 body over the limit is a `413` with `payload_too_large`, a body without the JSON
 content type a `415`, a bad query string or path segment a `400`, and a method
-the path does not serve a `405` that still names the methods it does. The admin
+the path does not serve a `405` that still names the methods it does.
+A credential or session refusal carries `details.reason` in the problem body,
+for example `token_revoked` or `session_unknown`, with the same values MCP uses;
+see [MCP tools](/reference/mcp-tools.md). The admin
 gate runs before a request's body is read, so a caller without the admin token
 gets `401` whatever body it sent (a query string that cannot be read is still a
-`400` first), and an agent token is not the admin token.
+`400` first), and a member token is not the admin token.
 
 ## Artifact pages
 
@@ -252,17 +280,17 @@ from a proxy, and a number that cannot be measured is absent rather than zero.
 
 | Route | Carries |
 |---|---|
-| `GET /api/v1/home` | `unread`, `waiting`, `waiting_items` (the newest hundred of the items that wait, newest first, each shaped as an inbox entry with its `project_display_name`; `waiting` stays the size of the whole queue), `node` (`host`, `mode`, the same datum Storage carries), `agents_active`, `last_event_at`, `recent` (the newest fifty events across every project), `unseen` (per project, the feed events above its cursor), each `recent` event and each `unseen` row with its `project_display_name` beside `project_id`, `storage` (`used_bytes`, `capacity_bytes`, `free_bytes`) and `prunable` (`sessions`, `bytes`), so Now makes one request |
-| `GET /api/v1/projects` and `GET /api/v1/projects/:id` | each project with its `id`, `display_name`, `owner_agent`, `created_at` and `unseen_events` |
+| `GET /api/v1/home` | `unread`, `waiting`, `waiting_items` (the newest hundred of the items that wait, newest first, each shaped as an inbox entry with its `project_display_name`; `waiting` stays the size of the whole queue), `node` (`host`, `mode`, the same datum Storage carries), `sessions_live`, `last_event_at`, `recent` (the newest fifty events across every project), `unseen` (per project, the feed events above its cursor), each `recent` event and each `unseen` row with its `project_display_name` beside `project_id`, `storage` (`used_bytes`, `capacity_bytes`, `free_bytes`) and `prunable` (`sessions`, `bytes`), so Now makes one request |
+| `GET /api/v1/projects` and `GET /api/v1/projects/:id` | each project with its `id`, `display_name`, `owner_member`, `created_at` and `unseen_events` |
 | `GET /api/v1/projects/:id/feed` | `events`, `next_since`, `next_before`, and `last_seen`, the newest event the human has seen, so a client draws the unread dot on an event whose id is above it. The `comment` and `page` kinds are written for agents and are not on the human feed: a `kinds` filter naming either is refused with `invalid_argument` |
 | `POST /api/v1/projects/:id/feed/seen` | `project_id`, the resulting `last_seen`, and `advanced`, false when the cursor did not move, as it does not for a `comment` or `page` event |
 | `POST /api/v1/projects/:id/feed/dismiss` | takes `event_ids`, up to 500 of them, and answers `dismissed`, how many the call newly hid. An id already dismissed, an id of another project, an id that names nothing and the id of a `comment` or `page` event are left out rather than refused |
 | `POST /api/v1/projects/:id/feed/dismiss-read` | `dismissed`, how many human events at or below the project's read cursor were newly hidden. A project with no cursor dismisses nothing, and the hub's own audit trail is left alone |
 | `POST /api/v1/projects/:id/ideas` | `id`, the event id of the idea; the idea is appended as a needs-action signal and surfaces in the inbox for triage |
 | `GET /api/v1/storage` | `total_bytes` (what the projects hold) and `used_bytes` (the whole data directory, hub store included), `capacity_bytes` and `free_bytes` for the volume, `data_path`, `node` (`host`, `mode`), `by_kind` (`events`, `sessions`, `artifacts`, `knowledge`), `events_shared_bytes`, `prunable`, and a row per project with its `project_display_name`, its `events_bytes`, `session_bytes`, `artifact_bytes` and `kb_bytes`, its prunable sessions and bytes, and its optional `last_write` timestamp. Every project has a row, one that holds nothing with zeros, so a project a prune has just emptied keeps its row |
-| `GET /api/v1/projects/:id/stats` | `events`, `artifacts`, `sessions`, `kb_pages`, `agents_active`, `threads`, `agents_written`, and `disk_bytes` for the project header, its tab labels, and the deletion manifest |
+| `GET /api/v1/projects/:id/stats` | `events`, `artifacts`, `sessions`, `kb_pages`, `sessions_live`, `threads`, `members_written`, and `disk_bytes` for the project header, its tab labels, and the deletion manifest |
 | `GET /api/v1/projects/:id/kb/...` | the knowledge base pages, their history, backlinks, lint and derived numbers, route by route in [Knowledge base pages](/reference/knowledge-base-pages.md) |
-| `GET /api/v1/sessions?project=` | each session, its owner, handoff, lineage and `brain_bytes` |
+| `GET /api/v1/sessions?project=` | each session with its `participants` (`member`, `agent`, `joined_at`, `last_seen_at`, `left_at`), `parent_id`, `children_count`, `started_by`, handoff, lineage and `brain_bytes`. `member`, `agent` and `live=1` filter it, and `parent` lists one session's children. `project` is not required with `live=1`, `member` or `parent` |
 | `GET /api/v1/sessions/:id` | the same fields plus `events`, the count of feed events the session produced, and `last_event`, the newest of them as one line |
 | `GET /api/v1/sessions/:id/replay` | `session_id` and `events`, the brain's tool-call audit entries oldest first; admin token required, and an empty list when the brain is gone |
 | `GET /api/v1/sessions/:id/resume` | `session_id`, `anchor` (the latest anchor or null, carrying `id`, `phase`, `summary`, `next_steps`, `sources` with each source's `id`, `kind`, `summary` and `found`, `owner` and `created_at`), `scores` (each carrying `id`, `slice`, `score`, `rationale`, `reviewer` and `created_at`), `events` (the session events after the anchor, oldest first), `next_since`, `recovery_path` and `truncated`; admin token required |
@@ -362,9 +390,9 @@ its artifact password policy (`off`, `optional` or `required`, and `optional` fo
 every project that has not said otherwise); a field the body does not name is
 left alone, and an unknown field is ignored as it is on the create route. The id
 is the slug every MCP call and every other table names, so it is read-only after
-creation and a body that carries one is refused. An agent's personal space is
+creation and a body that carries one is refused. A member's personal space is
 settable like any other project; only deleting it is refused, because that is the
-agent's lifecycle rather than a setting.
+member's lifecycle rather than a setting.
 
 A batch prune takes every ended session of one project, or of every project, with
 the same soft delete, undo window and sweep as pruning one. It never touches an

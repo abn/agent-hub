@@ -495,7 +495,7 @@ install over a Quadlet unit. To move a container's data to a native install:
    `mkdir -p <data directory> && tar -xf hub-data.tar -C <data directory>`.
 5. Check it: `agent-hub check --data-dir <data directory>`.
 6. To keep the admin token you used, copy `HUB_ADMIN_TOKEN` from `hub.env` into
-   `[hub] admin_token`. Agent tokens live in the store and keep working
+   `[hub] admin_token`. Member tokens live in the store and keep working
    whatever the admin token is.
 7. `agent-hub start`. Delete the moved-aside Quadlet file when you are sure.
 

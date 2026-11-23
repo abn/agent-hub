@@ -135,7 +135,7 @@ The rail is navigation, not a pane. It is one 52px identity block, then rows,
 then a footer, and it owes no control row. Its PROJECTS rows are the hub's
 ordinary projects, drawn from the same listing the register reads and taken
 again when a token is kept or a project is created, renamed or deleted. An
-agent's personal space never appears among them. The project's section switcher
+member's personal space never appears among them. The project's section switcher
 is a segmented control inside the index header, not a tab strip above the panes:
 it selects what the index lists and never changes the shell.
 
@@ -242,7 +242,7 @@ rather than by its width.
 Nine screens share the shell: Now, an inbox item, the artifacts list, Project
 (feed, artifacts, sessions and the knowledge base under one shell), the artifact
 viewer, session detail,
-Search, Storage and prune, and Settings, with Agents and access on its own
+Search, Storage and prune, and Settings, with Members and access on its own
 screen reached from Settings and Connect as the token gate. Each screen's
 design is below; the routes and the fields they carry are in
 [REST API](/reference/rest-api.md).
@@ -397,11 +397,11 @@ document and payload stay, so an agent still reads it.
 
 The sessions index groups sessions into active and ended, each row carrying the
 middle-truncated session id and its working name on the title line, a state dot
-and its status, the owner, the time and a right-column mono size. The session
+and its status, who took part, the time and a right-column mono size. The session
 detail draws the brain tree in the stage, under an anchor card. The card opens
-with the section label Anchor and then the owner's last phase boundary: the
+with the section label Anchor and then the last phase boundary a participant left: the
 phase as a value pill, the summary capped at 640, an ordered list of next
-steps, the sources it rests on, and the owner and time. The card is lines on
+steps, the sources it rests on, and who wrote it and when. The card is lines on
 the canvas, not a box, and the session's state is a dot and a word. A found source opens the
 event in the project's feed; a source that no longer resolves keeps its mono id
 and the word "missing" rather than being dropped. The latest score reads
@@ -418,9 +418,8 @@ A `kv` key is read in the aside, named
 in mono with the copy glyph, and on a coarse pointer the same value opens as one
 bottom sheet opened by the tree leaf. An `fs` file opens in the stage rendered
 by the same parser as an artifact, read-only, with a back control and a mono
-provenance line. The header side carries the owner, the handoff note and the
-lineage, with a Reassign control beside the copy-id glyph; Reassign never takes
-the Prune or End slot, which belongs to the session's own life. The session id
+provenance line. The header side carries the participants, the handoff note and the
+lineage; there is no Reassign, because a session belongs to no one, and the Prune and End slots belong to the session's own life. The session id
 appears once, in the stage header's meta line, with the copy glyph on the row
 that owns it.
 
@@ -536,7 +535,7 @@ reader.
 Settings is a 640px column of 48px rows under three quiet group labels: THIS
 DEVICE (theme as a three-way segmented group, compact rows, waiting on you),
 KEYBOARD (single-key shortcuts, the group absent under a coarse pointer), and
-THIS HUB (storage, agents and tokens, Connect, and Version). Version is a value
+THIS HUB (storage, members and tokens, Connect, and Version). Version is a value
 row reading the version and short commit the binary was built from, with no
 destination, no chevron and no tab stop. One helper line in the whole screen,
 and no paragraph explains a toggle. Theme shows a three-way group (System,
@@ -553,13 +552,13 @@ destinations live under the More tab root.
   <img src="../assets/screens/more-phone-light.png" alt="The phone's More sheet, holding the destinations the tab bar does not.">
 </picture>
 
-### Agents and access
+### Members and access
 
 Access management lives on its own screen reached from Settings, linked from an
 Access row. It displays the admin token with a copy control and a note that it
 comes from startup configuration and changes on restart with a different
-`HUB_ADMIN_TOKEN`. Agents are records with their personal space path, beside
-controls to reissue or revoke a token and to remove project grants under a
+`HUB_ADMIN_TOKEN`. Members are records with their personal space path, their live sessions and the agents seen on them, beside
+controls to reissue or revoke a token (reissue is how a member moves to a new machine) and to remove project grants under a
 confirmation dialog. A grant is access or no access, with no read or write
 level, so no screen renders read or write as an access value. The lock glyph
 and the word "confidential" appear only on a confidential project, and the
@@ -569,7 +568,7 @@ the screen keeps revoke and grant removal as separate controls.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/access-desktop-dark.png">
-  <img src="../assets/screens/access-desktop-light.png" alt="Access at desktop width: the agents, their tokens and their grants.">
+  <img src="../assets/screens/access-desktop-light.png" alt="Access at desktop width: the members, their tokens and their grants.">
 </picture>
 
 ### Connect
@@ -722,11 +721,12 @@ A fresh hub opens on Connect, where the token is checked against the hub before
 it is stored and the reader is returned to the route they were on. The Projects
 register is reachable from the rail's PROJECTS header on the desktop and from
 the tab bar on a phone, and a new hub's empty Now carries one call to action,
-create a project. Creating an agent issues its token once and reveals it; on a
-phone as well as a desktop the reveal offers the MCP setup for that agent with
-the token embedded, so the two halves are not spliced by hand. A pending
-enrolment reads on Now and in its item as "Pending enrolment" with the reason the agent
-gave, and the Access list marks a pending agent and shows its reason. A hub
+create a project. Adding a member issues its token once and reveals it; on a
+phone as well as a desktop the reveal separates what to store on that machine,
+which carries the token, from the project config, which carries none, so the two
+are not spliced by hand. A pending
+enrolment reads on Now and in its item as "Pending enrolment" with the reason the machine
+gave, and the Members list marks a pending member and shows its reason. The approval card names the member, the first agent, the operating system and the source, and says approval covers every agent on the machine; the name can be changed before approving. A hub
 with no admin token configured says so on Connect and points at the startup
 fix rather than repeating the refusal.
 
@@ -865,7 +865,7 @@ link back, and an address that names no screen opens Now.
 A grant is access or no access, so no screen renders read or write as an access
 value. The revoke-token dialog says that the token stops working now, that
 projects stay granted, and that a new token restores access. The stage's foot
-reads Revoke token, and an agent with no live token reads "No live token" with
+reads Revoke token, and a member with no live token reads "No live token" with
 Issue token beside it.
 
 ## See also

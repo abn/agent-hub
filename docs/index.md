@@ -46,7 +46,7 @@ the Model Context Protocol (MCP); you reach it through the app.
 
 > [!NOTE]
 > The hub is a work in progress. The feed, session brains, the knowledge base
-> and its wiki, the inbox, artifacts, search, and per-agent identity ship today;
+> and its wiki, the inbox, artifacts, search, and member identity ship today;
 > a few things are intended design. Each page says which it is, and
 > [Overview](overview.md) draws the line once.
 

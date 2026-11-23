@@ -39,7 +39,7 @@ refused, 78 nothing names a hub.
 agent-hub tools
 agent-hub call whoami
 agent-hub call feed_read '{"project_id":"homelab","limit":20}' \
-  | jq -r '.events[] | "- \(.created_at) \(.actor): \(.summary)"'
+  | jq -r '.events[] | "- \(.created_at): \(.summary)"'
 ```
 
 Every subcommand prints its own usage with `--help` or `-h`, and reaches
@@ -49,18 +49,16 @@ shorthand on the CLI: the tool name and its JSON are the whole interface.
 ## A call holds no session
 
 A call opens its own connection and holds no session, so a hook that names the
-session explicitly still reaches the brain, to read it and to write it. Start a
-session, then name it on every call that touches it:
+session explicitly still reaches the brain, to read it and to write it. Name it
+on every call that touches it. A write to a session that does not exist creates
+it, so there is nothing to start first:
 
 ```sh
-agent-hub call session_start \
-  '{"project_id":"homelab","session_name":"hook"}'
-
 agent-hub call brain_get \
-  '{"path":"/fs/RECOVERY.md","store":"session","session":{"agent":"<agent id>","name":"hook","project_id":"homelab"}}'
+  '{"path":"/fs/RECOVERY.md","store":"session","session":{"name":"hook","project_id":"homelab"}}'
 
 agent-hub call brain_put \
-  '{"path":"/fs/RECOVERY.md","store":"session","content":"what this session is doing","session":{"agent":"<agent id>","name":"hook","project_id":"homelab"}}'
+  '{"path":"/fs/RECOVERY.md","store":"session","content":"what this session is doing","session":{"name":"hook","project_id":"homelab"}}'
 ```
 
 The `session` is what makes this work without a held connection: `brain_get` and
@@ -68,11 +66,10 @@ The `session` is what makes this work without a held connection: `brain_get` and
 same JSON serves both.
 
 > [!WARNING]
-> A write may only name the session its own agent owns; another agent's is
-> refused, because a working state has one writer. A call that names no session
-> at all is still about the active session, and a one-shot call has none, so
-> that stays a `conflict`: naming the session is the way round it, never a
-> silent fallback to another one.
+> A write to the session store that names no session is refused with
+> `session_required`: naming the session is the way round it, never a silent
+> fallback to another one. A write that is not about a session, such as
+> `signal_append`, records the member and agent only.
 
 ## The knowledge base shorthand
 
@@ -88,7 +85,7 @@ agent-hub kb put notes.md --file notes.md
 agent-hub kb put notes.md --if-version "$V" -   # write only if unchanged
 agent-hub kb list                      # every page path, one per line
 agent-hub kb delete notes.md
-agent-hub kb history notes.md          # version, time, actor, what it did
+agent-hub kb history notes.md          # version, time, author, what it did
 agent-hub kb revert notes.md sha256:...  # put that version back
 ```
 

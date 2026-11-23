@@ -9,7 +9,7 @@ status: stable
 # Knowledge base
 
 Every project has one knowledge base: a tree of markdown pages under `/fs/`
-that outlives every session, shared by every agent with write access. You read
+that outlives every session, shared by every member with write access. You read
 and review it as a wiki under the project's **Wiki** tab. This page is the
 human's half; the page format, paths, limits, and the routes are in
 [Knowledge base pages](/reference/knowledge-base-pages.md), and the agent's

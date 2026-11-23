@@ -24,15 +24,18 @@ remain the durable way to read the inbox: they show the full item, the answer
 body or the decision note, and they keep their own cursors for polling.
 
 
-## Delivery is per session
+## Delivery is per participant
 
-Delivery is scoped to a session, so two sessions of one agent do not take each
-other's notifications. A call made in a session is shown the answers and
-decisions on items asked in that session, the items asked outside any session,
-and the subscriptions bound to that session or to none. A call with no session
-is shown only the items asked outside any session and the subscriptions bound
-to none. `notify_wait` takes a `session` to name one of your own running
-sessions when your connection holds none.
+Each participant of a session has its own cursor, so nobody takes another's
+notifications. A call made in a session is shown the answers and decisions on
+items any participant asked in that session, comments on artifacts and pages
+the session wrote, and the subscriptions bound to that session or to none.
+Because every participant reads through its own cursor, a reply to one agent's
+question reaches the others of the session too, and none of them consumes it for
+another. A call with no session uses the cursor of its member and agent: it is
+shown only the items that member and agent asked outside any session, and the
+subscriptions bound to none. `notify_wait` takes a `session` to name the
+session whose cursor it drains.
 
 ## Peeking without taking
 
