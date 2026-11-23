@@ -125,6 +125,8 @@ proves and how to write a check.
    docs stale is not finished.
 5. **Run `make check`** and keep the output. The gate passing, with the captured
    output to show for it, is what done means.
+   Before that, run only the tests the change touches and small tests over its
+   likely regression paths; the full e2e suite runs in PR CI.
 
 ## Conventions
 

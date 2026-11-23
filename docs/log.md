@@ -6,6 +6,21 @@ software release notes and the repository changelog.
 
 ## 2026-11-23
 
+### Interface pass: rows, menus, Settings, errors
+
+* **Update**: [Human interface](/design/human-interface.md) states that an
+  error, a failure note or an invalid field is drawn in ink with words, never
+  in the danger tone, which stays reserved for deletion. The composer's send
+  control sits on the ink fill.
+* **Update**: list rows, the selected row and empty notes are drawn one way on
+  Now, Feed, Sessions and Artifacts, and the wiki screens for those four were
+  recaptured.
+* **Update**: the artifact viewer opens its versions as a menu on a desktop,
+  and that menu stacks above the page at narrow widths. Artifacts are named by
+  file.
+* **Update**: Settings and the phone More screen follow the 48px row contract
+  under quiet group labels, and their screens were recaptured.
+
 ### Landing page: harness tabs
 
 * **Update**: the landing page's "Connect an agent" step shows one tab per

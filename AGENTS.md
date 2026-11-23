@@ -168,9 +168,15 @@ any access rule.
 
 ## Verification
 
-A change is not done until `make check` passes and the relevant tests are
-green, with real captured output. Wiki changes are recorded in `docs/log.md`,
-and the bundle is validated by `make docs/check`.
+A change is not done until the relevant tests are green and `make check`
+passes, with real captured output. `make check` is the full gate that hooks
+and CI reuse; locally, weigh a test run by what it returns. Run the tests the
+change adds or touches and small tests over its likely regression paths,
+including any test that reads the files you changed (in `e2e/`,
+`.agents/js-tests/` and `tests/`), then spot-check what changed by looking at
+it. Run the full e2e suite locally only when the change warrants it;
+otherwise PR CI runs it. Wiki changes are recorded in `docs/log.md`, and the
+bundle is validated by `make docs/check`.
 
 ## Contributor guide
 
