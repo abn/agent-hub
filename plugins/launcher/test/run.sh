@@ -127,6 +127,7 @@ base="http://127.0.0.1:$port/download"
 # plain HTTP allowed, a short probe timeout, the temp fallback moved under the
 # test root, and a pause point the lock-breaking cases can wait on.
 mkdir -p "$root/bin" "$root/tmpfs"
+# shellcheck disable=SC2016 # the definition is written out unexpanded
 pause_def='test_pause() { [ "$LAUNCHER_TEST_PAUSE_AT" = "$1" ] || return 0; : >"$LAUNCHER_TEST_GATE.reached"; while [ ! -e "$LAUNCHER_TEST_GATE" ]; do sleep 0.1; done; }'
 sed -e "s|^base=.*|base=$base|" \
   -e 's|^tls_only=1|tls_only=0|' \
@@ -297,7 +298,7 @@ check "no binary yet" test ! -e "$dir/agent-hub"
 check "the install finishes in the background" wait_for "$dir/agent-hub" 20
 check "the binary is executable" test -x "$dir/agent-hub"
 check "the lock is released" wait_gone "$dir/install.lock"
-check "no temp directory is left" is_empty "$(ls -A "$dir" | grep '^\.tmp' || true)"
+check "no temp directory is left" is_empty "$(find "$dir" -mindepth 1 -maxdepth 1 -name '.tmp*')"
 out=$(run_launcher x y)
 check "the next call runs it" eq "$out" "stub ran: x y"
 
@@ -350,7 +351,7 @@ make_lock "$(dead_pid) $host $(old_ms)"
 run_launcher --install
 check "an old lock with a dead pid is broken and the install runs" test -x "$dir/agent-hub"
 check "the lock is released" test ! -d "$dir/install.lock"
-check "the broken lock leaves no stale directory" is_empty "$(ls -A "$dir" | grep 'lock.stale' || true)"
+check "the broken lock leaves no stale directory" is_empty "$(find "$dir" -mindepth 1 -maxdepth 1 -name '*lock.stale*')"
 
 new_case lock-other-host
 live_pid
@@ -381,7 +382,7 @@ make_lock "$(dead_pid) $host $(old_ms)"
 CURL_DELAY=1
 export CURL_DELAY
 racers=
-for n in 1 2 3 4; do
+for _ in 1 2 3 4; do
   run_launcher --install &
   racers="$racers $!"
 done
@@ -469,7 +470,7 @@ touch -t 202001010000 "$dir/install.lock.break"
 run_launcher --install
 check "an ownerless guard older than 60 s is reaped and the install runs" test -x "$dir/agent-hub"
 check "no guard is left" test ! -e "$dir/install.lock.break"
-check "no stale directory is left" is_empty "$(ls -A "$dir" | grep 'stale' || true)"
+check "no stale directory is left" is_empty "$(find "$dir" -mindepth 1 -maxdepth 1 -name '*stale*')"
 
 new_case guard-dead-owner
 make_lock "$(dead_pid) $host $(old_ms)"
@@ -495,7 +496,7 @@ rc=$?
 check "the install fails" test "$rc" -ne 0
 check "no binary is left" test ! -e "$dir/agent-hub"
 check "launcher-error says why" eq "$(cat "$dir/launcher-error" 2>/dev/null)" "checksum mismatch"
-check "no temp directory is left" is_empty "$(ls -A "$dir" | grep '^\.tmp' || true)"
+check "no temp directory is left" is_empty "$(find "$dir" -mindepth 1 -maxdepth 1 -name '.tmp*')"
 check "the lock is released" test ! -d "$dir/install.lock"
 gets=$(archive_gets)
 out=$(hook_as s1 hook prompt --harness claude)
@@ -553,6 +554,7 @@ fi
 
 # --- the cache ------------------------------------------------------------
 
+# shellcheck disable=SC2012 # the mode string is the point; stat flags differ per OS
 mode_of() { ls -ld "$1" | cut -c1-10; }
 uid=$(id -u)
 
@@ -625,6 +627,7 @@ check "a symlinked binary is not run" is_empty "$out"
 wait_for "$dir/install.lock" 5 >/dev/null
 wait_gone "$dir/install.lock" >/dev/null
 check "the install replaces it with a regular file" test -f "$dir/agent-hub" -a ! -L "$dir/agent-hub"
+# shellcheck disable=SC2016 # the line is compared literally
 check "and leaves the link's target alone" eq "$(sed -n 2p "$c/real-stub")" 'case "$1" in'
 
 new_case bin-is-directory
@@ -717,8 +720,8 @@ bad_tar() {
   run_launcher --install
   check "the install fails" test ! -e "$dir/agent-hub"
   check "launcher-error says the archive is unsafe" contains "$(cat "$dir/launcher-error" 2>/dev/null)" "unsafe"
-  check "nothing is written outside the staging directory" is_empty "$(ls -A "$evil"; ls "$dir" | grep -v 'launcher-error' || true)"
-  check "no temp directory is left" is_empty "$(ls -A "$dir" | grep '^\.tmp' || true)"
+  check "nothing is written outside the staging directory" is_empty "$(find "$evil" "$dir" -mindepth 1 -maxdepth 1 ! -name launcher-error)"
+  check "no temp directory is left" is_empty "$(find "$dir" -mindepth 1 -maxdepth 1 -name '.tmp*')"
   check "the lock is released" test ! -d "$dir/install.lock"
   cp "$root/good.tar.gz" "$rel/$stem.tar.gz"
   cp "$root/good.tar.sha256" "$rel/$stem.sha256"
@@ -747,7 +750,7 @@ if command -v unzip >/dev/null 2>&1; then
     unset FAKE_S FAKE_M
     check "the install fails" test ! -e "$wdir/agent-hub.exe"
     check "launcher-error says the archive is unsafe" contains "$(cat "$wdir/launcher-error" 2>/dev/null)" "unsafe"
-    check "nothing is written outside the staging directory" is_empty "$(ls -A "$evil"; ls "$wdir" | grep -v 'launcher-error' || true)"
+    check "nothing is written outside the staging directory" is_empty "$(find "$evil" "$wdir" -mindepth 1 -maxdepth 1 ! -name launcher-error)"
     cp "$root/good.zip" "$rel/$wstem.zip"
     cp "$root/good.zip.sha256" "$rel/$wstem.sha256"
   }
@@ -763,7 +766,7 @@ bad_sum() {
   run_launcher --install
   check "$1: the install fails" test ! -e "$dir/agent-hub"
   check "$1: launcher-error says why" contains "$(cat "$dir/launcher-error" 2>/dev/null)" "$2"
-  check "$1: no temp directory is left" is_empty "$(ls -A "$dir" | grep '^\.tmp' || true)"
+  check "$1: no temp directory is left" is_empty "$(find "$dir" -mindepth 1 -maxdepth 1 -name '.tmp*')"
   check "$1: the lock is released" test ! -d "$dir/install.lock"
   cp "$root/good.tar.sha256" "$rel/$stem.sha256"
 }
