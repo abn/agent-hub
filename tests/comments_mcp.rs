@@ -232,7 +232,7 @@ fn comment_resolve_across_artifacts_is_not_found() {
 fn comment_post_appends_a_feed_event() {
     let data_dir = TempDir::new("comment-feed");
     common::seed::seed_project(data_dir.path(), "proj");
-    let mut server = McpServer::mcp(data_dir.path(), &[("HUB_AGENT_ID", "stdio-agent")]);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let artifact_id = publish(&mut server);
@@ -249,7 +249,7 @@ fn comment_post_appends_a_feed_event() {
             item["kind"] == "comment"
                 && item["summary"] == "comment on Report"
                 && item["payload"]["target"] == "artifact"
-                && item["payload"]["author"] == "stdio-agent"
+                && item["payload"]["author"] == "local"
         }),
         "posting a comment records a comment event: {feed}"
     );
@@ -265,7 +265,7 @@ fn comment_post_appends_a_feed_event() {
 fn an_idempotent_comment_replay_appends_no_second_event() {
     let data_dir = TempDir::new("comment-replay-feed");
     common::seed::seed_project(data_dir.path(), "proj");
-    let mut server = McpServer::mcp(data_dir.path(), &[("HUB_AGENT_ID", "stdio-agent")]);
+    let mut server = McpServer::mcp(data_dir.path(), &[]);
     server.initialize();
 
     let artifact_id = publish(&mut server);

@@ -26,8 +26,9 @@ use crate::policy::{self, Access};
 use crate::principal::Principal;
 use crate::store::anchors;
 use crate::store::events::{self, BriefFilter, Event};
-use crate::store::sessions::{self, Session, SessionQuery};
+use crate::store::sessions::{self, Session, SessionFilter};
 
+use super::session_arg::{Mode, SessionArg};
 use super::{HubServer, to_error_data};
 use crate::brain::RECOVERY_PATH;
 
@@ -46,22 +47,33 @@ impl HubServer {
         policy::authorize(&self.state.db, &principal, &project_id, Access::Read)
             .await
             .map_err(to_error_data)?;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&project_id),
+                Mode::Read,
+            )
+            .await
+            .map_err(to_error_data)?;
         self.state.settle_before_read().await;
 
-        let active = self
-            .active
-            .lock()
-            .await
+        let active = resolved
+            .session
             .as_ref()
-            .filter(|lease| lease.project_id == project_id)
-            .map(|lease| lease.session_id.clone());
+            .filter(|session| session.project_id == project_id)
+            .map(|session| session.id.clone());
         let previous = previous_session(&self.state.db, &principal, &project_id, active)
             .await
             .map_err(to_error_data)?;
 
-        let cursor = events::agent_cursor(&self.state.db, &project_id, &principal.actor)
-            .await
-            .map_err(to_error_data)?;
+        let cursor = match principal.participant() {
+            Some(key) => events::feed_cursor(&self.state.db, &project_id, &key)
+                .await
+                .map_err(to_error_data)?,
+            None => None,
+        };
         let (since, basis) = match (cursor, previous.as_ref()) {
             (Some(cursor), _) => (Some(cursor), "feed_cursor"),
             (None, Some(session)) => (id_floor(&session.last_activity), "previous_session"),
@@ -100,7 +112,8 @@ impl HubServer {
 
         Ok(CallToolResult::structured(json!({
             "project_id": project_id,
-            "agent": principal.actor,
+            "agent": principal.agent(),
+            "member": principal.member(),
             "since": { "event_id": since, "basis": basis },
             "answers": answers,
             "previous_session": previous_view,
@@ -115,28 +128,36 @@ impl HubServer {
 struct SessionBriefParams {
     /// The project to brief on.
     project_id: String,
+    /// The session this call belongs to. Naming a session that does not exist
+    /// yet creates nothing: a brief only reads.
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// The caller's most recently active session in the project other than the
-/// one this connection is working, or none.
+/// one the call names, or none.
 async fn previous_session(
     db: &turso::Database,
     principal: &Principal,
     project_id: &str,
     active: Option<String>,
 ) -> crate::Result<Option<Session>> {
-    let rows = sessions::query(
+    let Some(member) = principal.member() else {
+        return Ok(None);
+    };
+    let rows = sessions::list_filtered(
         db,
-        &SessionQuery {
+        &SessionFilter {
             project_id: Some(project_id),
-            agent: Some(&principal.actor),
-            limit: 2,
-            ..SessionQuery::default()
+            member: Some(member),
+            limit: Some(2),
+            ..SessionFilter::default()
         },
     )
     .await?;
     Ok(rows
         .into_iter()
+        .map(|listed| listed.session)
         .find(|session| active.as_deref() != Some(session.id.as_str())))
 }
 

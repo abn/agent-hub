@@ -22,6 +22,11 @@ pub struct StdioClient {
     stdin: ChildStdin,
     lines: Receiver<String>,
     next_id: u64,
+    /// The session the client follows: set by a successful `session_start`,
+    /// cleared by the `session_end` of that session. A call that names no
+    /// session of its own carries it, as a plugin's hook adds it to every hub
+    /// call. [`StdioClient::call_tool_raw`] sends exactly what it is given.
+    following: Option<Value>,
 }
 
 impl StdioClient {
@@ -73,6 +78,7 @@ impl StdioClient {
             stdin,
             lines,
             next_id: 0,
+            following: None,
         }
     }
 
@@ -137,8 +143,47 @@ impl StdioClient {
     }
 
     /// Call one tool and return the whole JSON-RPC message.
+    ///
+    /// The session the client follows is added when the call names none, the
+    /// way a plugin adds it to every hub call. A `session_start` that
+    /// succeeds is followed from then on; a `session_end` of the followed
+    /// session stops it.
     pub fn call_tool(&mut self, name: &str, arguments: Value) -> Value {
+        let mut arguments = arguments;
+        if let (Some(following), Some(object)) = (&self.following, arguments.as_object_mut()) {
+            object.entry("session").or_insert_with(|| following.clone());
+        }
+        let message = self.call_tool_raw(name, arguments.clone());
+        match name {
+            "session_start" => {
+                if let Some(id) = message
+                    .pointer("/result/structuredContent/session_id")
+                    .and_then(Value::as_str)
+                {
+                    self.following = Some(json!({"session_id": id}));
+                }
+            }
+            "session_end" if message.get("error").is_none() => {
+                let ended = arguments
+                    .pointer("/session/session_id")
+                    .or_else(|| arguments.get("session_id"));
+                if ended == self.following.as_ref().and_then(|f| f.get("session_id")) {
+                    self.following = None;
+                }
+            }
+            _ => {}
+        }
+        message
+    }
+
+    /// Call one tool with exactly these arguments, following no session.
+    pub fn call_tool_raw(&mut self, name: &str, arguments: Value) -> Value {
         self.call("tools/call", json!({"name": name, "arguments": arguments}))
+    }
+
+    /// Stop adding a followed session to calls that name none.
+    pub fn forget_session(&mut self) {
+        self.following = None;
     }
 
     fn wait_for(&mut self, id: u64) -> Value {

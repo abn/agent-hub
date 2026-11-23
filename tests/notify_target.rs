@@ -503,7 +503,7 @@ async fn an_enrolment_request_sends_the_same_contentless_post() {
             "/api/v1/enrol",
             None,
             Some(json!({
-                "suggested_id": "agent-wombat",
+                "member": "agent-wombat",
                 "display_name": "Wombat",
                 "why": "Nightly builds",
             })),

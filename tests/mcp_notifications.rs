@@ -260,8 +260,8 @@ fn an_answer_to_a_question_asked_in_a_session_waits_for_that_session() {
         "a call in no session is shown only what was asked outside one: {sessionless}"
     );
 
-    // Starting the same named session binds the connection to it, and the
-    // result of that very call carries what the session was waiting for.
+    // Starting the same named session joins it, and the result of that very
+    // call carries what the session was waiting for.
     let started = server.call_tool(
         "session_start",
         json!({"project_id": "proj", "session_name": "work"}),
@@ -315,8 +315,8 @@ fn notify_wait_in_a_named_session_reads_that_scope_and_leaves_the_others() {
         .as_str()
         .expect("session id")
         .to_string();
-    // The connection now holds the second session. Ask under the first by
-    // naming nothing: re-bind to it, ask, then step aside.
+    // The client follows the session it started last, so start the first again
+    // and ask under it, then step aside.
     first.call_tool(
         "session_start",
         json!({"project_id": "proj", "session_name": "work"}),

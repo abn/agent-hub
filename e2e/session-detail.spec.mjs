@@ -49,7 +49,7 @@ test.describe("session detail", () => {
     const started = await toolCall(hub, mcp, "session_start", { project_id: hub.projectId, session_name: name });
     const id = structured(started).session_id || "";
     expect(id, "the check could not start a session").toBeTruthy();
-    await toolCall(hub, mcp, "brain_put", { path, content: "one", store: "session" });
+    await toolCall(hub, mcp, "brain_put", { path, content: "one", store: "session", session: { session_id: id } });
     return id;
   }
 

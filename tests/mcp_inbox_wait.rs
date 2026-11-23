@@ -112,12 +112,12 @@ async fn post_expiring_approval(db: &turso::Database, actor: &str, seconds: i64)
     .expect("post approval")
 }
 
-/// A hub holding one project and two connected sessions.
+/// A hub holding one project and three connections.
 ///
-/// The sessions are separate on purpose: a streamable HTTP session answers one
-/// request at a time, so a blocking `inbox_wait` on one session would queue the
-/// answer behind it on the same session. Two sessions let the answer land while
-/// the wait is still open.
+/// The connections are separate on purpose: a streamable HTTP connection
+/// answers one request at a time, so a blocking `inbox_wait` on one would queue
+/// the answer behind it. Two connections of the same member let the answer land
+/// while the wait is still open.
 struct Fleet {
     // Declared before the directory: the hub is reaped before its directory goes.
     _child: HubProcess,
@@ -258,12 +258,10 @@ async fn an_embedded_stdio_wait_wakes_when_a_deadline_resolves_the_item() {
         agent_hub::store::projects::create(&db, PROJECT, "Project")
             .await
             .expect("create project");
-        post_expiring_approval(&db, AGENT, 2).await
+        post_expiring_approval(&db, "local", 2).await
     };
-    let mut server = common::stdio::StdioClient::mcp(
-        dir.path(),
-        &[("HUB_AGENT_ID", AGENT), ("HUB_SWEEP_INTERVAL_SECS", "1")],
-    );
+    let mut server =
+        common::stdio::StdioClient::mcp(dir.path(), &[("HUB_SWEEP_INTERVAL_SECS", "1")]);
     server.initialize();
 
     let started = Instant::now();

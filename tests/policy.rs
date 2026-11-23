@@ -2,7 +2,7 @@
 
 use agent_hub::error::ErrorCode;
 use agent_hub::policy::{Access, Visibility, authorize, visibility};
-use agent_hub::principal::Principal;
+use agent_hub::principal::{CredentialState, Principal};
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::search::{self, SearchQuery};
 use agent_hub::store::{identity, inbox, projects};
@@ -24,21 +24,13 @@ fn event(project_id: &str, kind: &str, summary: &str) -> NewEvent {
 }
 
 fn principal(actor: &str, agent_id: &str) -> Principal {
-    Principal {
-        actor: actor.to_string(),
-        agent_id: Some(agent_id.to_string()),
-        is_admin: false,
-        is_pending: false,
-    }
+    let mut principal = Principal::for_member(agent_id, "", CredentialState::Active);
+    principal.actor = actor.to_string();
+    principal
 }
 
 fn admin() -> Principal {
-    Principal {
-        actor: "human".to_string(),
-        agent_id: None,
-        is_admin: true,
-        is_pending: false,
-    }
+    Principal::human()
 }
 
 async fn forbidden(

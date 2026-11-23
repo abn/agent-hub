@@ -1,7 +1,7 @@
 //! Session anchor and score store tests: the five-field contract, source
 //! resolution, the resume view, and the human review gate.
 
-use agent_hub::principal::Principal;
+use agent_hub::principal::{CredentialState, Principal};
 use agent_hub::store::events::{self, NewEvent};
 use agent_hub::store::{anchors, projects, sessions};
 
@@ -17,30 +17,15 @@ async fn open() -> TestDb {
 }
 
 fn agent() -> Principal {
-    Principal {
-        actor: "agent-one".to_string(),
-        agent_id: Some("agent-one".to_string()),
-        is_admin: false,
-        is_pending: false,
-    }
+    Principal::for_member("agent-one", "", CredentialState::Active)
 }
 
 fn other_agent() -> Principal {
-    Principal {
-        actor: "agent-two".to_string(),
-        agent_id: Some("agent-two".to_string()),
-        is_admin: false,
-        is_pending: false,
-    }
+    Principal::for_member("agent-two", "", CredentialState::Active)
 }
 
 fn human() -> Principal {
-    Principal {
-        actor: "human".to_string(),
-        agent_id: None,
-        is_admin: true,
-        is_pending: false,
-    }
+    Principal::human()
 }
 
 async fn source(db: &TestDb, project: &str, session_id: &str, summary: &str) -> String {

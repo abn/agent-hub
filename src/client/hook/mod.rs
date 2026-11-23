@@ -768,7 +768,10 @@ async fn session_end(run: &Run<'_>) -> Result<Output, String> {
     let (hub, _) = run.hub()?;
     let mut conn = hub.open(HOOK_BUDGET).await.map_err(|f| describe(&f))?;
     let result = conn
-        .call("session_end", serde_json::json!({"session_id": session_id}))
+        .call(
+            "session_end",
+            serde_json::json!({"session": {"session_id": session_id}}),
+        )
         .await;
     conn.close().await;
     result.map(|_| Output::default()).map_err(|f| describe(&f))

@@ -11,6 +11,8 @@ use serde_json::json;
 use crate::policy::{self, Access};
 use crate::store::search::{self, SearchQuery};
 
+use super::feed::author_filter;
+use super::session_arg::{Mode, SessionArg};
 use super::{HubServer, to_error_data};
 
 /// Arguments for `search`.
@@ -27,9 +29,22 @@ struct SearchParams {
     /// Restrict to one family: `feed`, `artifact`, `brain`, or `kb`.
     #[serde(default, rename = "type")]
     kind: Option<String>,
-    /// Restrict the results to one session's brain content.
+    /// Restrict the results to one session's brain content, by id.
     #[serde(default)]
     session_id: Option<String>,
+    /// The session this call belongs to. It does not filter the results.
+    #[serde(default)]
+    session: Option<SessionArg>,
+    /// Only results written by this member.
+    #[serde(default)]
+    member: Option<String>,
+    /// Only results written by this agent, such as `claude-code`.
+    #[serde(default)]
+    agent: Option<String>,
+    /// Only results written by this kind of author: `participant`, `human`,
+    /// `local` or `legacy`.
+    #[serde(default, rename = "kind")]
+    author_kind: Option<String>,
     /// Recall backend: "lexical" (default) or "semantic". Semantic mode falls
     /// back to the lexical index when no embedding model is configured.
     #[serde(default)]
@@ -49,6 +64,21 @@ impl HubServer {
         Parameters(params): Parameters<SearchParams>,
     ) -> std::result::Result<CallToolResult, ErrorData> {
         let principal = self.principal(&context);
+        self.resolve_session(
+            &context,
+            &principal,
+            params.session.as_ref(),
+            params.project_id.as_deref(),
+            Mode::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
+        let author = author_filter(
+            params.member.as_deref(),
+            params.agent.as_deref(),
+            params.author_kind.as_deref(),
+        )
+        .map_err(to_error_data)?;
         // `scope = "global"` searches every project; otherwise a project id
         // scopes the search when one is given.
         let project_id = match params.scope.as_deref() {
@@ -74,11 +104,27 @@ impl HubServer {
         let results = search::search(&self.state.db, &query, visible.as_filter())
             .await
             .map_err(to_error_data)?;
+        let mut groups = serde_json::to_value(&results.groups)
+            .map_err(|err| to_error_data(crate::error::Error::Config(err.to_string())))?;
+        let mut count = results.count;
+        if !author.is_empty()
+            && let Some(groups) = groups.as_array_mut()
+        {
+            count = 0;
+            for group in groups.iter_mut() {
+                if let Some(hits) = group.get_mut("hits").and_then(|hits| hits.as_array_mut()) {
+                    hits.retain(|hit| super::author_matches(hit, &author));
+                    count += hits.len();
+                    group["count"] = hits.len().into();
+                }
+            }
+            groups.retain(|group| group["count"].as_u64() != Some(0));
+        }
         Ok(CallToolResult::structured(json!({
-            "count": results.count,
+            "count": count,
             "truncated": results.truncated,
             "took_ms": results.took_ms,
-            "groups": results.groups,
+            "groups": groups,
         })))
     }
 }

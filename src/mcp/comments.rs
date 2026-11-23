@@ -19,6 +19,8 @@ use crate::store::artifacts;
 use crate::store::comments::{self, comment_view, parse_anchor};
 use crate::store::identity;
 
+use super::brain::with_session;
+use super::session_arg::{Mode, SessionArg};
 use super::{HubServer, to_error_data};
 
 #[tool_router(router = comments_router, vis = "pub")]
@@ -43,12 +45,22 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&existing.project_id),
+                Mode::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
         let anchor = parse_anchor(params.anchor).map_err(to_error_data)?;
         let (plaintext, hash) = comments::generate_delete_token();
         let (comment, replayed) = comments::add_comment(
             &self.state.db,
             &params.artifact_id,
-            &principal.actor,
+            &principal.writer(resolved.session_id()),
             &params.body,
             anchor,
             params.anchor_version,
@@ -68,7 +80,7 @@ impl HubServer {
                     title: &existing.title,
                 },
                 &comment.id,
-                &principal.actor,
+                &principal.writer(resolved.session_id()),
             )
             .await;
         }
@@ -78,7 +90,7 @@ impl HubServer {
         if !replayed {
             payload["delete_token"] = Value::String(plaintext);
         }
-        Ok(CallToolResult::structured(payload))
+        Ok(CallToolResult::structured(with_session(payload, &resolved)))
     }
 
     #[tool(
@@ -98,6 +110,15 @@ impl HubServer {
             &principal,
             &existing.project_id,
             Access::Read,
+        )
+        .await
+        .map_err(to_error_data)?;
+        self.resolve_session(
+            &context,
+            &principal,
+            params.session.as_ref(),
+            Some(&existing.project_id),
+            Mode::Read,
         )
         .await
         .map_err(to_error_data)?;
@@ -129,6 +150,16 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&existing.project_id),
+                Mode::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
         let comment = comments::get_comment(&self.state.db, &params.comment_id)
             .await
             .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
@@ -143,9 +174,12 @@ impl HubServer {
             .map_err(to_error_data)?;
 
         self.state.notify();
-        Ok(CallToolResult::structured(json!({
-            "comment": comment_view(&updated),
-        })))
+        Ok(CallToolResult::structured(with_session(
+            json!({
+                "comment": comment_view(&updated),
+            }),
+            &resolved,
+        )))
     }
 
     #[tool(description = "Delete a comment.")]
@@ -167,6 +201,16 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
+        let resolved = self
+            .resolve_session(
+                &context,
+                &principal,
+                params.session.as_ref(),
+                Some(&existing.project_id),
+                Mode::Write,
+            )
+            .await
+            .map_err(to_error_data)?;
         let comment = comments::get_comment(&self.state.db, &params.comment_id)
             .await
             .map_err(|err| to_error_data(policy::conceal(&principal, err)))?;
@@ -181,7 +225,10 @@ impl HubServer {
             .map_err(to_error_data)?;
 
         self.state.notify();
-        Ok(CallToolResult::structured(json!({ "ok": true })))
+        Ok(CallToolResult::structured(with_session(
+            json!({ "ok": true }),
+            &resolved,
+        )))
     }
 }
 
@@ -197,12 +244,16 @@ struct CommentPostParams {
     /// Optional idempotency key, so a retried post returns the original.
     #[serde(default)]
     idempotency_key: Option<String>,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `comment_list`.
 #[derive(Debug, Deserialize, JsonSchema)]
 struct CommentListParams {
     artifact_id: String,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `comment_resolve`.
@@ -214,6 +265,8 @@ struct CommentResolveParams {
     /// The delete token returned at post time, when the caller has no write access.
     #[serde(default)]
     delete_token: Option<String>,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Arguments for `comment_delete`.
@@ -224,6 +277,8 @@ struct CommentDeleteParams {
     /// The delete token returned at post time, when the caller has no write access.
     #[serde(default)]
     delete_token: Option<String>,
+    #[serde(default)]
+    session: Option<SessionArg>,
 }
 
 /// Whether the caller may mutate a comment: a matching delete token suffices,
