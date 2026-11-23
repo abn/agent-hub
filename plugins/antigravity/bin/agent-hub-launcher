@@ -39,7 +39,7 @@ test_pause() { :; }
 os=$(uname -s 2>/dev/null)
 arch=$(uname -m 2>/dev/null)
 ext=tar.gz
-exe=agent-hub
+exe='agent-hub'
 target=
 error=
 posix_perms=1
@@ -60,7 +60,7 @@ case "$os-$arch" in
     if have unzip; then
       target=x86_64-pc-windows-msvc
       ext=zip
-      exe=agent-hub.exe
+      exe='agent-hub.exe'
     else
       error="unsupported platform $os-$arch (unzip is missing)"
     fi
@@ -98,6 +98,7 @@ dir=$cache_top/launcher/$VERSION/${target:-unsupported}
 bin=$dir/$exe
 chain=
 
+# shellcheck disable=SC2012 # the mode string is the point; stat flags differ per OS
 mode_of() { ls -ldL "$1" 2>/dev/null | cut -c1-10; }
 
 # private_dir DIR [create]: a real directory this user owns, mode 0700.
@@ -194,6 +195,8 @@ acquire() {
   return 1
 }
 
+# Run from cleanup, which an EXIT trap calls.
+# shellcheck disable=SC2317
 release() {
   [ -n "$me" ] || return 0
   if [ "$(cat "$lock/owner" 2>/dev/null)" = "$me" ]; then
@@ -401,7 +404,9 @@ fail() {
   exit 1
 }
 
-# The exit path of an install: staging directory, lock and guard.
+# The exit path of an install: staging directory, lock and guard. Run by the
+# EXIT trap below, which shellcheck does not follow.
+# shellcheck disable=SC2317
 cleanup() {
   [ -z "$tmp" ] || rm -rf "$tmp"
   release
