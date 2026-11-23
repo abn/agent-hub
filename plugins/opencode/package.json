@@ -29,6 +29,7 @@
     "config.mjs",
     "loop.mjs",
     "state.mjs",
+    "credential.mjs",
     "README.md"
   ],
   "engines": {
