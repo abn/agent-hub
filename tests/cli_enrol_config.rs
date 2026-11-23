@@ -32,6 +32,7 @@ fn clean_client(home: &Path) -> Command {
         .env_remove("HUB_TOKEN")
         .env_remove("HUB_CONFIG")
         .env_remove("HUB_AGENT_ID")
+        .env_remove("HUB_MEMBER")
         .env_remove("HUB_PROJECT")
         .env_remove("XDG_CONFIG_HOME");
     command
@@ -87,9 +88,9 @@ fn shared_approval_saves_url_and_token_and_next_call_needs_no_environment() {
     let output = enrol_client(&home, &hub.url())
         .args([
             "enrol",
-            "--id",
+            "--member",
             "live-agent",
-            "--name",
+            "--display-name",
             "LiveAgent",
             "--why",
             "live enrolment test",
@@ -109,12 +110,16 @@ fn shared_approval_saves_url_and_token_and_next_call_needs_no_environment() {
 
     let contents = std::fs::read_to_string(&config_file).expect("config written");
     assert!(
-        contents.contains("[client]"),
-        "no [client] table: {contents}"
+        contents.contains("[[credential]]"),
+        "no credential entry: {contents}"
     );
     assert!(contents.contains(&url_line), "no url line: {contents}");
+    assert!(
+        contents.contains("member = \"live-agent\""),
+        "no member line: {contents}"
+    );
     assert!(contents.contains("token = \""), "no token line: {contents}");
-    // A raw append would duplicate the key on a second run, so a fresh file
+    // A raw append would duplicate the entry on a second run, so a fresh file
     // holds each exactly once.
     assert_eq!(contents.matches("url =").count(), 1, "{contents}");
     assert_eq!(contents.matches("token =").count(), 1, "{contents}");
@@ -132,7 +137,7 @@ fn shared_approval_saves_url_and_token_and_next_call_needs_no_environment() {
     );
     let value = common::hub::stdout_json(&called);
     assert_eq!(
-        value.get("actor").and_then(|actor| actor.as_str()),
+        value.get("member").and_then(|member| member.as_str()),
         Some("live-agent"),
         "{value}"
     );
@@ -153,11 +158,10 @@ fn enrol_help_prints_its_usage_without_touching_the_hub() {
     assert!(stdout.contains("HUB_CONFIG"), "{stdout}");
 }
 
-/// The second agent on one machine reaches the first agent's token, so the
-/// refusal has to say whose token it is and name both ways out. Naming nothing
-/// leaves a new agent with no next step.
+/// Enrolling as a member whose token is already stored is refused with both
+/// ways out, and the stored token is left as it was.
 #[test]
-fn a_token_already_configured_is_refused_with_both_remedies() {
+fn a_token_already_stored_for_the_member_is_refused_with_both_remedies() {
     let hub = Hub::start("enrol-collision");
     let home = hub.config_path().parent().unwrap().to_path_buf();
     let config_file = home.join(".config").join("agent-hub").join("config.toml");
@@ -165,24 +169,23 @@ fn a_token_already_configured_is_refused_with_both_remedies() {
         .expect("the directory");
     std::fs::write(
         &config_file,
-        "[client]\nurl = \"http://hub.example\"\ntoken = \"the-first-agent-token\"\n",
+        format!(
+            "[[credential]]\nurl = \"{}\"\nmember = \"second\"\ntoken = \"the-first-token\"\n",
+            hub.url()
+        ),
     )
-    .expect("write the other agent's config");
+    .expect("write the stored credential");
 
     let output = clean_client(&home)
         .env("HUB_URL", hub.url())
-        .args(["enrol", "--id", "second", "--name", "Second"])
+        .args(["enrol", "--member", "second", "--display-name", "Second"])
         .output()
         .expect("run agent-hub enrol");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains("a token is already configured"),
+        stdout.contains("a token is already stored for member 'second'"),
         "the refusal says what is in the way: {stdout}"
-    );
-    assert!(
-        stdout.contains("another identity"),
-        "the refusal says the token is another agent's: {stdout}"
     );
     assert!(
         stdout.contains("--force"),
@@ -193,49 +196,102 @@ fn a_token_already_configured_is_refused_with_both_remedies() {
         "the refusal names a config file of its own: {stdout}"
     );
     assert!(
-        stdout.contains("--id"),
-        "the separate file is paired with a distinct id: {stdout}"
-    );
-
-    // A refusal, not a silent success and not an enrolment: the hub was never
-    // asked, and the token on disk is the one that was already there.
-    assert!(
         !stdout.contains("requesting enrolment"),
         "the refusal must not reach the hub: {stdout}"
     );
     let after = std::fs::read_to_string(&config_file).expect("config still there");
     assert!(
-        after.contains("the-first-agent-token"),
-        "the other agent's token is untouched: {after}"
+        after.contains("the-first-token"),
+        "the stored token is untouched: {after}"
     );
 }
 
-/// The remedy the refusal names has to work: a second agent enrols through a
-/// config file of its own, and the first agent's file is left alone.
+/// A second member on one machine is another entry in the same file, and the
+/// first one is left alone.
 #[test]
-fn a_second_agent_enrols_through_a_config_file_of_its_own() {
-    let hub = Hub::start("enrol-second-config");
+fn a_second_member_enrols_into_the_same_file_beside_the_first() {
+    let hub = Hub::start("enrol-second-member");
     let home = hub.config_path().parent().unwrap().to_path_buf();
-    let first = home.join(".config").join("agent-hub").join("config.toml");
-    let second = hub.config_path().with_file_name("second-agent.toml");
-    std::fs::create_dir_all(first.parent().expect("the config directory")).expect("the directory");
+    let file = home.join(".config").join("agent-hub").join("config.toml");
+    std::fs::create_dir_all(file.parent().expect("the config directory")).expect("the directory");
     std::fs::write(
-        &first,
-        "[client]\nurl = \"http://hub.example\"\ntoken = \"the-first-agent-token\"\n",
+        &file,
+        "[[credential]]\nurl = \"http://hub.example\"\nmember = \"first\"\ntoken = \"the-first-token\"\n",
     )
-    .expect("write the other agent's config");
+    .expect("write the first member's credential");
+    let approver = approve_when_pending(hub.port, "second-agent", None);
 
-    let port = hub.port;
-    let approver = std::thread::spawn(move || {
+    let output = clean_client(&home)
+        .env("HUB_URL", hub.url())
+        .args([
+            "enrol",
+            "--member",
+            "second-agent",
+            "--display-name",
+            "Second",
+        ])
+        .output()
+        .expect("run agent-hub enrol");
+    approver.join().expect("approver thread");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Enrolment approved"), "{stdout}");
+    let written = std::fs::read_to_string(&file).expect("config");
+    assert!(written.contains("the-first-token"), "{written}");
+    assert!(written.contains("member = \"second-agent\""), "{written}");
+}
+
+/// An approval under another name re-keys the stored entry to it.
+#[test]
+fn an_approval_under_another_name_renames_the_stored_credential() {
+    let hub = Hub::start("enrol-rename");
+    let home = hub.config_path().parent().unwrap().to_path_buf();
+    let file = home.join(".config").join("agent-hub").join("config.toml");
+    let approver = approve_when_pending(hub.port, "asked-for", Some("approved-as"));
+
+    let output = clean_client(&home)
+        .env("HUB_URL", hub.url())
+        .args([
+            "enrol",
+            "--member",
+            "asked-for",
+            "--display-name",
+            "Renamed",
+        ])
+        .output()
+        .expect("run agent-hub enrol");
+    approver.join().expect("approver thread");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Enrolment approved for member 'approved-as'"),
+        "{stdout}"
+    );
+    let written = std::fs::read_to_string(&file).expect("config");
+    assert!(written.contains("member = \"approved-as\""), "{written}");
+    assert!(!written.contains("asked-for"), "{written}");
+}
+
+/// Approve `member` as soon as its enrolment is pending, optionally under
+/// another name.
+fn approve_when_pending(
+    port: u16,
+    member: &'static str,
+    rename: Option<&'static str>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
-            let body = serde_json::json!({ "share": true }).to_string();
+            let mut body = serde_json::json!({ "share": true });
+            if let Some(rename) = rename {
+                body["member"] = serde_json::json!(rename);
+            }
             let res = wire::rest(
                 port,
                 "POST",
-                "/api/v1/enrol/second-agent/approve",
+                &format!("/api/v1/enrol/{member}/approve"),
                 Some(ADMIN_TOKEN),
-                Some(&body),
+                Some(&body.to_string()),
             );
             if res.status == 200 {
                 return;
@@ -247,49 +303,10 @@ fn a_second_agent_enrols_through_a_config_file_of_its_own() {
             );
             assert!(
                 std::time::Instant::now() < deadline,
-                "the pending agent never appeared: {}",
+                "the pending member never appeared: {}",
                 res.raw
             );
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-    });
-
-    let output = clean_client(&home)
-        .env("HUB_URL", hub.url())
-        .env("HUB_CONFIG", &second)
-        .args(["enrol", "--id", "second-agent", "--name", "Second"])
-        .output()
-        .expect("run agent-hub enrol");
-    approver.join().expect("approver thread");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stdout.contains("Enrolment approved"),
-        "the separate config proceeds to a pending enrolment: {stdout}{stderr}"
-    );
-    assert!(
-        stdout.contains("Token saved to"),
-        "the token lands in the file it named: {stdout}"
-    );
-    assert!(
-        !stdout.contains("already configured"),
-        "a config file of its own is not the collision: {stdout}"
-    );
-
-    let written = std::fs::read_to_string(&second).expect("the second config");
-    assert!(
-        written.contains("[client]"),
-        "no [client] table in the second config: {written}"
-    );
-    assert!(
-        !written.contains("the-first-agent-token"),
-        "the first agent's token was copied nowhere: {written}"
-    );
-
-    let untouched = std::fs::read_to_string(&first).expect("the first config");
-    assert!(
-        untouched.contains("the-first-agent-token"),
-        "the first agent's config is left as it was: {untouched}"
-    );
+    })
 }

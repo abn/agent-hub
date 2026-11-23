@@ -402,8 +402,36 @@ fn the_file_supplies_every_key_when_the_environment_is_empty() {
     let config = ClientConfig::resolve(&lookup).expect("resolve");
 
     assert_eq!(config.url.as_deref(), Some("http://hub.lan:8080"));
+    // A token under [client] is a credential for that hub with no member.
     assert_eq!(config.token.as_deref(), Some("file-token"));
-    assert_eq!(config.agent_id.as_deref(), Some("agent/laptop"));
+    assert_eq!(config.member, None);
+    // The agent comes from the client, so the file's agent_id is read and
+    // dropped.
+    assert_eq!(config.agent_id, None);
+}
+
+#[test]
+fn a_client_member_in_the_file_is_the_member_a_credential_is_chosen_for() {
+    let home = TempHome::new("file-member").with_config(concat!(
+        "[client]\n",
+        "url = \"http://hub.lan:8080\"\n",
+        "member = \"laptop\"\n",
+        "[[credential]]\n",
+        "url = \"http://hub.lan:8080\"\n",
+        "member = \"desktop\"\n",
+        "token = \"t-desktop\"\n",
+        "[[credential]]\n",
+        "url = \"http://hub.lan:8080\"\n",
+        "member = \"laptop\"\n",
+        "token = \"t-laptop\"\n",
+    ));
+    let lookup = env(&[("HOME", home.0.to_str().expect("utf-8 path"))]);
+
+    let config = ClientConfig::resolve(&lookup).expect("resolve");
+
+    assert_eq!(config.member.as_deref(), Some("laptop"));
+    assert_eq!(config.token.as_deref(), Some("t-laptop"));
+    assert_eq!(config.credentials.len(), 2);
 }
 
 #[test]
@@ -413,14 +441,16 @@ fn the_environment_supplies_every_key_with_no_file() {
         ("HOME", home.0.to_str().expect("utf-8 path")),
         ("HUB_URL", "http://env.lan:8080"),
         ("HUB_TOKEN", "env-token"),
-        ("HUB_AGENT_ID", "agent/env"),
+        ("HUB_MEMBER", "laptop"),
+        ("HUB_AGENT_ID", "opencode"),
     ]);
 
     let config = ClientConfig::resolve(&lookup).expect("resolve");
 
     assert_eq!(config.url.as_deref(), Some("http://env.lan:8080"));
     assert_eq!(config.token.as_deref(), Some("env-token"));
-    assert_eq!(config.agent_id.as_deref(), Some("agent/env"));
+    assert_eq!(config.member.as_deref(), Some("laptop"));
+    assert_eq!(config.agent_id.as_deref(), Some("opencode"));
 }
 
 #[test]
@@ -432,6 +462,7 @@ fn the_environment_wins_over_the_file_key_by_key() {
     ));
     let lookup = env(&[
         ("HOME", home.0.to_str().expect("utf-8 path")),
+        ("HUB_URL", "http://file.lan:8080"),
         ("HUB_TOKEN", "env-token"),
     ]);
 
@@ -440,6 +471,23 @@ fn the_environment_wins_over_the_file_key_by_key() {
     assert_eq!(config.url.as_deref(), Some("http://file.lan:8080"));
     assert_eq!(config.token.as_deref(), Some("env-token"));
     assert_eq!(config.agent_id, None);
+}
+
+/// A token in the environment belongs to the hub the environment names. Used
+/// against another hub it would be sent to a place it was never issued for.
+#[test]
+fn an_environment_token_is_not_sent_to_a_hub_the_environment_did_not_name() {
+    let home = TempHome::new("env-token-elsewhere")
+        .with_config(concat!("[client]\n", "url = \"http://file.lan:8080\"\n",));
+    let lookup = env(&[
+        ("HOME", home.0.to_str().expect("utf-8 path")),
+        ("HUB_TOKEN", "env-token"),
+    ]);
+
+    let config = ClientConfig::resolve(&lookup).expect("resolve");
+
+    assert_eq!(config.url.as_deref(), Some("http://file.lan:8080"));
+    assert_eq!(config.token, None);
 }
 
 #[test]
@@ -477,7 +525,7 @@ fn migration_creates_config_toml_once_with_mode_0600_and_is_noop_on_second_run()
         config.token.as_deref(),
         Some("legacy-token-secret-1234567890")
     );
-    assert_eq!(config.agent_id.as_deref(), Some("legacy-agent"));
+    assert_eq!(config.agent_id, None, "agent_id no longer names anything");
     assert_eq!(config.timeout, std::time::Duration::from_secs(45));
 
     assert!(migrated_file.is_file(), "config.toml was created");

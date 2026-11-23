@@ -241,7 +241,7 @@ fn a_second_serve_on_one_directory_refuses_and_names_the_first() {
 fn embedded_mcp_refuses_a_directory_a_hub_serves() {
     let sandbox = Sandbox::new("embedded");
     let hub = HubProcess::serve(&sandbox.data(), "daemon-test-admin", &[]);
-    let mut command = sandbox.cmd(&["mcp"]);
+    let mut command = sandbox.cmd(&["mcp", "--embedded"]);
     command.env_remove("HUB_URL");
     let output = command
         .stdin(std::process::Stdio::null())
@@ -663,7 +663,7 @@ impl Drop for Session {
 
 /// An embedded `agent-hub mcp` session holding the store, with its stdin open.
 fn embedded_session(sandbox: &Sandbox) -> Session {
-    let mut command = sandbox.cmd(&["mcp"]);
+    let mut command = sandbox.cmd(&["mcp", "--embedded"]);
     command.env_remove("HUB_URL");
     let child = Session(
         command

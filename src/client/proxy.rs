@@ -1,24 +1,47 @@
 //! A stdio MCP server that is nothing but a bridge to a running hub.
 //!
-//! Every request is answered by the hub over one streamable HTTP connection
-//! held for the life of the process, so the tools a caller sees are the hub's
-//! own and a hub that gains a tool needs no new client. The connection is also
-//! what carries the session: the hub tracks an active session per connection,
-//! so `session_start` and the brain tools that follow it land on the same one.
+//! Every request is answered by the hub over one streamable HTTP connection,
+//! so the tools a caller sees are the hub's own and a hub that gains a tool
+//! needs no new client. The connection is opened by the client's own
+//! `initialize`, with its `clientInfo` unchanged, because the hub reads the
+//! agent from it.
+//!
+//! The proxy never refuses to start. When the hub cannot be reached or refuses
+//! the token, it answers `initialize` itself, offers one local `whoami` that
+//! says why, and keeps looking: a changed `config.toml`, an approved
+//! enrolment or a hub that comes back opens the upstream, swaps it in without
+//! dropping a call in flight, and sends `notifications/tools/list_changed`.
 
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock, Weak};
+use std::time::{Duration, SystemTime};
 
 use rmcp::model::{
-    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorData,
-    ListResourceTemplatesResult, ListResourcesResult, ListToolsResult, PaginatedRequestParams,
-    ProtocolVersion, ReadResourceRequestParams, ReadResourceResponse, ResultType, ServerConfig,
-    ServerPeerInfo,
+    CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorCode,
+    ErrorData, InitializeRequestParams, InitializeResult, ListResourceTemplatesResult,
+    ListResourcesResult, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
+    ReadResourceRequestParams, ReadResourceResponse, ResultType, ServerCapabilities, ServerConfig,
+    ServerPeerInfo, Tool,
 };
-use rmcp::service::{Peer, RequestContext, RoleClient, ServiceError};
-use rmcp::{RoleServer, ServerHandler, ServiceExt};
+use rmcp::service::{
+    NotificationContext, Peer, RequestContext, RoleClient, RunningService, ServiceError,
+};
+use rmcp::{ClientHandler, RoleServer, ServerHandler, ServiceExt};
+use serde_json::{Value, json};
 
-use super::{Failure, connect};
+use super::credential::{self, WriteOptions};
+use super::{Failure, connect_with, embedded_error, short_cause, unusable};
 use crate::config::ClientConfig;
+
+/// How often the config file is looked at for a changed credential.
+const CONFIG_POLL: Duration = Duration::from_secs(2);
+
+/// How often a proxy with no upstream tries the hub again on its own.
+const OFFLINE_RETRY: Duration = Duration::from_secs(30);
+
+/// How long the status poll waits on the hub before asking again.
+const STATUS_WAIT_SECS: u64 = 30;
 
 /// Whether the client opened this connection on protocol revision `2026-07-28`
 /// or newer, the revisions whose results carry `resultType` and the cache hints.
@@ -52,189 +75,511 @@ fn complete_cacheable(
     }
 }
 
-/// The reason the hub gives when a connection holds no active session.
-const NO_ACTIVE_SESSION: &str = "no_active_session";
-
-/// The session the agent started, as the proxy would resume it.
-struct Lease {
-    /// The `session_start` the hub accepted, with `from` removed so a replay
-    /// resumes the session by project and name instead of picking it up again.
-    start: CallToolRequestParams,
-    session_id: String,
+/// Which hub, member and token an upstream was opened with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Identity {
+    url: String,
+    member: Option<String>,
+    token: Option<String>,
 }
 
-/// The stdio server, holding the hub's client peer.
-struct HubProxy {
+impl Identity {
+    fn of(config: &ClientConfig) -> Option<Self> {
+        Some(Self {
+            url: credential::normalise_url(config.url.as_deref()?),
+            member: config.member.clone(),
+            token: config.token.clone(),
+        })
+    }
+}
+
+/// The client side of the upstream link. It speaks with the downstream
+/// client's own `initialize`, and passes the hub's list changes on.
+struct UpHandler {
+    init: InitializeRequestParams,
+    shared: Weak<Shared>,
+}
+
+impl ClientHandler for UpHandler {
+    fn get_info(&self) -> InitializeRequestParams {
+        self.init.clone()
+    }
+
+    async fn on_tool_list_changed(&self, _context: NotificationContext<RoleClient>) {
+        if let Some(shared) = self.shared.upgrade() {
+            shared.announce().await;
+        }
+    }
+}
+
+/// One open link to the hub. Dropping it closes the link once the calls still
+/// holding it are done.
+struct Upstream {
     peer: Peer<RoleClient>,
-    /// The session the hub last accepted. The lock is held across forwarding
-    /// `session_start` and `session_end` and across a whole replay and retry,
-    /// so a replay never interleaves with an explicit start or end.
-    lease: tokio::sync::Mutex<Option<Lease>>,
-    /// What the hub answered the handshake with, presented as this server's own.
-    info: ServerConfig,
+    identity: Identity,
+    _service: RunningService<RoleClient, UpHandler>,
+}
+
+/// Why there is no upstream: the credential reason the hub gave, a resolver
+/// state, or `offline`.
+#[derive(Debug, Clone)]
+struct LocalState {
+    state: String,
+    hub_url: String,
+}
+
+/// An enrolment waiting for its operator.
+#[derive(Debug, Clone)]
+struct PendingEnrol {
+    url: String,
+    member: String,
+    token: String,
+    status_url: String,
+}
+
+struct Shared {
+    upstream: RwLock<Option<Arc<Upstream>>>,
+    info: RwLock<ServerConfig>,
+    client_init: Mutex<Option<InitializeRequestParams>>,
+    downstream: Mutex<Option<Peer<RoleServer>>>,
+    local: Mutex<LocalState>,
+    /// Serialises opening and swapping an upstream.
+    refresh_lock: tokio::sync::Mutex<()>,
+    /// Wakes the watcher to look at the config now.
+    wake: tokio::sync::Notify,
+    /// The enrolment the status poll follows, one at a time.
+    pending: Mutex<Option<PendingEnrol>>,
+    /// Whether the downstream client has finished its own handshake.
+    ready: AtomicBool,
+}
+
+fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn read<T>(lock: &RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    lock.read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn write<T>(lock: &RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    lock.write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The tools capability the proxy always advertises: the list changes when an
+/// upstream opens or is swapped.
+fn tools_changed(mut capabilities: ServerCapabilities) -> ServerCapabilities {
+    let tools = capabilities.tools.get_or_insert_with(Default::default);
+    tools.list_changed = Some(true);
+    capabilities
+}
+
+/// What the proxy says for itself before, or without, a hub.
+fn local_info() -> ServerConfig {
+    let capabilities = tools_changed(ServerCapabilities::default());
+    let mut info = ServerConfig::new(capabilities).with_instructions(
+        "Agent Hub is not reachable, or has not accepted this client yet. Call whoami to see why.",
+    );
+    info.server_info = rmcp::model::Implementation::new("agent-hub", env!("CARGO_PKG_VERSION"));
+    info
+}
+
+/// Present the hub's handshake as this server's own, so the caller sees the
+/// hub's capabilities, name, and instructions rather than a local stand-in.
+fn hub_info(peer_info: Option<Arc<ServerPeerInfo>>) -> ServerConfig {
+    let Some(peer_info) = peer_info else {
+        return local_info();
+    };
+    let mut info = ServerConfig::new(tools_changed(peer_info.capabilities.clone()));
+    info.protocol_version = peer_info.protocol_version.clone();
+    if let Some(server_info) = peer_info.server_info.clone() {
+        info.server_info = server_info;
+    }
+    info.instructions = peer_info.instructions.clone();
+    info
+}
+
+/// The single tool a proxy without a hub offers.
+fn local_tools() -> Vec<Tool> {
+    let schema = json!({ "type": "object", "properties": {} });
+    let schema = schema.as_object().cloned().unwrap_or_default();
+    vec![Tool::new(
+        "whoami",
+        "Say why the hub is not available: the credential state, or offline.",
+        schema,
+    )]
+}
+
+/// A tool error in the hub's own shape, so a client reads one format.
+fn tool_error(code: &str, message: &str, reason: Option<&str>) -> CallToolResult {
+    let details = match reason {
+        Some(reason) => json!({ "reason": reason }),
+        None => json!({}),
+    };
+    let body = json!({
+        "error": {
+            "code": code,
+            "message": message,
+            "retryable": code == "unavailable",
+            "details": details,
+        }
+    });
+    let mut result = CallToolResult::error(vec![ContentBlock::text(body.to_string())]);
+    result.structured_content = Some(body);
+    result
+}
+
+/// The state a failed handshake leaves: the hub's reason, or `offline`.
+fn state_of(failure: &Failure) -> String {
+    match failure {
+        Failure::Denied(error) => error
+            .pointer("/error/details/reason")
+            .and_then(Value::as_str)
+            .unwrap_or("token_unknown")
+            .to_string(),
+        _ => "offline".to_string(),
+    }
+}
+
+impl Shared {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            upstream: RwLock::new(None),
+            info: RwLock::new(local_info()),
+            client_init: Mutex::new(None),
+            downstream: Mutex::new(None),
+            local: Mutex::new(LocalState {
+                state: "offline".to_string(),
+                hub_url: String::new(),
+            }),
+            refresh_lock: tokio::sync::Mutex::new(()),
+            wake: tokio::sync::Notify::new(),
+            pending: Mutex::new(None),
+            ready: AtomicBool::new(false),
+        })
+    }
+
+    fn current(&self) -> Option<Arc<Upstream>> {
+        read(&self.upstream).clone()
+    }
+
+    fn set_local(&self, state: &str, hub_url: String) {
+        *locked(&self.local) = LocalState {
+            state: state.to_string(),
+            hub_url,
+        };
+    }
+
+    /// Tell the downstream client its tool list changed, once it is able to
+    /// hear it.
+    async fn announce(&self) {
+        if !self.ready.load(Ordering::SeqCst) {
+            return;
+        }
+        let peer = locked(&self.downstream).clone();
+        if let Some(peer) = peer {
+            let _ = peer.notify_tool_list_changed().await;
+        }
+    }
+
+    /// The initialize params the upstream is opened with: the client's own,
+    /// or the library's default for a client that opened without one.
+    fn init_params(&self) -> InitializeRequestParams {
+        locked(&self.client_init)
+            .clone()
+            .unwrap_or_else(|| ClientHandler::get_info(&()))
+    }
+
+    /// Read the settings again and open the upstream they name, if it is not
+    /// the one already open (or `force`). Returns whether an upstream is open.
+    async fn refresh(self: &Arc<Self>, force: bool) -> bool {
+        let _turn = self.refresh_lock.lock().await;
+        let config = match tokio::task::spawn_blocking(ClientConfig::from_env).await {
+            Ok(Ok(config)) => config,
+            Ok(Err(err)) => {
+                eprintln!("agent-hub mcp: {err}");
+                return self.current().is_some();
+            }
+            Err(_) => return self.current().is_some(),
+        };
+        let hub_url = config.url.clone().unwrap_or_default();
+        if let Some(message) = unusable(&config) {
+            if self.current().is_none() {
+                let state = match config.state {
+                    credential::State::SeveralMembers => "several_members",
+                    _ => "needs_trust",
+                };
+                eprintln!("agent-hub mcp: {message}");
+                self.set_local(state, hub_url);
+            }
+            return self.current().is_some();
+        }
+        let Some(identity) = Identity::of(&config) else {
+            if self.current().is_none() {
+                self.set_local("no_hub", hub_url);
+            }
+            return self.current().is_some();
+        };
+        if !force
+            && self
+                .current()
+                .is_some_and(|upstream| upstream.identity == identity)
+        {
+            return true;
+        }
+
+        let handler = UpHandler {
+            init: self.init_params(),
+            shared: Arc::downgrade(self),
+        };
+        match connect_with(&config, handler).await {
+            Ok(service) => {
+                let upstream = Arc::new(Upstream {
+                    peer: service.peer().clone(),
+                    identity,
+                    _service: service,
+                });
+                *write(&self.info) = hub_info(upstream._service.peer_info());
+                *write(&self.upstream) = Some(upstream);
+                eprintln!(
+                    "agent-hub mcp: proxying stdio to {}{}",
+                    config.url.as_deref().unwrap_or_default(),
+                    config
+                        .member
+                        .as_deref()
+                        .map(|member| format!(", as member {member}"))
+                        .unwrap_or_default()
+                );
+                self.announce().await;
+                true
+            }
+            Err(failure) => {
+                let state = state_of(&failure);
+                if self.current().is_none() {
+                    eprintln!(
+                        "agent-hub mcp: the hub is not available ({state}); will keep trying"
+                    );
+                    self.set_local(&state, hub_url);
+                } else {
+                    eprintln!(
+                        "agent-hub mcp: the new credential was not accepted ({state}); \
+                         keeping the open connection"
+                    );
+                }
+                false
+            }
+        }
+    }
+
+    /// Store a pending enrolment's token and follow its status.
+    async fn adopt_enrolment(self: &Arc<Self>, result: &CallToolResult) {
+        let Some(body) = result.structured_content.clone().or_else(|| {
+            result
+                .content
+                .iter()
+                .filter_map(|content| content.as_text())
+                .find_map(|text| serde_json::from_str::<Value>(&text.text).ok())
+        }) else {
+            return;
+        };
+        if body.get("status").and_then(Value::as_str) != Some("pending") {
+            return;
+        }
+        let field = |name: &str| body.get(name).and_then(Value::as_str).map(str::to_string);
+        let (Some(member), Some(token), Some(status_url)) =
+            (field("member"), field("token"), field("status_url"))
+        else {
+            return;
+        };
+        let Some(upstream) = self.current() else {
+            return;
+        };
+        let url = upstream.identity.url.clone();
+        let Some(path) = crate::config::credential_path(&|key| std::env::var(key).ok()) else {
+            return;
+        };
+        let stored = {
+            let (url, member, token) = (url.clone(), member.clone(), token.clone());
+            tokio::task::spawn_blocking(move || {
+                credential::write(&path, &url, &member, &token, &WriteOptions::default())
+            })
+            .await
+        };
+        match stored {
+            Ok(Ok(())) => {}
+            Ok(Err(err)) => {
+                eprintln!("agent-hub mcp: could not store the pending token: {err}");
+                return;
+            }
+            Err(_) => return,
+        }
+        *locked(&self.pending) = Some(PendingEnrol {
+            url,
+            member,
+            token,
+            status_url,
+        });
+        self.wake.notify_one();
+    }
+}
+
+/// One pass of the pending enrolment's status. True when the enrolment is
+/// settled and needs no more polling.
+async fn poll_enrolment(shared: &Arc<Shared>, http: &reqwest::Client) -> bool {
+    let Some(pending) = locked(&shared.pending).clone() else {
+        return false;
+    };
+    let url = if pending.status_url.contains('?') {
+        pending.status_url.clone()
+    } else {
+        format!("{}?wait={STATUS_WAIT_SECS}", pending.status_url)
+    };
+    let Ok(response) = http.get(&url).bearer_auth(&pending.token).send().await else {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        return false;
+    };
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        // Refused or revoked: nothing more to wait for.
+        *locked(&shared.pending) = None;
+        return true;
+    }
+    let Ok(body) = response.json::<Value>().await else {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        return false;
+    };
+    if body.get("status").and_then(Value::as_str) != Some("approved") {
+        return false;
+    }
+    let approved = body
+        .get("member")
+        .and_then(Value::as_str)
+        .unwrap_or(&pending.member)
+        .to_string();
+    if approved != pending.member
+        && let Some(path) = crate::config::credential_path(&|key| std::env::var(key).ok())
+    {
+        let (url, from, to) = (
+            pending.url.clone(),
+            pending.member.clone(),
+            approved.clone(),
+        );
+        let renamed = tokio::task::spawn_blocking(move || {
+            credential::rekey(&path, &url, &from, &to, &WriteOptions::default())
+        })
+        .await;
+        if !matches!(renamed, Ok(Ok(()))) {
+            eprintln!("agent-hub mcp: could not rename the stored credential to '{approved}'");
+        }
+    }
+    *locked(&shared.pending) = None;
+    shared.refresh(true).await;
+    true
+}
+
+/// The mtime and length of the file credentials live in.
+fn stamp(path: Option<&PathBuf>) -> Option<(SystemTime, u64)> {
+    let meta = std::fs::metadata(path?).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+/// Watch for a new credential and follow a pending enrolment, for as long as
+/// the proxy lives.
+async fn watch(shared: Arc<Shared>) {
+    let path = crate::config::credential_path(&|key| std::env::var(key).ok());
+    let mut seen = stamp(path.as_ref());
+    let mut since_try = Duration::ZERO;
+    if let Ok(http) = reqwest::Client::builder()
+        .timeout(Duration::from_secs(STATUS_WAIT_SECS + 10))
+        .build()
+    {
+        let shared = shared.clone();
+        tokio::spawn(async move {
+            loop {
+                if locked(&shared.pending).is_some() {
+                    poll_enrolment(&shared, &http).await;
+                } else {
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            }
+        });
+    }
+    loop {
+        let woken = tokio::time::timeout(CONFIG_POLL, shared.wake.notified()).await;
+        since_try += CONFIG_POLL;
+        let now = stamp(path.as_ref());
+        let retry = shared.current().is_none() && since_try >= OFFLINE_RETRY;
+        if now != seen || woken.is_ok() || retry {
+            seen = now;
+            since_try = Duration::ZERO;
+            shared.refresh(false).await;
+        }
+    }
+}
+
+/// The stdio server: a handle on the state the watcher and the handlers share.
+struct HubProxy {
+    shared: Arc<Shared>,
 }
 
 impl HubProxy {
-    /// Forward `session_start` or `session_end`, keeping the cache in step
-    /// with what the hub accepted.
-    async fn forward_lifecycle(
-        &self,
-        request: &CallToolRequestParams,
-    ) -> Result<CallToolResponse, ServiceError> {
-        let mut lease = self.lease.lock().await;
-        let outcome = self.peer.call_tool_once(request.clone()).await;
-        let accepted = match &outcome {
-            Ok(CallToolResponse::Complete(result)) if result.is_error != Some(true) => Some(result),
-            _ => None,
-        };
-        if request.name == "session_start" {
-            *lease = accepted.and_then(|result| remember(request.clone(), result));
-        } else if accepted.is_some() {
-            let ended = request
-                .arguments
-                .as_ref()
-                .and_then(|args| args.get("session_id"))
-                .and_then(serde_json::Value::as_str);
-            if lease
-                .as_ref()
-                .is_some_and(|held| Some(held.session_id.as_str()) == ended)
-            {
-                *lease = None;
-            }
+    /// Open the upstream on first use when the client began without an
+    /// `initialize`, as a modern client does.
+    async fn upstream(&self) -> Option<Arc<Upstream>> {
+        if let Some(upstream) = self.shared.current() {
+            return Some(upstream);
         }
-        outcome
+        if locked(&self.shared.client_init).is_none() {
+            self.shared.refresh(false).await;
+        }
+        self.shared.current()
     }
 
-    /// Forward a call the hub refused for want of an active session: resume
-    /// the remembered session once, then retry the call once. A failed resume
-    /// returns the original refusal.
-    async fn replay(
-        &self,
-        request: CallToolRequestParams,
-        refusal: ErrorData,
-    ) -> Result<CallToolResponse, ErrorData> {
-        let mut lease = self.lease.lock().await;
-        let Some(held) = lease.as_ref() else {
-            return Err(refusal);
-        };
-        let resumed = match self.peer.call_tool_once(held.start.clone()).await {
-            Ok(CallToolResponse::Complete(result)) if result.is_error != Some(true) => result,
-            _ => return Err(refusal),
-        };
-        let resumed_id = resumed
-            .structured_content
-            .as_ref()
-            .and_then(|body| body.get("session_id"))
-            .and_then(serde_json::Value::as_str);
-        if resumed_id != Some(held.session_id.as_str()) {
-            // The hub resumed another session than the one the agent held, so
-            // the retry would write somewhere the agent did not choose.
-            *lease = None;
-            return Err(refusal);
+    /// A call with no hub behind it: `whoami` says why, the rest are refused.
+    fn local_call(&self, request: &CallToolRequestParams) -> CallToolResult {
+        let local = locked(&self.shared.local).clone();
+        if request.name == "whoami" {
+            let body = serde_json::to_value(crate::mcp::whoami::WhoAmIUnreachable {
+                state: local.state,
+                hub_url: local.hub_url,
+            })
+            .unwrap_or_else(|_| json!({}));
+            let mut result = CallToolResult::success(vec![ContentBlock::text(body.to_string())]);
+            result.structured_content = Some(body);
+            return result;
         }
-        match self.peer.call_tool_once(request).await {
-            Ok(mut retried) => {
-                if let CallToolResponse::Complete(result) = &mut retried {
-                    carry_pending(&resumed, result);
-                }
-                Ok(retried)
-            }
-            Err(ServiceError::McpError(mut failure)) => {
-                carry_pending_error(&resumed, &mut failure);
-                Err(failure)
-            }
-            Err(other) => Err(upstream(other)),
-        }
-    }
-}
-
-/// The lease a `session_start` the hub accepted leaves behind, if its answer
-/// names the session.
-fn remember(mut start: CallToolRequestParams, result: &CallToolResult) -> Option<Lease> {
-    let session_id = result
-        .structured_content
-        .as_ref()?
-        .get("session_id")?
-        .as_str()?
-        .to_string();
-    if let Some(arguments) = start.arguments.as_mut() {
-        arguments.remove("from");
-    }
-    Some(Lease { start, session_id })
-}
-
-/// Whether the hub refused because the connection holds no active session.
-fn is_unbound(error: &ErrorData) -> bool {
-    error
-        .data
-        .as_ref()
-        .and_then(|data| data.pointer("/error/details/reason"))
-        .and_then(serde_json::Value::as_str)
-        == Some(NO_ACTIVE_SESSION)
-}
-
-/// The notifications the resume drained, if any.
-fn drained(resumed: &CallToolResult) -> Option<&Vec<serde_json::Value>> {
-    resumed
-        .structured_content
-        .as_ref()
-        .and_then(|body| body.pointer("/notifications/pending"))
-        .and_then(serde_json::Value::as_array)
-        .filter(|items| !items.is_empty())
-}
-
-/// Move the notifications the resume drained onto the retried result, so the
-/// agent still sees them. A failed result gets them too.
-fn carry_pending(resumed: &CallToolResult, retried: &mut CallToolResult) {
-    let Some(carried) = drained(resumed) else {
-        return;
-    };
-    let mut body = match retried.structured_content.take() {
-        Some(serde_json::Value::Object(body)) => body,
-        None => serde_json::Map::new(),
-        Some(other) => {
-            retried.structured_content = Some(other);
-            return;
-        }
-    };
-    let mut pending = carried.clone();
-    match body.get("notifications").and_then(|n| n.get("pending")) {
-        Some(own) => pending.extend(own.as_array().cloned().unwrap_or_default()),
-        None if body.contains_key("notifications") => {
-            retried.structured_content = Some(serde_json::Value::Object(body));
-            return;
-        }
-        None => {}
-    }
-    body.insert(
-        "notifications".to_string(),
-        serde_json::json!({ "pending": pending }),
-    );
-    let merged = serde_json::Value::Object(body);
-    retried.content = vec![ContentBlock::text(merged.to_string())];
-    retried.structured_content = Some(merged);
-}
-
-/// Put the drained notifications into the data of the error the retry failed
-/// with, so a failed call does not swallow what the resume delivered.
-fn carry_pending_error(resumed: &CallToolResult, failure: &mut ErrorData) {
-    let Some(carried) = drained(resumed) else {
-        return;
-    };
-    let data = failure
-        .data
-        .get_or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
-    if let Some(body) = data.as_object_mut() {
-        body.insert(
-            "notifications".to_string(),
-            serde_json::json!({ "pending": carried }),
-        );
+        tool_error(
+            "unavailable",
+            &format!(
+                "the hub is not available ({}); call whoami to see why",
+                local.state
+            ),
+            Some(&local.state),
+        )
     }
 }
 
 impl ServerHandler for HubProxy {
     fn get_info(&self) -> ServerConfig {
-        self.info.clone()
+        read(&self.shared.info).clone()
+    }
+
+    async fn initialize(
+        &self,
+        request: InitializeRequestParams,
+        context: RequestContext<RoleServer>,
+    ) -> Result<InitializeResult, ErrorData> {
+        context.peer.set_peer_info(request.clone());
+        *locked(&self.shared.client_init) = Some(request.clone());
+        *locked(&self.shared.downstream) = Some(context.peer.clone());
+        self.shared.refresh(true).await;
+        self.negotiate_initialize(&request)
+    }
+
+    async fn on_initialized(&self, _context: NotificationContext<RoleServer>) {
+        self.shared.ready.store(true, Ordering::SeqCst);
     }
 
     async fn list_tools(
@@ -242,7 +587,14 @@ impl ServerHandler for HubProxy {
         request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        let mut result = self.peer.list_tools(request).await.map_err(upstream)?;
+        let mut result = match self.upstream().await {
+            Some(upstream) => upstream
+                .peer
+                .list_tools(request)
+                .await
+                .map_err(upstream_error)?,
+            None => ListToolsResult::with_all_items(local_tools()),
+        };
         complete_cacheable(
             &mut result.result_type,
             &mut result.ttl_ms,
@@ -257,35 +609,39 @@ impl ServerHandler for HubProxy {
         request: CallToolRequestParams,
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let lifecycle = matches!(request.name.as_ref(), "session_start" | "session_end");
-        let outcome = if lifecycle {
-            self.forward_lifecycle(&request).await
-        } else {
-            self.peer.call_tool_once(request.clone()).await
+        let Some(upstream) = self.upstream().await else {
+            return Ok(self.local_call(&request).into());
         };
-        let mut response = match outcome {
+        let name = request.name.to_string();
+        let mut response = match upstream.peer.call_tool_once(request).await {
             Ok(response) => response,
-            Err(ServiceError::McpError(data)) if !lifecycle && is_unbound(&data) => {
-                // The hub forgot the session, which a restart does. Bind the
-                // connection again from what the agent last started.
-                self.replay(request, data).await?
-            }
-            Err(err) => return Err(upstream(err)),
+            Err(ServiceError::McpError(data)) => return Err(data),
+            Err(other) => return Ok(refusal_result(&other).into()),
         };
         if let CallToolResponse::Complete(result) = &mut response {
             result.result_type = Some(ResultType::COMPLETE);
+            if name == "enrol" && result.is_error != Some(true) {
+                self.shared.adopt_enrolment(result).await;
+            }
         }
         Ok(response)
     }
 
-    /// Forward resource listing, so the `resources` capability `hub_info`
-    /// copies from the hub is one the proxy can actually serve.
+    /// Forward resource listing, so the `resources` capability the hub
+    /// advertised is one the proxy can actually serve.
     async fn list_resources(
         &self,
         request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListResourcesResult, ErrorData> {
-        let mut result = self.peer.list_resources(request).await.map_err(upstream)?;
+        let Some(upstream) = self.upstream().await else {
+            return Ok(ListResourcesResult::default());
+        };
+        let mut result = upstream
+            .peer
+            .list_resources(request)
+            .await
+            .map_err(upstream_error)?;
         complete_cacheable(
             &mut result.result_type,
             &mut result.ttl_ms,
@@ -302,11 +658,14 @@ impl ServerHandler for HubProxy {
         request: Option<PaginatedRequestParams>,
         context: RequestContext<RoleServer>,
     ) -> Result<ListResourceTemplatesResult, ErrorData> {
-        let mut result = self
+        let Some(upstream) = self.upstream().await else {
+            return Ok(ListResourceTemplatesResult::default());
+        };
+        let mut result = upstream
             .peer
             .list_resource_templates(request)
             .await
-            .map_err(upstream)?;
+            .map_err(upstream_error)?;
         complete_cacheable(
             &mut result.result_type,
             &mut result.ttl_ms,
@@ -323,11 +682,18 @@ impl ServerHandler for HubProxy {
         request: ReadResourceRequestParams,
         context: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResponse, ErrorData> {
-        let mut response: ReadResourceResponse = self
+        let Some(upstream) = self.upstream().await else {
+            return Err(ErrorData::new(
+                ErrorCode::RESOURCE_NOT_FOUND,
+                "the hub is not available; call whoami to see why",
+                None,
+            ));
+        };
+        let mut response: ReadResourceResponse = upstream
             .peer
             .read_resource(request)
             .await
-            .map_err(upstream)?
+            .map_err(upstream_error)?
             .into();
         if let ReadResourceResponse::Complete(result) = &mut response {
             complete_cacheable(
@@ -341,23 +707,27 @@ impl ServerHandler for HubProxy {
     }
 }
 
-/// Present the hub's handshake as this server's own, so the caller sees the
-/// hub's capabilities, name, and instructions rather than a local stand-in.
-fn hub_info(peer_info: Option<Arc<ServerPeerInfo>>) -> ServerConfig {
-    let Some(peer_info) = peer_info else {
-        return ServerConfig::default();
-    };
-    let mut info = ServerConfig::new(peer_info.capabilities.clone());
-    info.protocol_version = peer_info.protocol_version.clone();
-    if let Some(server_info) = peer_info.server_info.clone() {
-        info.server_info = server_info;
+/// A transport failure on a call, as a tool error. A refused token keeps the
+/// reason the hub gave, and the stdio stream stays open.
+fn refusal_result(err: &ServiceError) -> CallToolResult {
+    let text = err.to_string();
+    if let Some((_, body)) = embedded_error(&text) {
+        let mut result = CallToolResult::error(vec![ContentBlock::text(body.to_string())]);
+        result.structured_content = Some(body);
+        return result;
     }
-    info.instructions = peer_info.instructions.clone();
-    info
+    if text.contains("401") {
+        return tool_error("unauthenticated", "the hub refused the token", None);
+    }
+    tool_error(
+        "unavailable",
+        &format!("the hub did not answer: {}", short_cause(&text)),
+        Some("offline"),
+    )
 }
 
 /// Pass the hub's own error through, and name anything else as a bridge fault.
-fn upstream(err: ServiceError) -> ErrorData {
+fn upstream_error(err: ServiceError) -> ErrorData {
     match err {
         ServiceError::McpError(data) => data,
         other => ErrorData::internal_error(format!("the hub did not answer: {other}"), None),
@@ -366,30 +736,21 @@ fn upstream(err: ServiceError) -> ErrorData {
 
 /// Serve stdio MCP as a proxy to the hub the settings name.
 pub async fn serve_stdio(config: ClientConfig) -> Result<(), Failure> {
-    let hub = connect(&config).await?;
-    // Said only after the handshake, so the line names a hub the token actually
-    // reached rather than one it is about to be refused by.
-    eprintln!(
-        "agent-hub mcp: proxying stdio to {}, as the agent the token resolves to",
-        config.url.as_deref().unwrap_or_default()
-    );
+    let shared = Shared::new();
+    shared.set_local("offline", config.url.clone().unwrap_or_default());
     let proxy = HubProxy {
-        peer: hub.peer().clone(),
-        lease: tokio::sync::Mutex::new(None),
-        info: hub_info(hub.peer_info()),
+        shared: shared.clone(),
     };
 
     let running = proxy
         .serve(rmcp::transport::stdio())
         .await
         .map_err(|err| Failure::Failed(format!("the stdio transport failed to start: {err}")))?;
-    running
+    let watcher = tokio::spawn(watch(shared.clone()));
+    let outcome = running
         .waiting()
         .await
-        .map_err(|err| Failure::Failed(format!("the stdio transport stopped: {err}")))?;
-
-    // The connection outlives every request the proxy served, so the session
-    // the hub holds for it stays the same one throughout.
-    hub.cancel().await.ok();
-    Ok(())
+        .map_err(|err| Failure::Failed(format!("the stdio transport stopped: {err}")));
+    watcher.abort();
+    outcome.map(|_| ())
 }

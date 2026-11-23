@@ -99,7 +99,7 @@ fn embedded_stdio_against_running_hub_refuses() {
     let _hub = HubProcess::serve(&data_dir, "test-token", &[]);
 
     let output = Command::new(env!("CARGO_BIN_EXE_agent-hub"))
-        .arg("mcp")
+        .args(["mcp", "--embedded"])
         .env("RUST_LOG", "error")
         .env("HUB_DATA_DIR", data_dir.path())
         .env_remove("HUB_URL")

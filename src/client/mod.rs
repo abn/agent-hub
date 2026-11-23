@@ -20,6 +20,7 @@ use serde_json::{Value, json};
 use crate::config::ClientConfig;
 
 pub mod backup;
+pub mod cli;
 pub mod credential;
 pub mod enrol;
 pub mod hook;
@@ -131,47 +132,94 @@ fn error_object(code: &str, message: &str) -> Value {
     })
 }
 
+/// Why the settings name no connection, as the line an operator reads.
+pub fn unusable(config: &ClientConfig) -> Option<String> {
+    use credential::State;
+    match config.state {
+        State::SeveralMembers => Some(format!(
+            "several members for {}; set member in .agent-hub.toml or HUB_MEMBER",
+            config.url.as_deref().unwrap_or("this hub")
+        )),
+        State::NeedsTrust => Some(format!(
+            "this project asks to use member {} on {}; allow it with `agent-hub trust` or under \
+             [trust] in config.toml",
+            config.member.as_deref().unwrap_or("(none)"),
+            config.url.as_deref().unwrap_or("this hub")
+        )),
+        State::Ok | State::Tokenless | State::NoHub => None,
+    }
+}
+
+/// The header a caller names its agent in, sent only when `HUB_AGENT_ID` says
+/// so: the hub otherwise reads the agent from the client's own handshake.
+const AGENT_HEADER: &str = "x-agent-id";
+
+/// The headers a connection carries beside its bearer.
+fn custom_headers(
+    config: &ClientConfig,
+) -> std::collections::HashMap<axum::http::HeaderName, axum::http::HeaderValue> {
+    let mut headers = std::collections::HashMap::new();
+    if let Some(agent) = config
+        .agent_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        && let Ok(value) = axum::http::HeaderValue::from_str(agent)
+    {
+        headers.insert(axum::http::HeaderName::from_static(AGENT_HEADER), value);
+    }
+    headers
+}
+
+/// The handshake a command-line call makes: it names itself as the command
+/// line, so the hub records its writes under the `cli` agent unless
+/// `HUB_AGENT_ID` names another.
+#[derive(Debug, Clone, Copy)]
+pub struct CliClient;
+
+impl rmcp::ClientHandler for CliClient {
+    fn get_info(&self) -> rmcp::model::InitializeRequestParams {
+        let mut info = rmcp::model::InitializeRequestParams::default();
+        info.client_info =
+            rmcp::model::Implementation::new("agent-hub-cli", env!("CARGO_PKG_VERSION"));
+        info
+    }
+}
+
 /// Open one MCP session on the hub and keep it until the caller drops it.
-pub async fn connect(config: &ClientConfig) -> Result<RunningService<RoleClient, ()>, Failure> {
+pub async fn connect(
+    config: &ClientConfig,
+) -> Result<RunningService<RoleClient, CliClient>, Failure> {
+    connect_with(config, CliClient).await
+}
+
+/// [`connect`] with a handler of the caller's own, which names the client in
+/// the handshake and hears what the hub sends.
+pub(crate) async fn connect_with<H>(
+    config: &ClientConfig,
+    handler: H,
+) -> Result<RunningService<RoleClient, H>, Failure>
+where
+    H: rmcp::ClientHandler,
+{
+    if let Some(message) = unusable(config) {
+        return Err(Failure::Config(message));
+    }
     let url = config.url.as_deref().ok_or_else(|| {
         Failure::Config("no hub URL configured; set HUB_URL or write it to config.toml".to_string())
     })?;
     let endpoint = format!("{}/mcp", url.trim_end_matches('/'));
     let mut transport_config = StreamableHttpClientTransportConfig::with_uri(endpoint.as_str());
-    // The configured agent id travels as `X-Agent-Id`. Without a token a
-    // loopback hub reads it as the agent's identity. Beside a token it names a
-    // sub-identity of the token's agent, which the hub holds to a stricter
-    // spelling. An id it would refuse is left off, with a warning, so a
-    // configuration that worked before keeps working as the token's agent.
-    let declared = config
-        .agent_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .filter(|id| {
-            let sendable = config.token.is_none() || crate::principal::is_declared_name(id);
-            if !sendable {
-                eprintln!(
-                    "agent-hub: HUB_AGENT_ID '{id}' is not a valid name to declare beside a token, \
-                     so calls are made as the token's agent"
-                );
-            }
-            sendable
-        });
     if let Some(token) = config.token.clone() {
         transport_config = transport_config.auth_header(token);
     }
-    if let Some(agent_id) = declared
-        && let Ok(value) = axum::http::HeaderValue::from_str(agent_id)
-    {
-        let name = axum::http::HeaderName::from_static(crate::principal::AGENT_ID_HEADER);
-        let mut headers = std::collections::HashMap::new();
-        headers.insert(name, value);
+    let headers = custom_headers(config);
+    if !headers.is_empty() {
         transport_config = transport_config.custom_headers(headers);
     }
     let transport = StreamableHttpClientTransport::from_config(transport_config);
 
-    match tokio::time::timeout(CONNECT_TIMEOUT, ().serve(transport)).await {
+    match tokio::time::timeout(CONNECT_TIMEOUT, handler.serve(transport)).await {
         Ok(Ok(service)) => Ok(service),
         Ok(Err(err)) => Err(connect_failure(&endpoint, &err.to_string())),
         Err(_) => Err(Failure::Unavailable(format!(
@@ -311,7 +359,7 @@ pub async fn call(config: &ClientConfig, tool: &str, arguments: Value) -> Result
 /// Call one tool over a connection the caller holds, for a command that makes
 /// many calls and should not open a connection for each.
 pub(crate) async fn call_on(
-    hub: &RunningService<RoleClient, ()>,
+    hub: &RunningService<RoleClient, CliClient>,
     config: &ClientConfig,
     tool: &str,
     arguments: serde_json::Map<String, Value>,
