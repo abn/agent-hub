@@ -6890,6 +6890,7 @@ a.session-back {
 }
 .hub-version-popover.fit-viewport {
   position: fixed;
+  z-index: 50;
   top: auto;
   left: var(--s-2);
   right: var(--s-2);

@@ -58,11 +58,16 @@ function clearControls() {
 // frame, and stop when the toast goes.
 function watchControls() {
   let frame = 0;
-  const hasFrames = typeof requestAnimationFrame === "function" && typeof cancelAnimationFrame === "function";
-  const cancel = () => (hasFrames ? cancelAnimationFrame(frame) : clearTimeout(frame));
+  // Checked at each call: an observer can fire after the globals are gone.
+  const hasFrames = () => typeof requestAnimationFrame === "function" && typeof cancelAnimationFrame === "function";
+  const cancel = () => {
+    if (hasFrames()) cancelAnimationFrame(frame);
+    else if (typeof clearTimeout === "function") clearTimeout(frame);
+  };
   const measure = () => {
     cancel();
-    frame = hasFrames ? requestAnimationFrame(clearControls) : setTimeout(clearControls, 16);
+    if (hasFrames()) frame = requestAnimationFrame(clearControls);
+    else if (typeof setTimeout === "function") frame = setTimeout(clearControls, 16);
   };
   const mutated = new MutationObserver((records) => {
     if (records.some((record) => !region.contains(record.target))) measure();
