@@ -136,7 +136,7 @@ impl Hub {
         let created = wire::rest(
             self.port,
             "POST",
-            "/api/v1/agents",
+            "/api/v1/members",
             Some(ADMIN_TOKEN),
             Some(&format!(r#"{{"id":"{id}","display_name":"{id}"}}"#)),
         );
@@ -148,7 +148,7 @@ impl Hub {
         let issued = wire::rest(
             self.port,
             "POST",
-            &format!("/api/v1/agents/{id}/token"),
+            &format!("/api/v1/members/{id}/token"),
             Some(ADMIN_TOKEN),
             None,
         );

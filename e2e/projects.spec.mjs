@@ -9,7 +9,7 @@ const isPhone = (testInfo) => testInfo.project.name === "phone";
 
 async function seedProjects(hub, tag, total) {
   const agent = `reg-${tag}-agent`;
-  const made = (await api(hub, "POST", "/api/v1/agents", { id: agent, display_name: `Reg ${tag} space` })).json();
+  const made = (await api(hub, "POST", "/api/v1/members", { id: agent, display_name: `Reg ${tag} space` })).json();
   for (let i = 0; i < total; i++) {
     await api(hub, "POST", "/api/v1/projects", { id: `reg-${tag}-${i}`, display_name: `Reg ${tag} ${i}` });
   }
@@ -26,7 +26,7 @@ async function routeRegister(page, total, spaces = 0) {
   }));
   await page.route(/\/api\/v1\/projects$/, (route) => route.fulfill({ json: { projects } }));
   await page.route(/\/api\/v1\/projects\/fx-\d+\/stats$/, (route) =>
-    route.fulfill({ json: { artifacts: 0, agents_active: 0 } }),
+    route.fulfill({ json: { artifacts: 0, sessions_live: 0 } }),
   );
 }
 

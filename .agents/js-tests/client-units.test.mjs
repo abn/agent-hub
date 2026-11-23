@@ -173,7 +173,6 @@ describe("formatEventSummary", () => {
     expect(summary("session", "session build-1 ended")).toBe("ended build-1");
     expect(summary("session", "session build-1 picked up from build-0")).toBe("picked up build-1 from build-0");
     expect(summary("session", "session build-1 forked from build-0")).toBe("forked build-1 from build-0");
-    expect(summary("session", "session build-1 reassigned to build-2")).toBe("reassigned build-1 to build-2");
   });
 
   it("lowercases a leading capitalised verb and leaves the rest of the line", () => {

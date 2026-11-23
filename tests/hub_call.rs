@@ -39,34 +39,26 @@ fn one_call_prints_the_tools_json_and_exits_zero() {
     assert_eq!(result["actor"], AGENT, "the hub answered: {result}");
 }
 
-/// `HUB_AGENT_ID` beside a token declares the caller's name to the hub, which
-/// records it as a sub-identity of the token's agent. A spelling the hub would
-/// refuse is left off, so a configuration that worked before keeps working.
+/// `HUB_AGENT_ID` names the agent the call is made as, beside the token's
+/// member. Without it the agent is the client's own name, which a one-shot call
+/// does not have, so it is `cli`.
 #[test]
-fn the_configured_agent_id_is_declared_beside_the_token() {
+fn the_configured_agent_id_names_the_agent_beside_the_token() {
     let hub = Hub::start("call-declared");
     let token = ("HUB_TOKEN", hub.agent_token.clone());
 
-    let actor = |agent_id: &str| {
-        let output = run_with(
-            &hub,
-            &["call", "whoami"],
-            &[token.clone(), ("HUB_AGENT_ID", agent_id.to_string())],
-        );
-        assert_eq!(output.status.code(), Some(0), "{agent_id}: {output:?}");
-        stdout_json(&output)["actor"]
-            .as_str()
-            .expect("actor")
-            .to_string()
+    let whoami = |settings: &[(&str, String)]| {
+        let output = run_with(&hub, &["call", "whoami"], settings);
+        assert_eq!(output.status.code(), Some(0), "{output:?}");
+        stdout_json(&output)
     };
 
-    assert_eq!(actor("claude"), format!("{AGENT}/claude"));
-    assert_eq!(actor(AGENT), AGENT, "the token's own name adds nothing");
-    assert_eq!(
-        actor("not a valid name"),
-        AGENT,
-        "an id the hub would refuse is not sent"
-    );
+    let named = whoami(&[token.clone(), ("HUB_AGENT_ID", "opencode".to_string())]);
+    assert_eq!(named["member"], AGENT, "{named}");
+    assert_eq!(named["agent"], "opencode", "{named}");
+    let bare = whoami(&[token]);
+    assert_eq!(bare["member"], AGENT, "{bare}");
+    assert_eq!(bare["agent"], "cli", "{bare}");
 }
 
 #[test]
@@ -127,7 +119,14 @@ fn a_hook_reads_and_writes_project_knowledge_with_no_session() {
     );
 
     // The session store has no such address, and says so rather than guessing.
-    let sessionless = run(&hub, &["call", "brain_get", r#"{"path":"/kv/anything"}"#]);
+    let sessionless = run(
+        &hub,
+        &[
+            "call",
+            "brain_get",
+            r#"{"path":"/kv/anything","store":"session"}"#,
+        ],
+    );
     assert_eq!(sessionless.status.code(), Some(1), "{sessionless:?}");
 }
 
@@ -187,9 +186,16 @@ fn the_config_file_names_the_hub_when_the_environment_does_not() {
 fn a_tool_error_is_the_hubs_own_object_on_stderr() {
     let hub = Hub::start("call-error");
 
-    // A call is its own connection, so no session is active to read a brain
-    // from, which is exactly why session-bound work goes through the proxy.
-    let output = run(&hub, &["call", "brain_get", r#"{"path":"/fs/handoff.md"}"#]);
+    // A session brain is read by naming the session, and a call that names
+    // none has nothing to read.
+    let output = run(
+        &hub,
+        &[
+            "call",
+            "brain_get",
+            r#"{"path":"/fs/handoff.md","store":"session"}"#,
+        ],
+    );
 
     assert_eq!(output.status.code(), Some(1), "a tool error exits 1");
     assert!(
@@ -197,7 +203,7 @@ fn a_tool_error_is_the_hubs_own_object_on_stderr() {
         "a failed call writes nothing to stdout: {:?}",
         String::from_utf8_lossy(&output.stdout)
     );
-    assert_eq!(stderr_json(&output)["error"]["code"], "conflict");
+    assert_eq!(stderr_json(&output)["error"]["code"], "invalid_argument");
 }
 
 #[test]
@@ -374,7 +380,7 @@ fn the_configured_project_is_never_sent_to_the_session_store() {
     // The documented one-shot read of a session brain, with the setting set and
     // without it.
     let named_read = format!(
-        r#"{{"path":"/fs/RECOVERY.md","store":"session","session":{{"agent":"{AGENT}","name":"hook","project_id":"{PROJECT}"}}}}"#
+        r#"{{"path":"/fs/RECOVERY.md","store":"session","session":{{"name":"hook","project_id":"{PROJECT}"}}}}"#
     );
     let with_project = run_with(
         &hub,
@@ -398,8 +404,8 @@ fn the_configured_project_is_never_sent_to_the_session_store() {
         "the setting changed nothing about a session-store read"
     );
 
-    // With no session named there is nothing to read, which is a conflict about
-    // the active session rather than a complaint about a project.
+    // With no session named there is nothing to read, which is a complaint
+    // about the session rather than about a project.
     let active = run_with(
         &hub,
         &[
@@ -412,7 +418,7 @@ fn the_configured_project_is_never_sent_to_the_session_store() {
     assert_eq!(active.status.code(), Some(1), "{active:?}");
     assert_eq!(
         stderr_json(&active)["error"]["code"],
-        "conflict",
+        "invalid_argument",
         "{active:?}"
     );
 
@@ -575,7 +581,7 @@ fn a_one_shot_hook_starts_a_session_and_reads_its_brain() {
             "call",
             "brain_get",
             &format!(
-                r#"{{"path":"/fs/RECOVERY.md","store":"session","session":{{"agent":"{AGENT}","name":"hook","project_id":"{PROJECT}"}}}}"#
+                r#"{{"path":"/fs/RECOVERY.md","store":"session","session":{{"name":"hook","project_id":"{PROJECT}"}}}}"#
             ),
         ],
     );
@@ -785,13 +791,13 @@ fn a_second_agent_cannot_write_a_session_it_names() {
         (
             "brain_put",
             format!(
-                r#"{{"store":"session","path":"/kv/plan","content":"not yours","session":{{"agent":"{AGENT}","name":"hook","project_id":"{PROJECT}"}}}}"#
+                r#"{{"store":"session","path":"/kv/plan","content":"not yours","session":{{"name":"hook","project_id":"{PROJECT}"}}}}"#
             ),
         ),
         (
             "brain_delete",
             format!(
-                r#"{{"store":"session","path":"/kv/plan","session":{{"agent":"{AGENT}","name":"hook","project_id":"{PROJECT}"}}}}"#
+                r#"{{"store":"session","path":"/kv/plan","session":{{"name":"hook","project_id":"{PROJECT}"}}}}"#
             ),
         ),
     ] {

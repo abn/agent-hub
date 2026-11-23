@@ -39,7 +39,7 @@ export function sessionRow(s, current, isSelected = false) {
         : `<span class="state-dot ring"></span>`;
 
   const size = s.brain_bytes != null ? fmtBytes(s.brain_bytes) : "";
-  const owner = esc(s.owner ?? s.agent ?? "");
+  const owner = esc(s.started_label ?? "");
   const statusWord = esc(s.status || "");
   const truncatedId = truncateMiddle(s.id);
   const metaText = `${owner} · ${statusWord} · ${relative(s.last_activity ?? s.created_at)} · <span class="session-id mono">${truncatedId}</span>`;
@@ -285,7 +285,7 @@ export function sessionDetailHTML(
     : "";
 
   const primaryButton = isEnded
-    ? `<button type="button" class="btn-primary danger" data-action="prune" data-id="${esc(session.id)}" data-agent="${esc(session.agent)}">Prune session</button>`
+    ? `<button type="button" class="btn-primary danger" data-action="prune" data-id="${esc(session.id)}" data-agent="${esc(session.started_label)}">Prune session</button>`
     : `<button type="button" class="btn-outline end-session" data-action="end" data-id="${esc(session.id)}">End session…</button>`;
 
   const helperNote = isEnded
@@ -321,17 +321,11 @@ export function sessionDetailHTML(
       <header class="session-detail-header">
         <div class="session-header-main">
           <div class="session-detail-title-block">
-            <div class="meta" data-owner="${esc(session.owner ?? session.agent)}"><span class="mono">${esc(session.id)}</span> <button type="button" class="row-copy-glyph" data-action="copy-id" data-id="${esc(session.id)}" title="${esc(session.id)}" aria-label="Copy full session id: ${esc(session.id)}">${glyphSvg("copy", { size: 14 })}</button></div>
+            <div class="meta" data-owner="${esc(session.started_label ?? "")}"><span class="mono">${esc(session.id)}</span> <button type="button" class="row-copy-glyph" data-action="copy-id" data-id="${esc(session.id)}" title="${esc(session.id)}" aria-label="Copy full session id: ${esc(session.id)}">${glyphSvg("copy", { size: 14 })}</button></div>
             <div class="meta"><span class="session-status ${session.status === "active" ? "active" : "ended"}"><span class="state-dot${session.status === "active" ? " live" : ""}"></span>${esc(session.status)}</span> · started ${relative(session.created_at)} · ${count(eventsCount, "event")}</div>
             ${handoff}
             ${lineage}
           </div>
-        </div>
-        <div class="session-header-side">
-          <span class="session-reassign">
-            <button type="button" class="btn-outline session-reassign-btn" data-action="reassign-open" data-id="${esc(session.id)}" data-owner="${esc(session.owner ?? session.agent)}" aria-haspopup="menu" aria-expanded="false">Reassign</button>
-            <div class="shell-group-menu session-reassign-menu" role="menu" aria-label="Move this session to an agent" hidden></div>
-          </span>
         </div>
       </header>
 
@@ -465,28 +459,6 @@ export async function endSession(id) {
   if (confirmed) toast("Session ended.");
 }
 
-// The human moves a session to another agent when the one holding it is not
-// coming back. The move is named and confirmed, because a session's brain
-// belongs to its owner and only the human ever makes this call.
-export async function reassignSession(id, agent, from) {
-  const confirmed = await confirmAction({
-    title: "Move this session?",
-    body: `${id} moves from ${from} to ${agent}. The agent can pick the work up again.`,
-    note: "The brain stays with the session. Feed events are never touched.",
-    safe: "Keep",
-    danger: "Reassign",
-    tone: "action",
-    commit: async () => {
-      await api(`/api/v1/sessions/${encodeURIComponent(id)}/reassign`, {
-        method: "POST",
-        body: JSON.stringify({ agent }),
-      });
-      await render();
-    },
-  });
-  if (confirmed) toast(`Session reassigned to ${agent}.`);
-}
-
 // The human's review of a run: one score from 1 to 5 and the words that say
 // why. A score is a derived fact that cites the anchor, so it is written once
 // and never edits the run. The dialog asks in the shared confirm pattern, with
@@ -517,44 +489,6 @@ async function openScoreDialog(button) {
     toast("Score saved.");
     await render();
   }
-}
-
-// The menu of agents a session can move to, opened from the header control.
-async function openReassignMenu(button) {
-  const wrap = button.closest(".session-reassign");
-  const menu = wrap?.querySelector(".session-reassign-menu");
-  if (!menu) return;
-  if (!menu.hidden) {
-    menu.hidden = true;
-    button.setAttribute("aria-expanded", "false");
-    return;
-  }
-  const id = button.dataset.id;
-  const from = button.dataset.owner;
-  let agents = [];
-  try {
-    agents = (await api("/api/v1/agents")).agents || [];
-  } catch (err) {
-    toast(`Could not list agents: ${err.message ?? err}`);
-    return;
-  }
-  const targets = agents.filter((a) => a.id !== from);
-  if (!targets.length) {
-    toast("No other agent to move this session to.");
-    return;
-  }
-  menu.innerHTML = targets
-    .map(
-      (a) =>
-        `<button type="button" role="menuitem" data-action="reassign" data-id="${esc(id)}" data-agent="${esc(a.id)}" data-from="${esc(from)}">${esc(a.display_name || a.id)}</button>`,
-    )
-    .join("");
-  const rect = button.getBoundingClientRect();
-  menu.style.top = `${Math.round(rect.bottom + 6)}px`;
-  menu.style.left = `${Math.round(Math.max(8, Math.min(rect.left, window.innerWidth - 200)))}px`;
-  menu.hidden = false;
-  button.setAttribute("aria-expanded", "true");
-  menu.querySelector("button")?.focus();
 }
 
 export async function pruneAllEnded(project) {
@@ -895,14 +829,6 @@ if (typeof document !== "undefined") {
   // comments drawer, so the sheet is not a trap on a keyboard.
   document.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
-    const menu = document.querySelector(".session-reassign-menu:not([hidden])");
-    if (menu) {
-      const trigger = /** @type {HTMLElement} */ (menu.closest(".session-reassign")?.querySelector('[data-action="reassign-open"]'));
-      trigger?.setAttribute("aria-expanded", "false");
-      /** @type {HTMLElement} */ (menu).hidden = true;
-      trigger?.focus();
-      return;
-    }
     const sheet = /** @type {HTMLElement} */ (document.querySelector(".kv-sheet:not([hidden])"));
     if (!sheet) return;
     sheet.hidden = true;
@@ -927,30 +853,6 @@ if (typeof document !== "undefined") {
     if (scoreOpen) {
       await openScoreDialog(scoreOpen);
       return;
-    }
-
-    const reassignOpen = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="reassign-open"]'));
-    if (reassignOpen) {
-      await openReassignMenu(reassignOpen);
-      return;
-    }
-
-    const reassignTo = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="reassign"]'));
-    if (reassignTo) {
-      const menu = /** @type {HTMLElement} */ (reassignTo.closest(".session-reassign-menu"));
-      if (menu) menu.hidden = true;
-      const opener = reassignTo.closest(".session-reassign")?.querySelector('[data-action="reassign-open"]');
-      opener?.setAttribute("aria-expanded", "false");
-      await reassignSession(/** @type {HTMLElement} */ (reassignTo).dataset.id, /** @type {HTMLElement} */ (reassignTo).dataset.agent, /** @type {HTMLElement} */ (reassignTo).dataset.from);
-      return;
-    }
-
-    // Any click that is not on the trigger or its items closes an open menu.
-    const openMenu = document.querySelector(".session-reassign-menu:not([hidden])");
-    if (openMenu) {
-      const trigger = openMenu.closest(".session-reassign")?.querySelector('[data-action="reassign-open"]');
-      trigger?.setAttribute("aria-expanded", "false");
-      /** @type {HTMLElement} */ (openMenu).hidden = true;
     }
 
     const pruneAllBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="prune-all"]'));

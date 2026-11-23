@@ -60,7 +60,7 @@ async function commentsSection(id, path) {
   const done = comments.filter((comment) => comment.done);
   const thread = (comment, resolved) => `<div class="wiki-comment">
     <div class="wiki-comment-head">
-      <span class="wiki-comment-author">${esc(comment.author)}</span>
+      <span class="wiki-comment-author">${esc(comment.actor)}</span>
       <span class="mono wiki-comment-time">${timeHTML(comment.created_at)}</span>
       <span class="wiki-comment-gap"></span>
       ${resolved ? "" : `<button type="button" class="btn-outline wiki-comment-resolve" data-action="wiki-comment-resolve" data-id="${esc(id)}" data-comment="${esc(comment.id)}">Resolve</button>`}

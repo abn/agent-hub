@@ -29,7 +29,7 @@ ADMIN_TOKEN = "browser-check-token"
 # named here rather than repeated as literals in two scripts.
 PROJECT_ID = "checks"
 PROJECT_NAME = "Checks"
-AGENT_ID = "checks/agent"
+AGENT_ID = "checks-agent"
 AGENT_NAME = "Check agent"
 SESSION_NAME = "nightly"
 # The anchor the session leaves at its phase boundary, and the event a later
@@ -139,7 +139,7 @@ def seed_versioned_artifact(port: int, project_id: str) -> str:
     Its own MCP session, so the update lands under the same actor as the
     publish and the main seed's event order stays untouched.
     """
-    session: list[str] = []
+    session = Connection(project_id, "versioned")
     mcp_call(
         port,
         session,
@@ -233,7 +233,7 @@ HOME_NEWEST_SUMMARY = "pool scrub finished clean"
 
 def seed_home(port: int) -> None:
     """One open approval and one finished event, the newest on the hub."""
-    session: list[str] = []
+    session = Connection(PROJECT_ID, "home")
     mcp_call(
         port,
         session,
@@ -277,7 +277,7 @@ def home_payload(**fields) -> dict:
     quiet = {
         "unread": 0,
         "waiting": 0,
-        "agents_active": 2,
+        "sessions_live": 2,
         "last_event_at": None,
         "recent": [],
         "unseen": [],
@@ -306,7 +306,7 @@ FEED_EMPTY_PROJECT = "feed-empty"
 
 
 def feed_days_session(port: int) -> list[str]:
-    session: list[str] = []
+    session = Connection(FEED_DAYS_PROJECT, "feed-days")
     mcp_call(
         port,
         session,
@@ -410,7 +410,55 @@ def request(port: int, method: str, path: str, body: dict | None = None) -> byte
         return response.read()
 
 
+# The tools whose writes name the hub session they belong to. A call that
+# names none records a member and an agent and no session.
+WRITE_TOOLS = frozenset(
+    {
+        "signal_append",
+        "question_post",
+        "answer_post",
+        "artifact_publish",
+        "artifact_update",
+        "artifact_draft",
+        "artifact_squash",
+        "artifact_delete",
+        "comment_post",
+        "comment_resolve",
+        "comment_delete",
+        "brain_put",
+        "brain_delete",
+        "brain_revert",
+        "brain_promote",
+        "session_anchor",
+    }
+)
+
+
+class Connection(list):
+    """The MCP session id a connection holds, and the hub session its writes
+    belong to: the connection names it once, every write passes it."""
+
+    def __init__(self, project: str, name: str):
+        super().__init__()
+        self.project = project
+        self.name = name
+
+
+def with_session(connection: list[str], payload: dict) -> dict:
+    """Pass the connection's hub session on a write that names none."""
+    name = getattr(connection, "name", None)
+    if not name or payload.get("method") != "tools/call":
+        return payload
+    params = payload.get("params", {})
+    arguments = params.get("arguments", {})
+    if params.get("name") in WRITE_TOOLS and "session" not in arguments:
+        project = arguments.get("project_id") or connection.project
+        arguments["session"] = {"project_id": project, "name": name}
+    return payload
+
+
 def mcp_call(port: int, session: list[str], payload: dict) -> dict:
+    payload = with_session(session, payload)
     headers = {
         "Authorization": f"Bearer {ADMIN_TOKEN}",
         "Content-Type": "application/json",
@@ -446,7 +494,7 @@ def seed(port: int) -> dict[str, str]:
     request(
         port,
         "POST",
-        "/api/v1/agents",
+        "/api/v1/members",
         {"id": AGENT_ID, "display_name": AGENT_NAME},
     )
     # A second project whose session was picked up from another, so the
@@ -454,7 +502,7 @@ def seed(port: int) -> dict[str, str]:
     # its feed events are the oldest on the hub and never crowd the latest
     # ten out of Home, which the checks assert against.
     request(port, "POST", "/api/v1/projects", {"id": LINEAGE_PROJECT, "display_name": "Lineage"})
-    lineage_session: list[str] = []
+    lineage_session = Connection(LINEAGE_PROJECT, "source")
     mcp_call(
         port,
         lineage_session,
@@ -532,14 +580,14 @@ def seed(port: int) -> dict[str, str]:
                 "method": "tools/call",
                 "params": {
                     "name": "session_end",
-                    "arguments": {"session_id": lineage_pickup_id, "handoff": "handoff note here"},
+                    "arguments": {"session": {"session_id": lineage_pickup_id}, "handoff": "handoff note here"},
                 },
             },
         )
     # Seeded ahead of the checks project for the same reason as the lineage
     # one: its session events stay the oldest on the hub.
     request(port, "POST", "/api/v1/projects", {"id": ATTIC_PROJECT, "display_name": "Attic"})
-    attic: list[str] = []
+    attic = Connection(ATTIC_PROJECT, ATTIC_SESSIONS[0] if ATTIC_SESSIONS else "attic")
     mcp_call(
         port,
         attic,
@@ -556,6 +604,7 @@ def seed(port: int) -> dict[str, str]:
     )
     mcp_call(port, attic, {"jsonrpc": "2.0", "method": "notifications/initialized"})
     for offset, name in enumerate(ATTIC_SESSIONS):
+        attic.name = name
         steps = [
             ("session_start", {"project_id": ATTIC_PROJECT, "session_name": name}),
             ("brain_put", {"store": "session", "path": "/kv/left-behind", "content": name}),
@@ -582,10 +631,10 @@ def seed(port: int) -> dict[str, str]:
                     "jsonrpc": "2.0",
                     "id": 4 + offset * 3,
                     "method": "tools/call",
-                    "params": {"name": "session_end", "arguments": {"session_id": started}},
+                    "params": {"name": "session_end", "arguments": {"session": {"session_id": started}}},
                 },
             )
-    session: list[str] = []
+    session = Connection(PROJECT_ID, SESSION_NAME)
     mcp_call(
         port,
         session,

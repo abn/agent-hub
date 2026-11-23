@@ -1,8 +1,8 @@
-//! The calling agent's own REST surface.
+//! The calling member's own REST surface.
 //!
-//! Routes here answer for the agent behind the token and never for the human
-//! admin: they read what is waiting for that agent, and nothing they do
-//! changes what it is shown next.
+//! Routes here answer for the member behind the token and never for the human
+//! admin: they read what is waiting for that member's agent, and nothing they
+//! do changes what it is shown next.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -14,11 +14,10 @@ use serde_json::{Value, json};
 
 use crate::app::AppState;
 use crate::error::Error;
+use crate::http::auth::credential_error;
 use crate::http::problem::Problem;
 use crate::mcp::notifications::{self, Entry, Pending};
-use crate::policy::{self, Access};
-use crate::principal::Principal;
-use crate::store::sessions;
+use crate::mcp::session_arg::{self, Mode, SessionArg, SessionRef};
 
 /// How many items one peek returns when the caller does not say.
 const LIMIT_DEFAULT: usize = 20;
@@ -33,7 +32,10 @@ const RECHECK: Duration = Duration::from_secs(10);
 /// What a peek was asked for.
 #[derive(Debug, Default)]
 struct PendingQuery {
+    /// A session id, or with `name` the same session by name.
     session: Option<String>,
+    name: Option<String>,
+    project_id: Option<String>,
     limit: usize,
     wait: u64,
     after: Option<String>,
@@ -43,9 +45,10 @@ struct PendingQuery {
 ///
 /// What the notification trailer would deliver to the caller now, in the
 /// trailer's item shape, without delivering it: no cursor moves, so a later
-/// `notify_wait` or tool result still carries every item. `session` scopes the
-/// read to one of the caller's own sessions, as `session` does on `notify_wait`;
-/// without it only the items asked outside any session are read.
+/// `notify_wait` or tool result still carries every item. The read is keyed by
+/// the caller's member, its agent (`X-Agent-Id`, else `cli`) and a session:
+/// `session` is a session id, or `name` with `project_id` names it. Without
+/// either only the items asked outside any session are read.
 ///
 /// With `wait` (seconds, 60 at most) the request is held open until an item
 /// newer than `after` is waiting, or the time is up. Without `after`, any
@@ -54,31 +57,63 @@ struct PendingQuery {
 /// the id of the last of them, which is what `after` takes on the next peek, so
 /// no item past `limit` is stepped over.
 ///
-/// The token must be an agent's. The admin token is refused: the admin has no
-/// attention queue of its own.
+/// The token must be an active member's. A pending or missing token is refused
+/// with its reason, and so is the admin token: the admin has no attention queue
+/// of its own.
 pub async fn pending(
     State(state): State<AppState>,
     headers: HeaderMap,
     RawQuery(raw): RawQuery,
 ) -> std::result::Result<Json<Value>, Problem> {
+    let token = crate::http::auth::bearer_token(&headers);
     let principal = crate::mcp::resolve_caller(&state, &headers)
         .await
+        .map_err(|err| Problem::from_error(&credential_error(err, token.as_deref())))?;
+    principal
+        .require_active()
         .map_err(|err| Problem::from_error(&err))?;
-    if principal.is_admin {
+    if principal.member().is_none() || principal.is_admin() {
         return Err(Problem::from_error(&Error::Forbidden(
-            "pending items are read with an agent token; the admin token has none".to_string(),
+            "pending items are read with a member token; the admin token has none".to_string(),
         )));
     }
     let query = parse_query(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;
-    let session = match query.session.as_deref() {
-        Some(session_id) => Some(
-            own_session(&state, &principal, session_id)
-                .await
-                .map_err(|err| Problem::from_error(&err))?,
-        ),
-        None => None,
+    let session = match (&query.session, &query.name, &query.project_id) {
+        (None, None, None) => None,
+        (session_id, name, project_id) => {
+            let arg = SessionArg::Ref(SessionRef {
+                session_id: session_id.clone(),
+                name: name.clone(),
+                project_id: project_id.clone(),
+            });
+            let resolved = session_arg::resolve(
+                &state,
+                &principal,
+                Some(&arg),
+                query.project_id.as_deref(),
+                Mode::Read,
+            )
+            .await
+            .map_err(|err| Problem::from_error(&err))?;
+            // A peek in a session that has ended says so, so a hook sharing it
+            // with another instance knows to start it again.
+            if let Some(session) = resolved
+                .session
+                .as_ref()
+                .filter(|session| session.status != "active")
+            {
+                return Err(Problem::from_error(&Error::Session(
+                    crate::error::SessionReason::Ended,
+                    format!(
+                        "session '{}' has ended; call session_start to reopen it",
+                        session.session_name
+                    ),
+                    None,
+                )));
+            }
+            resolved.session.map(|session| session.id)
+        }
     };
-
     // Subscribe before the first read so a write cannot land between the read
     // and listening.
     let mut ticker = state.ticker.subscribe();
@@ -158,40 +193,6 @@ fn has_fresh(pending: &Pending, after: Option<&str>) -> bool {
     }
 }
 
-/// The caller's own running session, by id.
-///
-/// An id that names nothing is concealed as an MCP call concealed it, so which
-/// ids exist is not something a refusal leaks.
-async fn own_session(
-    state: &AppState,
-    principal: &Principal,
-    session_id: &str,
-) -> crate::Result<String> {
-    let session = sessions::get(&state.db, session_id)
-        .await?
-        .filter(|session| session.deleted_at.is_none())
-        .ok_or_else(|| {
-            policy::conceal(
-                principal,
-                Error::NotFound(format!("session {session_id} not found")),
-            )
-        })?;
-    policy::authorize(&state.db, principal, &session.project_id, Access::Read).await?;
-    if session.agent != principal.actor {
-        return Err(Error::Forbidden(format!(
-            "session {} belongs to another agent owner={}",
-            session.id, session.agent
-        )));
-    }
-    if session.status == "ended" {
-        return Err(Error::Conflict(format!(
-            "session {} has ended; call session_start to begin or resume a session of your own",
-            session.id
-        )));
-    }
-    Ok(session.id)
-}
-
 fn parse_query(raw: Option<&str>) -> std::result::Result<PendingQuery, Error> {
     let mut query = PendingQuery {
         limit: LIMIT_DEFAULT,
@@ -200,6 +201,10 @@ fn parse_query(raw: Option<&str>) -> std::result::Result<PendingQuery, Error> {
     for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
         match key.as_ref() {
             "session" => query.session = Some(value.into_owned()).filter(|id| !id.is_empty()),
+            "name" => query.name = Some(value.into_owned()).filter(|name| !name.is_empty()),
+            "project_id" => {
+                query.project_id = Some(value.into_owned()).filter(|id| !id.is_empty());
+            }
             "after" => query.after = Some(value.into_owned()).filter(|id| !id.is_empty()),
             "limit" => {
                 let limit = value.parse::<usize>().map_err(|_| {

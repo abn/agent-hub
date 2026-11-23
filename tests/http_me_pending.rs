@@ -24,11 +24,19 @@ struct Mcp {
     port: u16,
     token: String,
     session: String,
+    /// The hub session every call but `session_start` passes, when bound.
+    bound: Option<Value>,
 }
 
 impl Mcp {
+    /// Pass this session on every later call, as a harness does.
+    fn bind(mut self, name: &str) -> Self {
+        self.bound = Some(json!({"project_id": PROJECT, "name": name}));
+        self
+    }
+
     fn connect(port: u16, token: &str) -> Self {
-        let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":PROTOCOL_VERSION,"capabilities":{},"clientInfo":{"name":"x","version":"0"}}}).to_string();
+        let body = json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":PROTOCOL_VERSION,"capabilities":{},"clientInfo":{"name":"cli","version":"0"}}}).to_string();
         let response = mcp_post(port, &body, Some(token), None);
         let session = response.header("mcp-session-id").expect("session");
         mcp_post(
@@ -41,10 +49,17 @@ impl Mcp {
             port,
             token: token.to_string(),
             session,
+            bound: None,
         }
     }
 
     fn call(&self, name: &str, arguments: Value) -> Value {
+        let mut arguments = arguments;
+        if let (Some(bound), Some(object)) = (&self.bound, arguments.as_object_mut())
+            && name != "session_start"
+        {
+            object.insert("session".to_string(), bound.clone());
+        }
         let response = mcp_post(
             self.port,
             &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":name,"arguments":arguments}}).to_string(),
@@ -252,8 +267,8 @@ async fn a_peek_in_a_session_reads_that_sessions_items_and_no_other() {
     let world = world("me-pending-session").await;
     let child = HubProcess::serve(&world.dir, ADMIN_TOKEN, &[]);
     let port = child.port();
-    let first = Mcp::connect(port, &world.agent_token);
-    let second = Mcp::connect(port, &world.agent_token);
+    let first = Mcp::connect(port, &world.agent_token).bind("first");
+    let second = Mcp::connect(port, &world.agent_token).bind("second");
     let first_id = first.call(
         "session_start",
         json!({"project_id": PROJECT, "session_name": "first"}),
@@ -289,17 +304,20 @@ async fn a_peek_in_a_session_reads_that_sessions_items_and_no_other() {
         );
     }
 
-    let stranger = Mcp::connect(port, &world.other_token);
-    let refused = rest(
+    let unknown = rest(
         port,
         "GET",
-        &format!("/api/v1/me/pending?session={first_id}"),
-        Some(&world.other_token),
+        "/api/v1/me/pending?session=no-such-session",
+        Some(&world.agent_token),
         None,
     );
-    assert_eq!(refused.status, 403, "{}", refused.raw);
-    assert_eq!(json_of(&refused)["code"], "forbidden");
-    drop(stranger);
+    assert_eq!(unknown.status, 404, "{}", unknown.raw);
+    assert_eq!(
+        json_of(&unknown)["details"]["reason"],
+        "session_unknown",
+        "{}",
+        unknown.raw
+    );
 
     let delivered = second.call("notify_wait", json!({"wait_seconds": 0}));
     assert_eq!(
@@ -570,7 +588,7 @@ async fn direct_marks_what_names_the_caller_and_not_ambient_activity() {
 }
 
 #[tokio::test]
-async fn the_route_answers_agents_only() {
+async fn the_route_answers_active_members_only() {
     let world = world("me-pending-auth").await;
     let child = HubProcess::serve(&world.dir, ADMIN_TOKEN, &[]);
     let port = child.port();
@@ -582,6 +600,29 @@ async fn the_route_answers_agents_only() {
     let anonymous = rest(port, "GET", "/api/v1/me/pending", None, None);
     assert_eq!(anonymous.status, 401, "{}", anonymous.raw);
     assert_eq!(json_of(&anonymous)["code"], "unauthenticated");
+    assert_eq!(json_of(&anonymous)["details"]["reason"], "token_missing");
+
+    let enrolled = rest(
+        port,
+        "POST",
+        "/api/v1/enrol",
+        None,
+        Some(r#"{"member":"newcomer","display_name":"Newcomer","why":"testing"}"#),
+    );
+    assert_eq!(enrolled.status, 202, "{}", enrolled.raw);
+    let pending_token = json_of(&enrolled)["token"]
+        .as_str()
+        .expect("pending token")
+        .to_string();
+    let pending = rest(
+        port,
+        "GET",
+        "/api/v1/me/pending",
+        Some(&pending_token),
+        None,
+    );
+    assert_eq!(pending.status, 401, "{}", pending.raw);
+    assert_eq!(json_of(&pending)["details"]["reason"], "token_pending");
 
     let unknown = rest(port, "GET", "/api/v1/me/pending", Some("not-a-token"), None);
     assert_eq!(unknown.status, 401, "{}", unknown.raw);

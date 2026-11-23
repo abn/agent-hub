@@ -30,6 +30,11 @@ pub struct Problem {
     pub detail: String,
     /// The machine-readable hub error code.
     pub code: &'static str,
+    /// What a client acts on beyond the code: `{"reason": ..}` for a refused
+    /// credential or session, plus any extra the error carries. Absent when
+    /// the error has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl Problem {
@@ -42,6 +47,7 @@ impl Problem {
             status: status.as_u16(),
             detail: error.to_string(),
             code: error.code().as_str(),
+            details: error.details(),
         }
     }
 

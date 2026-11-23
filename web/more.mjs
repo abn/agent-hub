@@ -15,10 +15,10 @@ export async function moreScreen(gen) {
   try {
     const [storageRes, agentsRes] = await Promise.all([
       api("/api/v1/storage"),
-      api("/api/v1/agents"),
+      api("/api/v1/members"),
     ]);
     usage = storageRes || {};
-    agents = agentsRes?.agents || [];
+    agents = agentsRes?.members || [];
   } catch {}
 
   const nodeLine = [usage.node?.host, usage.node?.mode]

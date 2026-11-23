@@ -4,7 +4,34 @@ use axum::http::{HeaderMap, header};
 
 use super::problem::Problem;
 use crate::app::AppState;
+use crate::error::{CredentialReason, Error};
 use crate::principal::Principal;
+
+/// Name why a plain refusal was made. A resolver that already gave a reason
+/// keeps it; one that did not is read from what was presented: no bearer is
+/// `token_missing`, any other is `token_unknown`.
+pub fn credential_error(err: Error, token: Option<&str>) -> Error {
+    match err {
+        Error::Unauthenticated(message) => Error::Credential(
+            if token.is_none() {
+                CredentialReason::TokenMissing
+            } else {
+                CredentialReason::TokenUnknown
+            },
+            message,
+        ),
+        other => other,
+    }
+}
+
+/// The human operator behind a REST call: the admin token, or the open
+/// loopback hub. A refusal carries the credential reason.
+pub fn admin(state: &AppState, token: Option<&str>) -> std::result::Result<Principal, Problem> {
+    state
+        .auth
+        .require_admin(token)
+        .map_err(|err| Problem::from_error(&credential_error(err, token)))
+}
 
 /// Pull a bearer token from the `Authorization` header, if one is present.
 pub fn bearer_token(headers: &HeaderMap) -> Option<String> {
@@ -25,9 +52,10 @@ pub async fn agent_principal(
     state: &AppState,
     headers: &HeaderMap,
 ) -> std::result::Result<Principal, Problem> {
+    let token = bearer_token(headers);
     state
         .auth
-        .resolve_member_as(&state.db, bearer_token(headers).as_deref(), headers)
+        .resolve_member_as(&state.db, token.as_deref(), headers)
         .await
-        .map_err(|err| Problem::from_error(&err))
+        .map_err(|err| Problem::from_error(&credential_error(err, token.as_deref())))
 }

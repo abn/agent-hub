@@ -272,7 +272,7 @@ function headerMeta(oldest) {
 }
 
 function introMargin(data) {
-  const agents = Math.max(0, Math.trunc(Number(data.agents_active)) || 0);
+  const agents = Math.max(0, Math.trunc(Number(data.sessions_live)) || 0);
   const node = [data.node?.host, data.node?.mode].filter((part) => typeof part === "string" && part);
   return `<span class="section-label now-mar-label">Working now</span>
     <p class="now-who">${agents ? `${agents} ${agents === 1 ? "agent" : "agents"} active` : "No agents active"}</p>
@@ -290,7 +290,7 @@ export async function now(gen) {
   const oldest = sinceOldest(since);
   const needs = asks.now.length + asks.unlisted;
   const anyAsk = needs + asks.later.length > 0;
-  const agents = Math.max(0, Math.trunc(Number(data.agents_active)) || 0);
+  const agents = Math.max(0, Math.trunc(Number(data.sessions_live)) || 0);
 
   const summary = summaryHTML({ now: asks.now, later: asks.later.length, since: sinceCount, agents, unlisted: asks.unlisted });
   const intro = ledger("now-intro", `<p class="now-sum">${summary}</p>`, introMargin(data));

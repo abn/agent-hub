@@ -48,10 +48,7 @@ pub async fn create(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> std::result::Result<(StatusCode, Json<BackupTaken>), Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let Some(backup_dir) = state.config.backup_dir.clone() else {
         return Err(Problem::from_error(&Error::NotFound(

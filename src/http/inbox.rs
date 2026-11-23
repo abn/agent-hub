@@ -84,10 +84,7 @@ async fn mark(
     event_id: &str,
     read: bool,
 ) -> std::result::Result<Json<inbox_store::ReadState>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(headers).as_deref())?;
 
     let marked = if read {
         inbox_store::mark_read(&state.db, event_id).await
@@ -112,10 +109,7 @@ pub async fn read_all(
     headers: HeaderMap,
     body: std::result::Result<Json<ReadAllBody>, JsonRejection>,
 ) -> std::result::Result<Json<ReadAllResult>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     // An empty body is the whole inbox, which is what the header control does.
     let payload = match body {
@@ -162,10 +156,7 @@ pub async fn home(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<Home>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     // The file and volume numbers come from the memo, so Home's one request
     // does not restat the data directory on every poll.
@@ -202,10 +193,7 @@ pub async fn list(
     headers: HeaderMap,
     ProblemQuery(params): ProblemQuery<InboxParams>,
 ) -> std::result::Result<Json<InboxList>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let status = params.status.as_deref().filter(|status| !status.is_empty());
     let project = params
@@ -244,10 +232,7 @@ pub async fn answer(
     headers: HeaderMap,
     body: std::result::Result<Json<AnswerBody>, JsonRejection>,
 ) -> std::result::Result<Json<AnswerResult>, Problem> {
-    let principal = state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    let principal = crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let payload = json_body(body, "answer body must be JSON with a body field")?;
 
@@ -291,10 +276,7 @@ pub async fn decide(
     headers: HeaderMap,
     body: std::result::Result<Json<DecisionBody>, JsonRejection>,
 ) -> std::result::Result<Json<AnswerResult>, Problem> {
-    let principal = state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    let principal = crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let payload = json_body(body, "decision body must be JSON with a decision field")?;
 
@@ -327,6 +309,8 @@ pub async fn decide(
     if let Some(agent_id) = decision.enrolled_agent {
         state.set_enrol_share(&agent_id, true);
     }
+    // A declined enrolment deleted the pending token: its streams close.
+    state.announce_revoked(decision.revoked);
 
     state.notify();
     Ok(Json(AnswerResult {

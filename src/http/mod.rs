@@ -21,17 +21,18 @@ const READY_PROBE_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
 /// failure an operator is about to hit.
 const READY_MIN_FREE_BYTES: i64 = 64 * 1024 * 1024;
 
-pub mod agents;
 pub mod artifacts;
 pub mod auth;
 pub mod backup;
 pub mod enrol;
 pub mod feed;
+pub mod filters;
 pub mod ideas;
 pub mod inbox;
 pub mod kb;
 pub mod kb_comments;
 pub mod me;
+pub mod members;
 pub mod metrics;
 pub mod origin;
 pub mod problem;
@@ -69,18 +70,18 @@ pub fn router(state: AppState) -> Router {
         .route("/sw.js", get(web::service_worker))
         .route("/bootstrap/SKILL.md", get(skill::skill))
         .route("/metrics", get(metrics::metrics))
-        .route("/api/v1/agents", get(agents::list).post(agents::create))
+        .route("/api/v1/members", get(members::list).post(members::create))
         .route(
-            "/api/v1/agents/{id}/token",
-            post(agents::issue).delete(agents::revoke),
+            "/api/v1/members/{id}/token",
+            post(members::issue).delete(members::revoke),
         )
         .route(
-            "/api/v1/agents/{id}/grants",
-            get(agents::grants).post(agents::grant),
+            "/api/v1/members/{id}/grants",
+            get(members::grants).post(members::grant),
         )
         .route(
-            "/api/v1/agents/{id}/grants/{project_id}",
-            delete(agents::ungrant),
+            "/api/v1/members/{id}/grants/{project_id}",
+            delete(members::ungrant),
         )
         .route("/api/v1/enrol", post(enrol::enrol))
         .route("/api/v1/enrol/status", get(enrol::status))
@@ -192,7 +193,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/sessions", get(sessions::list))
         .route("/api/v1/sessions/{id}", get(sessions::detail))
         .route("/api/v1/sessions/{id}/end", post(sessions::end))
-        .route("/api/v1/sessions/{id}/reassign", post(sessions::reassign))
         .route("/api/v1/sessions/{id}/brain", get(sessions::brain))
         .route("/api/v1/sessions/{id}/replay", get(sessions::replay))
         .route("/api/v1/sessions/{id}/resume", get(sessions::resume))

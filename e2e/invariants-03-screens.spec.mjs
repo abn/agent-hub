@@ -14,8 +14,8 @@ const headerHeight = (page) =>
   page.evaluate(() => document.querySelector(".shell-head")?.getBoundingClientRect().height ?? null);
 
 const createAgent = async (hub, id, name) => {
-  await api(hub, "POST", "/api/v1/agents", { id, display_name: name });
-  await api(hub, "POST", `/api/v1/agents/${encodeURIComponent(id)}/token`);
+  await api(hub, "POST", "/api/v1/members", { id, display_name: name });
+  await api(hub, "POST", `/api/v1/members/${encodeURIComponent(id)}/token`);
 };
 
 test.describe("phone frame", () => {
@@ -382,7 +382,7 @@ test.describe("round 14", () => {
     const confidential = "round14-confidential";
     await createAgent(hub, agent, "Round 14 probe");
     await api(hub, "POST", "/api/v1/projects", { id: confidential, display_name: "Round 14 confidential", confidential: true });
-    await api(hub, "POST", `/api/v1/agents/${encodeURIComponent(agent)}/grants`, { project_id: confidential });
+    await api(hub, "POST", `/api/v1/members/${encodeURIComponent(agent)}/grants`, { project_id: confidential });
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await goto(page, "#/home");
@@ -532,7 +532,7 @@ test.describe("round 14", () => {
 test.describe("register and connect", () => {
   test("the projects register files agent spaces apart from projects", async ({ hub, page }) => {
     const agent = "space-test-agent";
-    const created = (await api(hub, "POST", "/api/v1/agents", { id: agent, display_name: "Test Space" })).json();
+    const created = (await api(hub, "POST", "/api/v1/members", { id: agent, display_name: "Test Space" })).json();
     const spaceId = created.personal_project_id;
     await goto(page, "#/projects", "Projects");
     await expect(page.locator(".project-row").first()).toBeVisible();
@@ -774,7 +774,7 @@ test.describe("settings and storage", () => {
       kb_bytes: parts[3],
       prunable_bytes: 1000,
       prunable_sessions: 1,
-      agents_active: 0,
+      sessions_live: 0,
     });
     await page.route("**/api/v1/storage", async (route) => {
       const response = await route.fetch();

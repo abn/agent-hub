@@ -602,7 +602,7 @@ function setupAgentsEvents() {
     }
 
     try {
-      await api("/api/v1/agents", {
+      await api("/api/v1/members", {
         method: "POST",
         body: JSON.stringify({ id: idVal, display_name: nameVal }),
       });
@@ -614,7 +614,7 @@ function setupAgentsEvents() {
       // it directly. There is nothing to reissue, so no confirm state.
       let issued = null;
       try {
-        issued = await api(`/api/v1/agents/${encodeURIComponent(idVal)}/token`, { method: "POST" });
+        issued = await api(`/api/v1/members/${encodeURIComponent(idVal)}/token`, { method: "POST" });
       } catch {}
       revealIssuedToken(issued?.token || null, nameVal || idVal, idVal);
     } catch (err) {
@@ -633,14 +633,14 @@ export async function accessScreen(gen, params = null) {
   let projects = [];
   const grantsByAgent = {};
   try {
-    const res = await Promise.all([api("/api/v1/agents"), api("/api/v1/projects")]);
-    agents = res[0].agents || [];
+    const res = await Promise.all([api("/api/v1/members"), api("/api/v1/projects")]);
+    agents = res[0].members || [];
     projects = res[1].projects || [];
     await Promise.all(
       agents.map(async (agent) => {
         try {
           grantsByAgent[agent.id] = (
-            await api(`/api/v1/agents/${encodeURIComponent(agent.id)}/grants`)
+            await api(`/api/v1/members/${encodeURIComponent(agent.id)}/grants`)
           ).grants || [];
         } catch {
           grantsByAgent[agent.id] = [];
@@ -689,7 +689,7 @@ export async function accessScreen(gen, params = null) {
 export async function agentsSection() {
   let agents = [];
   try {
-    agents = (await api("/api/v1/agents")).agents || [];
+    agents = (await api("/api/v1/members")).members || [];
   } catch (error) {
     return errorCard("Access", error);
   }
@@ -867,7 +867,7 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
     if (state === 1) {
       commit.disabled = true;
       try {
-        const issued = await api(`/api/v1/agents/${encodeURIComponent(agentId || agentName)}/token`, {
+        const issued = await api(`/api/v1/members/${encodeURIComponent(agentId || agentName)}/token`, {
           method: "POST",
         });
         visible = issued.token;
@@ -1020,7 +1020,7 @@ function openGrantPicker(agentId, agentName, projects, grants) {
     commit.disabled = true;
     problem.hidden = true;
     try {
-      await api(`/api/v1/agents/${encodeURIComponent(agentId)}/grants`, {
+      await api(`/api/v1/members/${encodeURIComponent(agentId)}/grants`, {
         method: "POST",
         body: JSON.stringify({ project_id: select.value }),
       });
@@ -1070,7 +1070,7 @@ function openGrantPicker(agentId, agentName, projects, grants) {
 export async function issueToken(id, name = "") {
   // Issuing where there is no live token is not destructive, so the reveal is
   // shown directly rather than behind the reissue confirmation.
-  const issued = await api(`/api/v1/agents/${encodeURIComponent(id)}/token`, { method: "POST" });
+  const issued = await api(`/api/v1/members/${encodeURIComponent(id)}/token`, { method: "POST" });
   await revealIssuedToken(issued.token, name || id, id);
 }
 
@@ -1082,7 +1082,7 @@ export async function revokeToken(id, name = "") {
     tone: "primary",
     danger: "Revoke token",
     commit: async () => {
-      await api(`/api/v1/agents/${encodeURIComponent(id)}/token`, { method: "DELETE" });
+      await api(`/api/v1/members/${encodeURIComponent(id)}/token`, { method: "DELETE" });
       await render();
     },
   });
@@ -1100,7 +1100,7 @@ export async function ungrant(id, project) {
     danger: "Remove grant",
     tone: "primary",
     commit: async () => {
-      await api(`/api/v1/agents/${encodeURIComponent(id)}/grants/${encodeURIComponent(project)}`, {
+      await api(`/api/v1/members/${encodeURIComponent(id)}/grants/${encodeURIComponent(project)}`, {
         method: "DELETE",
       });
       await render();
