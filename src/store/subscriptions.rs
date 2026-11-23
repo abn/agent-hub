@@ -27,8 +27,14 @@ pub const DRAIN_LIMIT: i64 = 50;
 #[derive(Debug, Clone)]
 pub struct Subscription {
     pub id: String,
-    /// The actor that registered it, and the only one it drains for.
+    /// The member that registered it. Kept under its old name, the label a
+    /// subscription was keyed by, until every reader takes `participant`.
     pub agent: String,
+    /// The participant it drains for.
+    pub participant: crate::author::ParticipantKey,
+    /// Only events whose author passes this are reported; empty is every
+    /// author.
+    pub author_filter: crate::author::AuthorFilter,
     /// The project it is scoped to, or `None` for every project the caller may
     /// read.
     pub project_id: Option<String>,
@@ -118,6 +124,34 @@ pub async fn create_with_filters(
     last_seen_event_id: &str,
     filters: Filters<'_>,
 ) -> Result<Registered> {
+    let key = crate::author::ParticipantKey::from_label(agent);
+    let author = crate::author::AuthorFilter {
+        label: filters.actor.map(str::to_string),
+        ..Default::default()
+    };
+    register_inner(
+        db,
+        &key,
+        &NewSubscription {
+            session_id,
+            project_id,
+            kinds,
+            last_seen_event_id,
+            author,
+            exclude_self: filters.exclude_self,
+            about_self: filters.about_self,
+        },
+    )
+    .await
+}
+
+async fn register_inner(
+    db: &Database,
+    key: &crate::author::ParticipantKey,
+    new: &NewSubscription<'_>,
+) -> Result<Registered> {
+    let (session_id, project_id, kinds) = (new.session_id, new.project_id, new.kinds);
+    let last_seen_event_id = new.last_seen_event_id;
     let tx = super::begin_write(db).await?;
     if let Some(session_id) = session_id
         && !super::notifications::session_is_active(&tx, session_id).await?
@@ -129,8 +163,10 @@ pub async fn create_with_filters(
     let wanted = sorted(kinds);
     let mut rows = tx
         .query(
-            &format!("SELECT {COLUMNS} FROM notify_subscriptions WHERE agent = ?1 ORDER BY id"),
-            vec![Value::Text(agent.to_string())],
+            &format!(
+                "SELECT {COLUMNS} FROM notify_subscriptions WHERE member_id = ?1 AND agent = ?2 ORDER BY id"
+            ),
+            vec![Value::Text(key.member.clone()), Value::Text(key.agent.clone())],
         )
         .await
         .map_err(engine)?;
@@ -139,9 +175,9 @@ pub async fn create_with_filters(
         if held.session_id.as_deref() == session_id
             && held.project_id.as_deref() == project_id
             && sorted(&held.kinds) == wanted
-            && held.actor_filter.as_deref() == filters.actor
-            && held.exclude_self == filters.exclude_self
-            && held.about_self == filters.about_self
+            && held.author_filter == new.author
+            && held.exclude_self == new.exclude_self
+            && held.about_self == new.about_self
         {
             return Ok(Registered {
                 id: held.id,
@@ -153,19 +189,25 @@ pub async fn create_with_filters(
     drop(rows);
 
     let id = super::next_id();
+    let filter = (!new.author.is_empty())
+        .then(|| serde_json::to_string(&new.author))
+        .transpose()
+        .map_err(|err| Error::Engine(err.to_string()))?;
     tx.execute(
-        "INSERT INTO notify_subscriptions(id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self, about_self, session_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO notify_subscriptions(id, member_id, agent, project_id, kinds, last_seen_event_id,
+            created_at, author_filter, exclude_self, about_self, session_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         vec![
             Value::Text(id.clone()),
-            Value::Text(agent.to_string()),
+            Value::Text(key.member.clone()),
+            Value::Text(key.agent.clone()),
             optional(project_id),
             Value::Text(kinds.join(",")),
             Value::Text(last_seen_event_id.to_string()),
             Value::Text(super::now_rfc3339()),
-            optional(filters.actor),
-            Value::Integer(i64::from(filters.exclude_self)),
-            Value::Integer(i64::from(filters.about_self)),
+            optional(filter.as_deref()),
+            Value::Integer(i64::from(new.exclude_self)),
+            Value::Integer(i64::from(new.about_self)),
             optional(session_id),
         ],
     )
@@ -195,16 +237,22 @@ fn optional(value: Option<&str>) -> Value {
 
 /// The columns a subscription row is read from, in the order
 /// [`subscription_from_row`] expects.
-const COLUMNS: &str = "id, agent, project_id, kinds, last_seen_event_id, created_at, actor_filter, exclude_self, about_self, session_id";
+const COLUMNS: &str = "id, member_id, project_id, kinds, last_seen_event_id, created_at, author_filter, exclude_self, about_self, session_id, agent";
 
 /// Every subscription one agent owns, whatever session it is bound to, oldest
 /// first.
 pub async fn list(db: &Database, agent: &str) -> Result<Vec<Subscription>> {
+    list_key(db, &crate::author::ParticipantKey::from_label(agent)).await
+}
+
+async fn list_key(db: &Database, key: &crate::author::ParticipantKey) -> Result<Vec<Subscription>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            &format!("SELECT {COLUMNS} FROM notify_subscriptions WHERE agent = ?1 ORDER BY id"),
-            vec![Value::Text(agent.to_string())],
+            &format!(
+                "SELECT {COLUMNS} FROM notify_subscriptions WHERE member_id = ?1 AND agent = ?2 ORDER BY id"
+            ),
+            vec![Value::Text(key.member.clone()), Value::Text(key.agent.clone())],
         )
         .await
         .map_err(engine)?;
@@ -238,16 +286,7 @@ pub async fn list_in_scope(
 /// The owner is part of the predicate, so an id belonging to another agent is
 /// indistinguishable from one that never existed.
 pub async fn delete(db: &Database, agent: &str, id: &str) -> Result<bool> {
-    let _turn = super::write_turn().await?;
-    let conn = super::connect(db)?;
-    let removed = conn
-        .execute(
-            "DELETE FROM notify_subscriptions WHERE id = ?1 AND agent = ?2",
-            vec![Value::Text(id.to_string()), Value::Text(agent.to_string())],
-        )
-        .await
-        .map_err(engine)?;
-    Ok(removed > 0)
+    delete_for(db, &crate::author::ParticipantKey::from_label(agent), id).await
 }
 
 /// Move one subscription's cursor forward to an event id it has reported.
@@ -343,12 +382,22 @@ fn subscription_from_row(row: &Row) -> Result<Subscription> {
     };
     let exclude_self = flag(7)?;
     let about_self = flag(8)?;
+    let member = required_text(row, 1)?;
+    let author_filter: crate::author::AuthorFilter = match text_at(row, 6)? {
+        Some(json) => serde_json::from_str(&json).unwrap_or_default(),
+        None => crate::author::AuthorFilter::default(),
+    };
     Ok(Subscription {
         id: required_text(row, 0)?,
-        agent: required_text(row, 1)?,
+        agent: member.clone(),
+        participant: crate::author::ParticipantKey {
+            member,
+            agent: text_at(row, 10)?.unwrap_or_default(),
+        },
         project_id: text_at(row, 2)?,
         kinds,
-        actor_filter: text_at(row, 6)?,
+        actor_filter: author_filter.label.clone(),
+        author_filter,
         exclude_self,
         about_self,
         session_id: text_at(row, 9)?,
@@ -401,18 +450,30 @@ pub async fn register(
     key: &crate::author::ParticipantKey,
     subscription: &NewSubscription<'_>,
 ) -> Result<Registered> {
-    let _ = (db, key, subscription);
-    Err(super::unbuilt("subscriptions::register"))
+    register_inner(db, key, subscription).await
 }
 
 /// A participant's subscriptions, in one session scope or all.
+///
+/// With a session, the scope is the subscriptions bound to it and those bound
+/// to none; without, every subscription the participant holds.
 pub async fn list_for(
     db: &Database,
     key: &crate::author::ParticipantKey,
     session_id: Option<&str>,
 ) -> Result<Vec<Subscription>> {
-    let _ = (db, key, session_id);
-    Err(super::unbuilt("subscriptions::list_for"))
+    let held = list_key(db, key).await?;
+    Ok(match session_id {
+        None => held,
+        Some(session) => held
+            .into_iter()
+            .filter(|row| {
+                row.session_id
+                    .as_deref()
+                    .is_none_or(|bound| bound == session)
+            })
+            .collect(),
+    })
 }
 
 /// Remove one of a participant's subscriptions. False when it held none by
@@ -422,13 +483,38 @@ pub async fn delete_for(
     key: &crate::author::ParticipantKey,
     id: &str,
 ) -> Result<bool> {
-    let _ = (db, key, id);
-    Err(super::unbuilt("subscriptions::delete_for"))
+    let _turn = super::write_turn().await?;
+    let conn = super::connect(db)?;
+    let removed = conn
+        .execute(
+            "DELETE FROM notify_subscriptions WHERE id = ?1 AND member_id = ?2 AND agent = ?3",
+            vec![
+                Value::Text(id.to_string()),
+                Value::Text(key.member.clone()),
+                Value::Text(key.agent.clone()),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    Ok(removed > 0)
 }
 
 /// Move a subscription's cursor from `from` to `to`. False when another drain
 /// moved it first.
 pub async fn advance_from(db: &Database, id: &str, from: &str, to: &str) -> Result<bool> {
-    let _ = (db, id, from, to);
-    Err(super::unbuilt("subscriptions::advance_from"))
+    let _turn = super::write_turn().await?;
+    let conn = super::connect(db)?;
+    let moved = conn
+        .execute(
+            "UPDATE notify_subscriptions SET last_seen_event_id = ?1
+              WHERE id = ?2 AND last_seen_event_id = ?3",
+            vec![
+                Value::Text(to.to_string()),
+                Value::Text(id.to_string()),
+                Value::Text(from.to_string()),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    Ok(moved > 0)
 }

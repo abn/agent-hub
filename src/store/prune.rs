@@ -34,23 +34,35 @@ pub async fn prune_session(db: &Database, session_id: &str) -> Result<PruneToken
     }
 
     let now = time::OffsetDateTime::now_utc();
-    let _turn = super::write_turn().await?;
-    let conn = super::connect(db)?;
+    let stamp = format_time(now);
+    let tx = super::begin_write(db).await?;
     // The checks above are advisory: they name the reason precisely, but the
     // row can change under them. The write carries them too, so a resume that
     // lands in between cannot leave a session both active and pruned, with the
     // sweep about to remove the brain the agent is writing to.
-    let pruned = conn
+    let pruned = tx
         .execute(
             "UPDATE sessions SET deleted_at = ?1
              WHERE id = ?2 AND deleted_at IS NULL AND status = 'ended'",
-            vec![
-                Value::Text(format_time(now)),
-                Value::Text(session.id.clone()),
-            ],
+            vec![Value::Text(stamp.clone()), Value::Text(session.id.clone())],
         )
         .await
         .map_err(engine)?;
+    if pruned > 0 {
+        // A parent's prune takes its children with it, under the same stamp,
+        // so the one undo token restores them together.
+        let family = family_in(&tx, &session.id).await?;
+        for child in family.iter().skip(1) {
+            tx.execute(
+                "UPDATE sessions SET deleted_at = ?1
+                 WHERE id = ?2 AND deleted_at IS NULL AND status = 'ended'",
+                vec![Value::Text(stamp.clone()), Value::Text(child.clone())],
+            )
+            .await
+            .map_err(engine)?;
+        }
+    }
+    tx.commit().await.map_err(engine)?;
     if pruned == 0 {
         // Another prune, a resume, or a commit moved the row, and only the row
         // as it stands now says which; the checks above ran against the state
@@ -189,10 +201,36 @@ pub async fn undo(db: &Database, token: &str) -> Result<()> {
         ));
     }
 
+    // A name another session took since the prune is not given back.
+    let mut held = tx
+        .query(
+            "SELECT live.id FROM sessions pruned JOIN sessions live
+               ON live.project_id = pruned.project_id AND live.session_name = pruned.session_name
+              WHERE pruned.id = ?1 AND live.deleted_at IS NULL AND live.id <> pruned.id",
+            vec![Value::Text(token.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    if let Some(row) = held.next().await.map_err(engine)? {
+        let holder = match row.get_value(0).map_err(engine)? {
+            Value::Text(id) => id,
+            _ => String::new(),
+        };
+        return Err(Error::Session(
+            crate::error::SessionReason::NameTaken,
+            format!("session {token} cannot be restored: session {holder} holds its name"),
+            Some(serde_json::Map::from_iter([(
+                "session_id".to_string(),
+                serde_json::Value::from(holder),
+            )])),
+        ));
+    }
+    drop(held);
+
     let restored = tx
         .execute(
             "UPDATE sessions SET deleted_at = NULL WHERE id = ?1 AND status = 'ended' AND deleted_at = ?2",
-            vec![Value::Text(token.to_string()), Value::Text(deleted_at)],
+            vec![Value::Text(token.to_string()), Value::Text(deleted_at.clone())],
         )
         .await
         .map_err(engine)?;
@@ -200,6 +238,33 @@ pub async fn undo(db: &Database, token: &str) -> Result<()> {
         return Err(Error::Conflict(format!(
             "session {token} changed while undoing the prune; it was not restored"
         )));
+    }
+    // Children pruned with it come back with it.
+    let mut parents = vec![token.to_string()];
+    while let Some(parent) = parents.pop() {
+        let mut rows = tx
+            .query(
+                "SELECT id FROM sessions WHERE parent_id = ?1 AND deleted_at = ?2 AND status = 'ended'",
+                vec![Value::Text(parent), Value::Text(deleted_at.clone())],
+            )
+            .await
+            .map_err(engine)?;
+        let mut children = Vec::new();
+        while let Some(row) = rows.next().await.map_err(engine)? {
+            if let Value::Text(id) = row.get_value(0).map_err(engine)? {
+                children.push(id);
+            }
+        }
+        drop(rows);
+        for child in children {
+            tx.execute(
+                "UPDATE sessions SET deleted_at = NULL WHERE id = ?1",
+                vec![Value::Text(child.clone())],
+            )
+            .await
+            .map_err(engine)?;
+            parents.push(child);
+        }
     }
     tx.commit().await.map_err(engine)?;
     Ok(())
@@ -226,6 +291,16 @@ async fn claim(db: &Database, session_id: &str, deleted_at: &str) -> Result<bool
 
 /// Commit every prune whose window has passed. Returns how many were committed.
 pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
+    sweep_gated(db, data_dir, &crate::app::SessionGates::default()).await
+}
+
+/// [`sweep`], holding each session's gate exclusive while it is committed, so
+/// no brain or artifact write is in flight in a session whose files go.
+pub async fn sweep_gated(
+    db: &Database,
+    data_dir: &Path,
+    gates: &crate::app::SessionGates,
+) -> Result<u64> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
@@ -270,6 +345,7 @@ pub async fn sweep(db: &Database, data_dir: &Path) -> Result<u64> {
             continue;
         }
 
+        let _gate = gates.exclusive(&id).await;
         // Claim the session transactionally before touching files or metadata.
         if status == "ended" && !claim(db, &id, &deleted_at).await? {
             continue;
@@ -317,8 +393,19 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
     // snapshot taken in between would name a brain the copy cannot find.
     let _removing = super::hold_removals().await;
 
-    // 1. Quarantine the file under the session lock
+    // 1. Quarantine the file under the session lock, and the brains merged
+    // into it by the members upgrade with it.
     let _ = store.quarantine(project_id, session_id).await?;
+    let archives = {
+        let conn = super::connect(db)?;
+        super::migrate::archives_of(&conn, session_id).await?
+    };
+    for archive in &archives {
+        let path = data_dir.join(archive);
+        if path.exists() {
+            std::fs::rename(&path, quarantined(&path))?;
+        }
+    }
 
     // 2. Commit metadata deletion
     let tx = super::begin_write(db).await?;
@@ -348,12 +435,18 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
     )
     .await
     .map_err(engine)?;
-    tx.execute(
+    for sql in [
+        "DELETE FROM session_participants WHERE session_id = ?1",
+        "DELETE FROM session_aliases WHERE session_id = ?1",
+        "DELETE FROM identity_merge_paths WHERE loser_session_id IN
+           (SELECT loser_session_id FROM identity_merges WHERE survivor_session_id = ?1)",
+        "DELETE FROM identity_merges WHERE survivor_session_id = ?1",
         "DELETE FROM sessions WHERE id = ?1",
-        vec![Value::Text(session_id.to_string())],
-    )
-    .await
-    .map_err(engine)?;
+    ] {
+        tx.execute(sql, vec![Value::Text(session_id.to_string())])
+            .await
+            .map_err(engine)?;
+    }
     // Idempotency rows are keyed by project and key, not by session, so the
     // session's keys cannot be targeted directly. The session lifecycle events
     // that were just removed carry no keys, but a key recorded against any
@@ -369,7 +462,47 @@ async fn commit(db: &Database, data_dir: &Path, session_id: &str, project_id: &s
 
     // 3. Remove quarantined files
     store.remove_quarantine(project_id, session_id).await?;
+    for archive in &archives {
+        let path = quarantined(&data_dir.join(archive));
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => {
+                tracing::warn!(path = %path.display(), error = %err, "could not remove a merged brain")
+            }
+        }
+    }
     Ok(())
+}
+
+fn quarantined(path: &Path) -> std::path::PathBuf {
+    let mut name = path.as_os_str().to_owned();
+    name.push(".quarantine");
+    std::path::PathBuf::from(name)
+}
+
+/// The session and its not-pruned descendants, parent first, read in the
+/// caller's transaction.
+async fn family_in(conn: &turso::Connection, session_id: &str) -> Result<Vec<String>> {
+    let mut out = vec![session_id.to_string()];
+    let mut next = 0;
+    while next < out.len() {
+        let parent = out[next].clone();
+        next += 1;
+        let mut rows = conn
+            .query(
+                "SELECT id FROM sessions WHERE parent_id = ?1 AND deleted_at IS NULL ORDER BY id",
+                vec![Value::Text(parent)],
+            )
+            .await
+            .map_err(engine)?;
+        while let Some(row) = rows.next().await.map_err(engine)? {
+            if let Value::Text(id) = row.get_value(0).map_err(engine)? {
+                out.push(id);
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Recover any intermediate prune states at startup:

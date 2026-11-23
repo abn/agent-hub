@@ -44,6 +44,10 @@ pub struct InboxItem {
     /// reader can see which run is waiting on the answer.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
+    /// Who asked it.
+    pub author: crate::author::AuthorView,
+    /// `hub` for the hub's own act, null for a call.
+    pub origin: Option<String>,
 }
 
 /// The outcome of an approval, as its inbox entry shows it.
@@ -62,6 +66,10 @@ pub struct Decision {
     /// outcome the asking agent named, and `actor` is the hub.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub expired: bool,
+    /// Who decided.
+    pub author: crate::author::AuthorView,
+    /// `hub` when the deadline decided, null for a call.
+    pub origin: Option<String>,
 }
 
 /// How a question was answered, as its inbox entry shows it.
@@ -79,6 +87,10 @@ pub struct Answer {
     /// recorded the closure, so `actor` is the hub and `body` is null.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub expired: bool,
+    /// Who answered.
+    pub author: crate::author::AuthorView,
+    /// `hub` when the deadline closed it, null for a call.
+    pub origin: Option<String>,
 }
 
 /// Status counts for the home summary.
@@ -274,8 +286,15 @@ pub async fn page_for_agent(
 pub(crate) enum AskedIn<'a> {
     /// Asked in this session.
     Session(&'a str),
-    /// Asked outside any session.
+    /// Asked outside any session. The label-keyed trailer's scope, kept
+    /// until that trailer reads [`crate::store::notifications::attention`].
+    #[allow(dead_code)]
     Outside,
+    /// Asked outside any session by one member's agent, or by the member
+    /// with no agent recorded.
+    OutsideBy { member: &'a str, agent: &'a str },
+    /// These items, whatever their scope.
+    Ids(&'a [String]),
 }
 
 /// The resolved entries one actor wrote in one session scope, oldest
@@ -285,6 +304,7 @@ pub(crate) enum AskedIn<'a> {
 /// and a long run of resolutions in another scope cannot fill it. The order is
 /// ascending by the id a cursor counts, so a caller that moves its cursor to
 /// the last item returned passes nothing it was not given.
+#[allow(dead_code)]
 pub(crate) async fn resolved_in_scope(
     db: &Database,
     actor: &str,
@@ -298,6 +318,33 @@ pub(crate) async fn resolved_in_scope(
         Some("resolved"),
         None,
         Some(actor),
+        since,
+        limit,
+        visible,
+        Listing {
+            collapse_read: true,
+            scope: Some(scope),
+            ascending: true,
+        },
+    )
+    .await
+}
+
+/// The resolved entries of one scope whoever asked them, oldest resolution
+/// first, from the first one newer than `since`: the participant delivery
+/// path.
+pub(crate) async fn resolved_in(
+    db: &Database,
+    scope: AskedIn<'_>,
+    since: Option<&str>,
+    limit: i64,
+    visible: Option<&[String]>,
+) -> Result<InboxPage> {
+    list_as(
+        db,
+        Some("resolved"),
+        None,
+        None,
         since,
         limit,
         visible,
@@ -377,9 +424,9 @@ async fn list_as(
         "CASE WHEN i.status = 'read' THEN 'unread' ELSE i.status END,
                 e.created_at,
                 CASE WHEN i.status IN ('unread', 'read') THEN e.created_at ELSE i.updated_at END,
-                i.expires_at, i.on_expiry, e.session_id"
+                i.expires_at, i.on_expiry, e.session_id, e.author_kind, e.member_id, e.agent, e.origin, (SELECT s.session_name FROM sessions s WHERE s.id = e.session_id)"
     } else {
-        "i.status, e.created_at, i.updated_at, i.expires_at, i.on_expiry, e.session_id"
+        "i.status, e.created_at, i.updated_at, i.expires_at, i.on_expiry, e.session_id, e.author_kind, e.member_id, e.agent, e.origin, (SELECT s.session_name FROM sessions s WHERE s.id = e.session_id)"
     };
     // The answer that decides the entry, when one has: an answer on the entry's
     // own thread in the same project. A cursor counts it, so an answer that
@@ -418,6 +465,27 @@ async fn list_as(
             sql.push_str(&format!(" AND e.session_id = ?{}", params.len()));
         }
         Some(AskedIn::Outside) => sql.push_str(" AND e.session_id IS NULL"),
+        Some(AskedIn::OutsideBy { member, agent }) => {
+            params.push(Value::Text(member.to_string()));
+            let m = params.len();
+            params.push(Value::Text(agent.to_string()));
+            let a = params.len();
+            sql.push_str(&format!(
+                " AND e.session_id IS NULL AND e.member_id = ?{m} AND (e.agent = ?{a} OR e.agent = '')"
+            ));
+        }
+        Some(AskedIn::Ids(ids)) => {
+            if ids.is_empty() {
+                sql.push_str(" AND 0");
+            } else {
+                let mut placeholders = Vec::with_capacity(ids.len());
+                for id in ids {
+                    params.push(Value::Text(id.clone()));
+                    placeholders.push(format!("?{}", params.len()));
+                }
+                sql.push_str(&format!(" AND e.id IN ({})", placeholders.join(", ")));
+            }
+        }
         None => {}
     }
     if let Some(visible) = visible {
@@ -520,7 +588,8 @@ async fn attach_decisions(conn: &Connection, items: &mut [InboxItem]) -> Result<
     let mut rows = conn
         .query(
             &format!(
-                "SELECT thread_id, project_id, id, actor, payload, created_at FROM events
+                "SELECT thread_id, project_id, id, actor, payload, created_at,
+                        author_kind, member_id, agent, session_id, origin FROM events
                  WHERE kind = 'answer' AND thread_id IN ({}) ORDER BY id ASC",
                 holes.join(", ")
             ),
@@ -555,6 +624,8 @@ async fn attach_decisions(conn: &Connection, items: &mut [InboxItem]) -> Result<
                 event_id: required_text(&row, 2)?,
                 decided_at: required_text(&row, 5)?,
                 expired,
+                author: crate::store::events::author_at(&row, 6, 3)?.view(None),
+                origin: text_at(&row, 10)?,
             },
         ));
     }
@@ -589,7 +660,8 @@ async fn attach_answers(conn: &Connection, items: &mut [InboxItem]) -> Result<()
     let mut rows = conn
         .query(
             &format!(
-                "SELECT thread_id, project_id, id, actor, payload, created_at FROM events
+                "SELECT thread_id, project_id, id, actor, payload, created_at,
+                        author_kind, member_id, agent, session_id, origin FROM events
                  WHERE kind = 'answer' AND thread_id IN ({}) ORDER BY id ASC",
                 holes.join(", ")
             ),
@@ -624,6 +696,8 @@ async fn attach_answers(conn: &Connection, items: &mut [InboxItem]) -> Result<()
                 event_id: required_text(&row, 2)?,
                 answered_at: required_text(&row, 5)?,
                 expired,
+                author: crate::store::events::author_at(&row, 6, 3)?.view(None),
+                origin: text_at(&row, 10)?,
             },
         ));
     }
@@ -650,7 +724,7 @@ pub async fn open_items(db: &Database, limit: i64) -> Result<Vec<InboxItem>> {
         .query(
             "SELECT e.id, e.project_id, e.kind, e.actor, e.summary, e.payload,
                     i.status, e.created_at, i.updated_at, i.expires_at, i.on_expiry,
-                    e.session_id
+                    e.session_id, e.author_kind, e.member_id, e.agent, e.origin, (SELECT s.session_name FROM sessions s WHERE s.id = e.session_id)
              FROM inbox i JOIN events e ON e.id = i.event_id
              WHERE i.status IN ('action', 'waiting')
              ORDER BY e.id DESC LIMIT ?1",
@@ -1036,6 +1110,15 @@ fn item_from_row(row: &Row) -> Result<InboxItem> {
         expires_at: text_at(row, 9)?,
         on_expiry: text_at(row, 10)?,
         session_id: text_at(row, 11)?,
+        author: crate::author::Author::from_columns(
+            text_at(row, 12)?.as_deref(),
+            text_at(row, 13)?.as_deref(),
+            text_at(row, 14)?.as_deref(),
+            text_at(row, 11)?.as_deref(),
+            &required_text(row, 3)?,
+        )
+        .view(text_at(row, 16)?.as_deref()),
+        origin: text_at(row, 15)?,
     })
 }
 

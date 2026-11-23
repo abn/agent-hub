@@ -186,10 +186,12 @@ fn hub_entries(dir: &Path) -> Vec<PathBuf> {
         config.sessions_dir(),
         config.knowledge_dir(),
         config.artifacts_dir(),
-        // The tailnet's device state and the copies taken before a migration
-        // have no helper of their own; the hub creates both here.
+        // The tailnet's device state, the copies taken before a migration and
+        // the session brains an upgrade merged away have no helper of their
+        // own; the hub creates all three here.
         dir.join("tailnet"),
         dir.join("backups"),
+        dir.join("merged"),
         dir.join(HUB_RECORD),
         dir.join(HUB_LOCK),
     ]
@@ -604,7 +606,14 @@ mod tests {
     fn only_the_hubs_own_entries_go_and_the_rest_is_named() {
         let dir = scratch("mixed");
         let data = dir.join("data");
-        for sub in ["sessions", "kb", "artifacts", "tailnet", "backups"] {
+        for sub in [
+            "sessions",
+            "kb",
+            "artifacts",
+            "tailnet",
+            "backups",
+            "merged",
+        ] {
             std::fs::create_dir_all(data.join(sub)).unwrap();
             std::fs::write(data.join(sub).join("f"), "x").unwrap();
         }

@@ -14,7 +14,10 @@ use crate::error::{Error, Result};
 pub struct Project {
     pub id: String,
     pub display_name: String,
+    /// The member whose personal space this is. Kept under its old name until
+    /// every reader takes `owner_member`.
     pub owner_agent: Option<String>,
+    pub owner_member: Option<String>,
     /// Whether this is an agent's personal space rather than an ordinary
     /// project. An agent sees every other agent's space in its listing, so it
     /// needs to tell them apart to label or filter them, and `owner_agent`
@@ -27,6 +30,8 @@ pub struct Project {
     /// screen showing many projects learns it once, not once per project on
     /// every navigation.
     pub agents_active: i64,
+    /// Live sessions here: active, with a participant seen inside the window.
+    pub sessions_live: i64,
     /// Whether the project is confidential and hidden without a grant.
     pub confidential: bool,
     /// Status: 'active' or 'deleting'.
@@ -48,7 +53,7 @@ pub async fn list(db: &Database, active_since: &str) -> Result<Vec<Project>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, owner_agent, created_at, confidential, status
+            "SELECT id, display_name, owner_member, created_at, confidential, status
              FROM projects WHERE status = 'active' ORDER BY created_at ASC",
             (),
         )
@@ -62,7 +67,12 @@ pub async fn list(db: &Database, active_since: &str) -> Result<Vec<Project>> {
     // One grouped count for the whole listing rather than one per project.
     let unseen = crate::store::events::unseen_counts(db).await?;
     let live = crate::store::sessions::agents_active_by_project(db, active_since).await?;
+    let sessions_live = crate::store::sessions::live_by_project(db, active_since).await?;
     for project in &mut projects {
+        project.sessions_live = sessions_live
+            .iter()
+            .find(|(id, _)| id == &project.id)
+            .map_or(0, |(_, count)| *count);
         project.unseen_events = unseen
             .iter()
             .find(|row| row.project_id == project.id)
@@ -82,7 +92,7 @@ pub async fn list_visible(
     principal: &crate::principal::Principal,
 ) -> Result<Vec<Project>> {
     let all = list(db, active_since).await?;
-    if principal.is_admin {
+    if principal.is_admin() {
         return Ok(all);
     }
     let visible = crate::policy::visibility(db, principal).await?;
@@ -209,10 +219,12 @@ pub async fn create_with_confidential(
         id: id.to_string(),
         display_name: display_name.to_string(),
         owner_agent: None,
+        owner_member: None,
         is_personal: false,
         created_at,
         unseen_events: 0,
         agents_active: 0,
+        sessions_live: 0,
         confidential,
         status: "active".to_string(),
     })
@@ -283,7 +295,7 @@ pub(crate) async fn insert_owned(
     confidential: bool,
 ) -> Result<()> {
     tx.execute(
-        "INSERT INTO projects(id, display_name, owner_agent, created_at, retention, settings, confidential, status)
+        "INSERT INTO projects(id, display_name, owner_member, created_at, retention, settings, confidential, status)
          VALUES (?1, ?2, ?3, ?4, NULL, NULL, ?5, 'active')",
         vec![
             Value::Text(id.to_string()),
@@ -311,10 +323,14 @@ pub struct ProjectStats {
     pub kb_pages: i64,
     /// Agents with a session in this project touched inside the active window.
     pub agents_active: i64,
+    /// Live sessions: active, with a participant seen inside the window.
+    pub sessions_live: i64,
     /// Distinct non-null threads across events in this project.
     pub threads: i64,
     /// Distinct non-null actors across events in this project.
     pub agents_written: i64,
+    /// Distinct members that wrote events in this project.
+    pub members_written: i64,
     /// Total bytes on disk for this project (artifacts, session brains, knowledge base).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub disk_bytes: Option<i64>,
@@ -400,12 +416,17 @@ pub async fn stats(
         kb_pages: count("SELECT COUNT(*) FROM search_docs WHERE project_id = ?1 AND type = 'kb'")
             .await?,
         agents_active: crate::store::sessions::agents_active(db, active_since, Some(id)).await?,
+        sessions_live: crate::store::sessions::live_count(db, active_since, Some(id)).await?,
         threads: count(
             "SELECT COUNT(DISTINCT thread_id) FROM events WHERE project_id = ?1 AND thread_id IS NOT NULL",
         )
         .await?,
         agents_written: count(
             "SELECT COUNT(DISTINCT actor) FROM events WHERE project_id = ?1 AND actor IS NOT NULL",
+        )
+        .await?,
+        members_written: count(
+            "SELECT COUNT(DISTINCT member_id) FROM events WHERE project_id = ?1 AND member_id IS NOT NULL",
         )
         .await?,
         disk_bytes,
@@ -417,7 +438,7 @@ pub async fn get(db: &Database, id: &str) -> Result<Option<Project>> {
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "SELECT id, display_name, owner_agent, created_at, confidential, status
+            "SELECT id, display_name, owner_member, created_at, confidential, status
              FROM projects WHERE id = ?1 AND status = 'active'",
             vec![Value::Text(id.to_string())],
         )
@@ -454,7 +475,7 @@ pub async fn delete(db: &Database, data_dir: &Path, id: &str) -> Result<()> {
     let tx = super::begin_write(db).await?;
     let mut rows = tx
         .query(
-            "SELECT owner_agent, status FROM projects WHERE id = ?1",
+            "SELECT owner_member, status FROM projects WHERE id = ?1",
             vec![Value::Text(id.to_string())],
         )
         .await
@@ -517,6 +538,16 @@ pub(crate) async fn finish_delete(db: &Database, data_dir: &Path, id: &str) -> R
         let _ = std::fs::rename(&sess_dir, &q_sess);
     }
 
+    // Brains the members upgrade merged into this project's sessions go with
+    // them.
+    let q_merged = data_dir
+        .join("merged")
+        .join(format!("{QUARANTINE_PREFIX}{id}-{del_id}"));
+    let merged_dir = data_dir.join("merged").join(id);
+    if merged_dir.exists() {
+        let _ = std::fs::rename(&merged_dir, &q_merged);
+    }
+
     let q_kb =
         crate::brain::knowledge_dir(data_dir).join(format!("{QUARANTINE_PREFIX}{id}-{del_id}"));
     let kb_dir = crate::brain::knowledge_dir(data_dir).join(id);
@@ -563,12 +594,20 @@ pub(crate) async fn finish_delete(db: &Database, data_dir: &Path, id: &str) -> R
     )
     .await
     .map_err(engine)?;
-    tx.execute(
+    for sql in [
+        "DELETE FROM session_participants WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?1)",
+        "DELETE FROM notify_cursors WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?1)",
+        "DELETE FROM notify_backlog WHERE session_id IN (SELECT id FROM sessions WHERE project_id = ?1)",
+        "DELETE FROM session_aliases WHERE project_id = ?1",
+        "DELETE FROM identity_merge_paths WHERE loser_session_id IN
+           (SELECT loser_session_id FROM identity_merges WHERE project_id = ?1)",
+        "DELETE FROM identity_merges WHERE project_id = ?1",
         "DELETE FROM sessions WHERE project_id = ?1",
-        vec![Value::Text(id.to_string())],
-    )
-    .await
-    .map_err(engine)?;
+    ] {
+        tx.execute(sql, vec![Value::Text(id.to_string())])
+            .await
+            .map_err(engine)?;
+    }
     tx.execute(
         "DELETE FROM grants WHERE project_id = ?1",
         vec![Value::Text(id.to_string())],
@@ -607,6 +646,9 @@ pub(crate) async fn finish_delete(db: &Database, data_dir: &Path, id: &str) -> R
     if q_kb.exists() {
         let _ = std::fs::remove_dir_all(&q_kb);
     }
+    if q_merged.exists() {
+        let _ = std::fs::remove_dir_all(&q_merged);
+    }
 
     if let Err(err) = blob::remove_tree(data_dir, &format!("artifacts/{id}")) {
         tracing::warn!(project = id, error = %err, "artifact tree removal failed");
@@ -638,6 +680,7 @@ pub async fn recover(db: &Database, data_dir: &Path) -> Result<usize> {
     clean_deleted_dirs(&data_dir.join("artifacts"))?;
     clean_deleted_dirs(&data_dir.join("sessions"))?;
     clean_deleted_dirs(&crate::brain::knowledge_dir(data_dir))?;
+    clean_deleted_dirs(&data_dir.join("merged"))?;
 
     let conn = super::connect(db)?;
     let mut rows = conn
@@ -727,12 +770,14 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
         // The one thing that makes a project an agent's personal space is that
         // an agent owns it, so the marker is read rather than kept beside it.
         is_personal: owner_agent.is_some(),
+        owner_member: owner_agent.clone(),
         owner_agent,
         created_at: text(3)?,
-        // Both filled by the caller, which counts every project it returns in
-        // one query rather than one query per row.
+        // Filled by the caller, which counts every project it returns in one
+        // query rather than one query per row.
         unseen_events: 0,
         agents_active: 0,
+        sessions_live: 0,
         confidential,
         status,
     })

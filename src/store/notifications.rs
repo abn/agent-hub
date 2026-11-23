@@ -9,7 +9,9 @@
 
 use turso::{Connection, Database, Value};
 
+use crate::author::ParticipantKey;
 use crate::error::Result;
+use crate::store::inbox::AskedIn;
 
 /// The newest notification event one agent has been shown for one session
 /// scope, if any. The empty session is the scope of items asked outside any
@@ -20,12 +22,21 @@ pub async fn cursor(db: &Database, agent: &str, session_id: &str) -> Result<Opti
 }
 
 async fn cursor_on(conn: &Connection, agent: &str, session_id: &str) -> Result<Option<String>> {
+    key_cursor_on(conn, &ParticipantKey::from_label(agent), session_id).await
+}
+
+async fn key_cursor_on(
+    conn: &Connection,
+    key: &ParticipantKey,
+    session_id: &str,
+) -> Result<Option<String>> {
     let mut rows = conn
         .query(
-            "SELECT last_seen_event_id FROM agent_notify_cursors
-             WHERE agent = ?1 AND session_id = ?2",
+            "SELECT last_seen_event_id FROM notify_cursors
+             WHERE member_id = ?1 AND agent = ?2 AND session_id = ?3",
             vec![
-                Value::Text(agent.to_string()),
+                Value::Text(key.member.clone()),
+                Value::Text(key.agent.clone()),
                 Value::Text(session_id.to_string()),
             ],
         )
@@ -63,11 +74,13 @@ pub async fn advance(db: &Database, agent: &str, session_id: &str, event_id: &st
     if current.as_deref().is_some_and(|seen| event_id <= seen) {
         return Ok(());
     }
+    let key = ParticipantKey::from_label(agent);
     tx.execute(
-        "INSERT OR REPLACE INTO agent_notify_cursors(agent, session_id, last_seen_event_id, updated_at)
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT OR REPLACE INTO notify_cursors(member_id, agent, session_id, last_seen_event_id, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
         vec![
-            Value::Text(agent.to_string()),
+            Value::Text(key.member),
+            Value::Text(key.agent),
             Value::Text(session_id.to_string()),
             Value::Text(event_id.to_string()),
             Value::Text(super::now_rfc3339()),
@@ -94,12 +107,14 @@ pub(crate) async fn session_is_active(conn: &Connection, session_id: &str) -> Re
 /// Forget every attention cursor kept for one session, so a pruned session
 /// takes its place with it.
 pub(crate) async fn forget_session_in_tx(tx: &super::WriteTx, session_id: &str) -> Result<()> {
-    tx.execute(
-        "DELETE FROM agent_notify_cursors WHERE session_id = ?1",
-        vec![Value::Text(session_id.to_string())],
-    )
-    .await
-    .map_err(super::engine)?;
+    for sql in [
+        "DELETE FROM notify_cursors WHERE session_id = ?1",
+        "DELETE FROM notify_backlog WHERE session_id = ?1",
+    ] {
+        tx.execute(sql, vec![Value::Text(session_id.to_string())])
+            .await
+            .map_err(super::engine)?;
+    }
     Ok(())
 }
 
@@ -141,16 +156,89 @@ pub async fn attention(
     limit: i64,
     visible: Option<&[String]>,
 ) -> Result<Attention> {
-    let _ = (db, key, session_id, limit, visible);
-    Err(super::unbuilt("notifications::attention"))
+    select(db, key, session_id, limit, visible).await
 }
 
 /// Settle a delivered page. False when another call settled first, in which
 /// case this page must not be delivered (the trailer shows nothing;
 /// `inbox_wait` and `notify_wait` select again).
 pub async fn settle(db: &Database, settle: &Settle) -> Result<bool> {
-    let _ = (db, settle);
-    Err(super::unbuilt("notifications::settle"))
+    if settle.backlog.is_empty() && settle.to == settle.from {
+        return Ok(true);
+    }
+    let tx = super::begin_write(db).await?;
+    let key = &settle.key;
+    for event_id in &settle.backlog {
+        let gone = tx
+            .execute(
+                "DELETE FROM notify_backlog
+                  WHERE member_id = ?1 AND agent = ?2 AND session_id = ?3 AND event_id = ?4",
+                vec![
+                    Value::Text(key.member.clone()),
+                    Value::Text(key.agent.clone()),
+                    Value::Text(settle.session_id.clone()),
+                    Value::Text(event_id.clone()),
+                ],
+            )
+            .await
+            .map_err(super::engine)?;
+        if gone == 0 {
+            tx.rollback().await.map_err(super::engine)?;
+            return Ok(false);
+        }
+    }
+    if let Some(to) = settle.to.as_deref()
+        && settle.to != settle.from
+    {
+        let moved = match settle.from.as_deref() {
+            Some(from) => tx
+                .execute(
+                    "UPDATE notify_cursors SET last_seen_event_id = ?1, updated_at = ?2
+                      WHERE member_id = ?3 AND agent = ?4 AND session_id = ?5
+                        AND last_seen_event_id = ?6",
+                    vec![
+                        Value::Text(to.to_string()),
+                        Value::Text(super::now_rfc3339()),
+                        Value::Text(key.member.clone()),
+                        Value::Text(key.agent.clone()),
+                        Value::Text(settle.session_id.clone()),
+                        Value::Text(from.to_string()),
+                    ],
+                )
+                .await
+                .map_err(super::engine)?,
+            None => {
+                // A scope with no cursor yet: the first settle creates it, and
+                // a second, racing one finds it already there. A session that
+                // is no longer active takes no new cursor.
+                if !settle.session_id.is_empty()
+                    && !session_is_active(&tx, &settle.session_id).await?
+                {
+                    tx.commit().await.map_err(super::engine)?;
+                    return Ok(true);
+                }
+                tx.execute(
+                    "INSERT OR IGNORE INTO notify_cursors(member_id, agent, session_id, last_seen_event_id, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    vec![
+                        Value::Text(key.member.clone()),
+                        Value::Text(key.agent.clone()),
+                        Value::Text(settle.session_id.clone()),
+                        Value::Text(to.to_string()),
+                        Value::Text(super::now_rfc3339()),
+                    ],
+                )
+                .await
+                .map_err(super::engine)?
+            }
+        };
+        if moved == 0 {
+            tx.rollback().await.map_err(super::engine)?;
+            return Ok(false);
+        }
+    }
+    tx.commit().await.map_err(super::engine)?;
+    Ok(true)
 }
 
 /// The same page without consuming it, for `GET /api/v1/me/pending`.
@@ -161,6 +249,145 @@ pub async fn peek(
     limit: i64,
     visible: Option<&[String]>,
 ) -> Result<Attention> {
-    let _ = (db, key, session_id, limit, visible);
-    Err(super::unbuilt("notifications::peek"))
+    select(db, key, session_id, limit, visible).await
+}
+
+/// Select a page: the scope's backlog rows, then its items and addressed
+/// events above the cursor, oldest first, cut at `limit`.
+async fn select(
+    db: &Database,
+    key: &ParticipantKey,
+    session_id: &str,
+    limit: i64,
+    visible: Option<&[String]>,
+) -> Result<Attention> {
+    let limit = limit.clamp(1, crate::limits::FEED_LIMIT_MAX);
+    let conn = super::connect(db)?;
+    let from = key_cursor_on(&conn, key, session_id).await?;
+
+    let mut backlog = Vec::new();
+    {
+        let mut rows = conn
+            .query(
+                "SELECT event_id FROM notify_backlog
+                  WHERE member_id = ?1 AND agent = ?2 AND session_id = ?3 ORDER BY event_id",
+                vec![
+                    Value::Text(key.member.clone()),
+                    Value::Text(key.agent.clone()),
+                    Value::Text(session_id.to_string()),
+                ],
+            )
+            .await
+            .map_err(super::engine)?;
+        while let Some(row) = rows.next().await.map_err(super::engine)? {
+            if let Value::Text(id) = row.get_value(0).map_err(super::engine)? {
+                backlog.push(id);
+            }
+        }
+    }
+    // A peek's `after` pages the backlog by the key `cut` orders items by, so
+    // the rows are resolved first and the page is cut from those past `after`.
+    // A drain has no `after`, and takes the first rows.
+    let mut items = if backlog.is_empty() {
+        Vec::new()
+    } else if after.is_some() {
+        let page =
+            super::inbox::resolved_in(db, AskedIn::Ids(&backlog), after, limit, visible).await?;
+        backlog = page
+            .items
+            .iter()
+            .map(|item| item.event_id.clone())
+            .collect();
+        page.items
+    } else {
+        backlog.truncate(limit as usize);
+        super::inbox::resolved_in(db, AskedIn::Ids(&backlog), None, limit, visible)
+            .await?
+            .items
+    };
+
+    let scope = if session_id.is_empty() {
+        AskedIn::OutsideBy {
+            member: &key.member,
+            agent: &key.agent,
+        }
+    } else {
+        AskedIn::Session(session_id)
+    };
+    let page = super::inbox::resolved_in(db, scope, from.as_deref(), limit, visible).await?;
+
+    // Comment and page events that name the scope's session, or (sessionless)
+    // this participant.
+    let mut events = Vec::new();
+    {
+        let floor = from.clone().unwrap_or_default();
+        let found = super::events::read_feed_scoped(
+            db,
+            None,
+            &super::events::FeedQuery {
+                since: Some(floor),
+                kinds: Some(vec!["comment".to_string(), "page".to_string()]),
+                limit: crate::limits::FEED_LIMIT_MAX,
+                ..Default::default()
+            },
+        )
+        .await?;
+        for event in found.events {
+            let readable = visible.is_none_or(|ids| ids.contains(&event.project_id));
+            let audience = super::migrate::Audience::of(event.payload.as_ref());
+            let named = if session_id.is_empty() {
+                audience.names(None, Some(key))
+            } else {
+                audience.names(Some(session_id), None)
+            };
+            let own = event.author.member.as_deref() == Some(key.member.as_str())
+                && event.author.agent.as_deref() == Some(key.agent.as_str());
+            if readable && named && !own {
+                events.push(event);
+            }
+        }
+    }
+
+    // Merge the two cursor streams and cut the page.
+    enum Entry {
+        Item(Box<super::inbox::InboxItem>),
+        Event(Box<super::events::Event>),
+    }
+    let mut merged: Vec<(String, Entry)> = page
+        .items
+        .into_iter()
+        .map(|item| {
+            (
+                super::inbox::item_effective_id(&item).to_string(),
+                Entry::Item(Box::new(item)),
+            )
+        })
+        .chain(
+            events
+                .into_iter()
+                .map(|event| (event.id.clone(), Entry::Event(Box::new(event)))),
+        )
+        .collect();
+    merged.sort_by(|a, b| a.0.cmp(&b.0));
+    merged.truncate((limit as usize).saturating_sub(items.len()));
+    let to = merged.last().map(|(id, _)| id.clone()).or(from.clone());
+    let mut event_page = Vec::new();
+    for (_, entry) in merged {
+        match entry {
+            Entry::Item(item) => items.push(*item),
+            Entry::Event(event) => event_page.push(*event),
+        }
+    }
+    Ok(Attention {
+        items,
+        events: event_page,
+        settle: Settle {
+            key: key.clone(),
+            session_id: session_id.to_string(),
+            from,
+            to,
+            // A backlog row whose item is no longer readable still settles.
+            backlog,
+        },
+    })
 }

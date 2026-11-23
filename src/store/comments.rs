@@ -29,7 +29,14 @@ pub const CONTEXT_CHARS_MAX: usize = 64;
 pub struct Comment {
     pub id: String,
     pub artifact_id: String,
+    /// The writer's key. Kept as `author` until every reader takes `actor`.
     pub author: String,
+    /// The writer's key, as every other row names it.
+    pub actor: String,
+    /// Who wrote it.
+    pub author_record: crate::author::AuthorView,
+    /// `hub` for the hub's own act, null for a call.
+    pub origin: Option<String>,
     pub body: String,
     pub anchor: Option<serde_json::Value>,
     pub anchor_version: Option<i64>,
@@ -45,6 +52,9 @@ pub fn comment_view(comment: &Comment) -> serde_json::Value {
         "id": comment.id,
         "artifact_id": comment.artifact_id,
         "author": comment.author,
+        "actor": comment.actor,
+        "author_record": comment.author_record,
+        "origin": comment.origin,
         "body": comment.body,
         "anchor": comment.anchor.clone().unwrap_or(serde_json::Value::Null),
         "anchor_version": comment.anchor_version,
@@ -172,14 +182,15 @@ pub fn generate_delete_token() -> (String, String) {
 pub async fn add_comment(
     db: &Database,
     artifact_id: &str,
-    author: &str,
+    writer: impl Into<crate::author::Writer>,
     body: &str,
     anchor: Option<AnchorInput>,
     anchor_version: Option<i64>,
     delete_token_hash: Option<&str>,
     idempotency_key: Option<&str>,
 ) -> Result<(Comment, bool)> {
-    let author = check_author(author)?;
+    let writer: crate::author::Writer = writer.into();
+    let author = check_author(writer.actor())?;
     let body = check_body(body)?;
     let anchor_json = check_anchor(anchor)?;
 
@@ -233,17 +244,28 @@ pub async fn add_comment(
     let id = crate::store::next_id();
     let created_at = crate::store::now_rfc3339();
     tx.execute(
-        "INSERT INTO comments(id, artifact_id, author, body, anchor, anchor_version, done, delete_token_hash, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8)",
+        "INSERT INTO comments(id, artifact_id, author, body, anchor, anchor_version, done,
+            delete_token_hash, created_at, author_kind, member_id, agent, session_id, origin)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         vec![
             Value::Text(id.clone()),
             Value::Text(artifact_id.to_string()),
             Value::Text(author.clone()),
             Value::Text(body.clone()),
-            optional_text(anchor_json.as_ref().map(|anchor| anchor.to_string()).as_deref()),
+            optional_text(
+                anchor_json
+                    .as_ref()
+                    .map(|anchor| anchor.to_string())
+                    .as_deref(),
+            ),
             Value::Integer(stamped),
             optional_text(delete_token_hash),
             Value::Text(created_at.clone()),
+            Value::Text(writer.author.kind().as_str().to_string()),
+            optional_text(writer.author.member()),
+            optional_text(writer.author.agent()),
+            optional_text(writer.author.session()),
+            optional_text(writer.origin.as_column()),
         ],
     )
     .await
@@ -264,7 +286,7 @@ pub async fn list_comments(db: &Database, artifact_id: &str) -> Result<Vec<Comme
     }
     let mut rows = conn
         .query(
-            "SELECT id, artifact_id, author, body, anchor, anchor_version, done, delete_token_hash, created_at
+            "SELECT id, artifact_id, author, body, anchor, anchor_version, done, delete_token_hash, created_at, author_kind, member_id, agent, session_id, origin
              FROM comments WHERE artifact_id = ?1 ORDER BY created_at ASC, id ASC",
             vec![Value::Text(artifact_id.to_string())],
         )
@@ -291,7 +313,7 @@ pub async fn set_comment_done(db: &Database, comment_id: &str, done: bool) -> Re
     let conn = super::connect(db)?;
     let mut rows = conn
         .query(
-            "UPDATE comments SET done = ?1 WHERE id = ?2 RETURNING id, artifact_id, author, body, anchor, anchor_version, done, delete_token_hash, created_at",
+            "UPDATE comments SET done = ?1 WHERE id = ?2 RETURNING id, artifact_id, author, body, anchor, anchor_version, done, delete_token_hash, created_at, author_kind, member_id, agent, session_id, origin",
             vec![
                 Value::Integer(i64::from(done)),
                 Value::Text(comment_id.to_string()),
@@ -335,7 +357,7 @@ pub async fn delete_comment(db: &Database, comment_id: &str) -> Result<()> {
 async fn comment_on(conn: &turso::Connection, comment_id: &str) -> Result<Option<Comment>> {
     let mut rows = conn
         .query(
-            "SELECT id, artifact_id, author, body, anchor, anchor_version, done, delete_token_hash, created_at
+            "SELECT id, artifact_id, author, body, anchor, anchor_version, done, delete_token_hash, created_at, author_kind, member_id, agent, session_id, origin
              FROM comments WHERE id = ?1",
             vec![Value::Text(comment_id.to_string())],
         )
@@ -530,10 +552,14 @@ fn comment_from_row(row: &Row) -> Result<Comment> {
             )));
         }
     };
+    let author = crate::store::events::author_at(row, 9, 2)?;
     Ok(Comment {
         id: required_text(row, 0)?,
         artifact_id: required_text(row, 1)?,
         author: required_text(row, 2)?,
+        actor: required_text(row, 2)?,
+        author_record: author.view(None),
+        origin: text_at(row, 13)?,
         body: required_text(row, 3)?,
         anchor,
         anchor_version,
@@ -578,6 +604,12 @@ mod tests {
             id: "c-1".to_string(),
             artifact_id: "art-1".to_string(),
             author: "alice".to_string(),
+            actor: "alice".to_string(),
+            author_record: crate::author::Author::Legacy {
+                label: "alice".to_string(),
+            }
+            .view(None),
+            origin: None,
             body: "looks good".to_string(),
             anchor: None,
             anchor_version: None,

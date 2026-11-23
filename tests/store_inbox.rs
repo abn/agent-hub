@@ -998,6 +998,8 @@ async fn a_decided_approval_shows_its_decision_in_the_inbox() {
                 "decision": "declined",
                 "note": "not on a Friday",
                 "actor": "human",
+                "author": {"kind": "human"},
+                "origin": null,
                 "event_id": decision,
                 "decided_at": decided_at,
             }),
@@ -1108,6 +1110,8 @@ async fn an_answered_question_shows_its_answer_in_the_inbox() {
             serde_json::json!({
                 "body": "yes, after the backup",
                 "actor": "human",
+                "author": {"kind": "human"},
+                "origin": null,
                 "event_id": answer,
                 "answered_at": answered_at,
             }),

@@ -112,13 +112,19 @@ const TABLES: &[&str] = &[
     "artifact_versions",
     "comments",
     "sessions",
-    "agents",
-    "agent_tokens",
+    "session_participants",
+    "session_aliases",
+    "members",
+    "member_tokens",
     "grants",
     "idempotency",
     "search_docs",
     "project_feed_cursors",
-    "agent_feed_cursors",
+    "feed_cursors",
+    "notify_cursors",
+    "notify_backlog",
+    "identity_merges",
+    "identity_merge_paths",
     "artifact_shares",
     "id_high_water",
 ];
@@ -156,22 +162,22 @@ async fn migrate_creates_schema_and_search_index() {
     // Migration 2 adds each agent's personal space id, unique but nullable so
     // agents that predate it do not collide.
     let mut agents = conn
-        .query("SELECT personal_project_id FROM agents LIMIT 1", ())
+        .query("SELECT personal_project_id FROM members LIMIT 1", ())
         .await
-        .expect("agents.personal_project_id exists");
+        .expect("members.personal_project_id exists");
     assert!(agents.next().await.expect("row").is_none());
     drop(agents);
 
     let mut indexes = conn
         .query(
-            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'agents_personal_project'",
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'members_personal_project'",
             (),
         )
         .await
         .expect("index query");
     assert!(
         indexes.next().await.expect("row").is_some(),
-        "missing agents_personal_project index"
+        "missing members_personal_project index"
     );
     drop(indexes);
 
@@ -258,21 +264,21 @@ async fn migrate_creates_schema_and_search_index() {
 
     for id in ["a", "b"] {
         conn.execute(
-            "INSERT INTO agents(id, display_name, created_at) VALUES (?1, ?1, '2026-09-16T00:00:00Z')",
+            "INSERT INTO members(id, display_name, created_at) VALUES (?1, ?1, '2026-09-16T00:00:00Z')",
             [id],
         )
         .await
         .expect("insert agent");
     }
     conn.execute(
-        "UPDATE agents SET personal_project_id = 'space-1' WHERE id = 'a'",
+        "UPDATE members SET personal_project_id = 'space-1' WHERE id = 'a'",
         (),
     )
     .await
     .expect("set personal space");
     let duplicate = conn
         .execute(
-            "UPDATE agents SET personal_project_id = 'space-1' WHERE id = 'b'",
+            "UPDATE members SET personal_project_id = 'space-1' WHERE id = 'b'",
             (),
         )
         .await;
@@ -451,8 +457,10 @@ async fn migration_seven_rekeys_sessions_without_losing_rows() {
         .expect("insert session");
     }
 
-    let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, latest());
+    let version = agent_hub::store::migrate_to(&db, 27)
+        .await
+        .expect("migrate");
+    assert_eq!(version, 27);
 
     let mut rows = conn
         .query(
@@ -511,7 +519,17 @@ async fn migration_seven_rekeys_sessions_without_losing_rows() {
         "every row keeps its id, owner, state and brain path"
     );
 
-    // The owner still resumes the same session by name after the re-key.
+    // Through the members upgrade too, with the owners mapped, the session is
+    // resumed by its name.
+    std::fs::write(
+        dir.join("identity-map.toml"),
+        "[owners]\n\"agent-one\" = \"human\"\n\"agent-two\" = \"human\"\n",
+    )
+    .expect("owner map");
+    let version = agent_hub::store::migrate_in(&db, Some(&dir))
+        .await
+        .expect("upgrade");
+    assert_eq!(version, latest());
     let resumed = agent_hub::store::sessions::start(&db, "proj", "nightly", "agent-one")
         .await
         .expect("resume");
@@ -522,7 +540,7 @@ async fn migration_seven_rekeys_sessions_without_losing_rows() {
 }
 
 #[tokio::test]
-async fn live_sessions_are_unique_per_owner_and_a_pruned_name_is_free() {
+async fn live_session_names_are_unique_per_project_and_a_pruned_name_is_free() {
     let dir = TempDir::new("store-schema-owner-key");
     let db = open_engine(&dir.join("hub.db")).await.expect("open engine");
     migrate(&db).await.expect("migrate");
@@ -538,7 +556,7 @@ async fn live_sessions_are_unique_per_owner_and_a_pruned_name_is_free() {
         let conn = conn.clone();
         async move {
             conn.execute(
-                "INSERT INTO sessions(id, project_id, session_name, agent, status, brain_path, created_at, last_activity) \
+                "INSERT INTO sessions(id, project_id, session_name, started_label, status, brain_path, created_at, last_activity) \
                  VALUES (?1, 'proj', 'nightly', ?2, 'active', 'sessions/proj/x.db', '2026-09-16T00:00:00Z', '2026-09-16T00:00:00Z')",
                 [id, agent],
             )
@@ -546,13 +564,10 @@ async fn live_sessions_are_unique_per_owner_and_a_pruned_name_is_free() {
         }
     };
 
-    insert("one", "agent-one").await.expect("first owner");
+    insert("one", "agent-one").await.expect("first holder");
     insert("two", "agent-two")
         .await
-        .expect("another agent holds the same name");
-    insert("three", "agent-one")
-        .await
-        .expect_err("one owner cannot hold the same live name twice");
+        .expect_err("a project holds one live session of a name, whoever starts it");
 
     // A soft-deleted row is outside the index, so the name it held is free
     // again and the tombstone keeps its id for an undo.
@@ -728,8 +743,11 @@ async fn migration_nine_keeps_projects_and_gives_them_the_default_policy() {
     .await
     .expect("insert event");
 
-    let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, latest());
+    // Read at the last version that had the column.
+    let version = agent_hub::store::migrate_to(&db, 27)
+        .await
+        .expect("migrate");
+    assert_eq!(version, 27);
 
     let mut rows = conn
         .query(
@@ -1060,8 +1078,11 @@ async fn migration_eleven_adds_enrolment_columns_and_index() {
     .await
     .expect("insert agent");
 
-    let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, latest());
+    // Read at the last version before the members upgrade renamed it.
+    let version = agent_hub::store::migrate_to(&db, 27)
+        .await
+        .expect("migrate");
+    assert_eq!(version, 27);
 
     let mut rows = conn
         .query(
@@ -1445,8 +1466,11 @@ async fn migration_twenty_adds_the_agent_feed_cursor_table() {
         .expect("record version");
     }
 
-    let version = migrate(&db).await.expect("migrate");
-    assert_eq!(version, latest());
+    // Read at the last version before the members upgrade renamed it.
+    let version = agent_hub::store::migrate_to(&db, 27)
+        .await
+        .expect("migrate");
+    assert_eq!(version, 27);
 
     // The table is keyed by project and the resolved actor, so two agents in
     // one project hold separate cursors and one agent holds a cursor per

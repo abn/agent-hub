@@ -123,7 +123,22 @@ pub fn online_target(backup_dir: &Path, data_dir: &Path) -> Result<PathBuf> {
     Ok(target)
 }
 
+/// The set a migration copies aside: an offline backup into `out_dir`, which
+/// is under the data directory's `backups/`, a directory no backup walks.
+pub(crate) async fn backup_aside(data_dir: &Path, out_dir: &Path) -> Result<BackupReport> {
+    run_into(data_dir, out_dir, Source::Offline, true).await
+}
+
 async fn run(data_dir: &Path, out_dir: &Path, source: Source<'_>) -> Result<BackupReport> {
+    run_into(data_dir, out_dir, source, false).await
+}
+
+async fn run_into(
+    data_dir: &Path,
+    out_dir: &Path,
+    source: Source<'_>,
+    aside: bool,
+) -> Result<BackupReport> {
     let hub_db = data_dir.join(HUB_DB);
     if !hub_db.is_file() {
         return Err(Error::NotFound(format!(
@@ -132,7 +147,7 @@ async fn run(data_dir: &Path, out_dir: &Path, source: Source<'_>) -> Result<Back
         )));
     }
     // A backup written inside the tree it copies would be walked as content.
-    if out_dir == data_dir || out_dir.starts_with(data_dir) {
+    if !aside && (out_dir == data_dir || out_dir.starts_with(data_dir)) {
         return Err(Error::InvalidArgument(format!(
             "the backup output {} must be outside the data directory {}",
             out_dir.display(),
@@ -200,12 +215,17 @@ async fn backup_inner(
         }
     }
 
+    // Merged brains archived by the members upgrade are a third engine root.
+    // No hub ever opens them, so online they are copied over a handle of
+    // their own rather than left out as an unserved file.
+    let merged = data_dir.join("merged");
     for (root, store) in [
         (data_dir.join("sessions"), source_store(source, false)),
         (
             crate::brain::knowledge_dir(data_dir),
             source_store(source, true),
         ),
+        (merged.clone(), None),
     ] {
         let walked = root.clone();
         for file in blocking(move || walk_files(&walked)).await? {
@@ -217,6 +237,15 @@ async fn backup_inner(
             let rel = relative(data_dir, &file)?;
             let dest = out_dir.join(&rel);
             match store {
+                None if online_source(source) && root == merged => {
+                    let db = open_hub_store(&file).await?;
+                    if let Some(parent) = dest.parent() {
+                        crate::config::private_dir(parent)?;
+                    }
+                    let conn = crate::store::connect(&db)?;
+                    vacuum_into(&conn, &dest).await?;
+                    copied.push((dest, rel));
+                }
                 None => {
                     let db = open_hub_store(&file).await?;
                     collect_engine(&db, &file, &dest, &rel, &mut entries, &mut used_fallback)
@@ -275,6 +304,10 @@ async fn backup_inner(
         bytes,
         used_fallback,
     })
+}
+
+fn online_source(source: Source<'_>) -> bool {
+    matches!(source, Source::Serving(_))
 }
 
 /// Copy the artifact blobs and the tailnet key state verbatim, returning their

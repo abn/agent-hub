@@ -133,7 +133,7 @@ pub(crate) async fn write_turn() -> Result<WriteTurn> {
 /// writer is given the turn.
 pub(crate) struct WriteTx {
     conn: turso::Connection,
-    _turn: WriteTurn,
+    _turn: Option<WriteTurn>,
 }
 
 impl std::ops::Deref for WriteTx {
@@ -160,7 +160,23 @@ pub(crate) async fn begin_write(db: &turso::Database) -> Result<WriteTx> {
     let turn = write_turn().await?;
     let conn = connect(db)?;
     conn.execute("BEGIN IMMEDIATE", ()).await.map_err(engine)?;
-    Ok(WriteTx { conn, _turn: turn })
+    Ok(WriteTx {
+        conn,
+        _turn: Some(turn),
+    })
+}
+
+/// Begin an immediate write transaction outside the process write queue.
+///
+/// Only for a migration, which runs while the store is being opened and no
+/// other writer of it exists in this process. The engine's own lock still
+/// orders it against any other connection. Keeping it out of the queue means
+/// a long migration of one store never starves the writers of another, which
+/// a test binary that opens many stores would otherwise see.
+async fn begin_migration(db: &turso::Database) -> Result<WriteTx> {
+    let conn = connect(db)?;
+    conn.execute("BEGIN IMMEDIATE", ()).await.map_err(engine)?;
+    Ok(WriteTx { conn, _turn: None })
 }
 
 /// The gate between removing store files and an online backup.
@@ -215,6 +231,30 @@ pub async fn open_engine(path: &Path) -> Result<turso::Database> {
 /// transaction, and its version is recorded in the same transaction so a
 /// failed migration leaves no partial version behind.
 pub async fn migrate(db: &turso::Database) -> Result<i64> {
+    migrate_in(db, None).await
+}
+
+/// [`migrate`], reading the operator's owner map from `data_dir` when a data
+/// step needs it (`<data_dir>/identity-map.toml`).
+///
+/// A data step that finds what it cannot move refuses with the stop message
+/// [`migrate::is_stop`] recognises, and its transaction rolls back whole.
+pub async fn migrate_in(db: &turso::Database, data_dir: Option<&Path>) -> Result<i64> {
+    migrate_upto(db, data_dir, schema::SUPPORTED_MAX).await
+}
+
+/// Apply migrations up to and including `max`: a store at an older version,
+/// for a staged plan or a test of one migration.
+pub async fn migrate_to(db: &turso::Database, max: i64) -> Result<i64> {
+    migrate_upto(db, None, max).await
+}
+
+/// Apply migrations up to and including `max`.
+pub(crate) async fn migrate_upto(
+    db: &turso::Database,
+    data_dir: Option<&Path>,
+    max: i64,
+) -> Result<i64> {
     let conn = connect(db)?;
     {
         let _turn = write_turn().await?;
@@ -237,10 +277,19 @@ pub async fn migrate(db: &turso::Database) -> Result<i64> {
 
     for migration in schema::MIGRATIONS
         .iter()
-        .filter(|migration| migration.version > current)
+        .filter(|migration| migration.version > current && migration.version <= max)
     {
-        let tx = begin_write(db).await?;
+        let tx = begin_migration(db).await?;
         tx.execute_batch(migration.ddl).await.map_err(engine)?;
+        if let Some(step) = migration.data {
+            match step {
+                schema::DataStep::Members => {
+                    let map = migrate::OwnerMap::load(data_dir)?;
+                    migrate::members_step(&tx, &map).await?;
+                }
+            }
+            tx.execute_batch(step.post()).await.map_err(engine)?;
+        }
         tx.execute(
             "INSERT INTO schema_version(version) VALUES (?1)",
             [migration.version],
