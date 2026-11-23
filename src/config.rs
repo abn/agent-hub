@@ -33,6 +33,7 @@ pub const HUB_KEYS: &[&str] = &[
     "notify_token",
     "notify_interval_secs",
     "backup_dir",
+    "log_file",
 ];
 
 /// The settings that name the hub a client reaches.
@@ -625,6 +626,151 @@ impl Config {
     }
 }
 
+/// The operating systems whose directory layout the hub knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Os {
+    Linux,
+    Macos,
+    Windows,
+}
+
+impl Os {
+    /// The layout of the system this binary runs on. Anything that is neither
+    /// macOS nor Windows follows the XDG layout.
+    pub fn current() -> Self {
+        if cfg!(windows) {
+            Self::Windows
+        } else if cfg!(target_os = "macos") {
+            Self::Macos
+        } else {
+            Self::Linux
+        }
+    }
+}
+
+/// An absolute directory from an environment variable, or `None` when it is
+/// unset, empty or relative (the XDG rule for its base directories).
+fn absolute_env(env: &dyn Fn(&str) -> Option<String>, key: &str) -> Option<PathBuf> {
+    present(env(key))
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+}
+
+/// Where a native install keeps the store when `data_dir` is not set.
+pub fn platform_data_dir(env: &dyn Fn(&str) -> Option<String>, os: Os) -> Option<PathBuf> {
+    match os {
+        Os::Linux => absolute_env(env, "XDG_DATA_HOME")
+            .or_else(|| absolute_env(env, "HOME").map(|home| home.join(".local").join("share")))
+            .map(|base| base.join("agent-hub")),
+        Os::Macos => absolute_env(env, "HOME").map(|home| {
+            home.join("Library")
+                .join("Application Support")
+                .join("agent-hub")
+        }),
+        Os::Windows => {
+            absolute_env(env, "LOCALAPPDATA").map(|base| base.join("agent-hub").join("data"))
+        }
+    }
+}
+
+/// Where a native install writes the log when `log_file` is not set.
+pub fn platform_log_file(env: &dyn Fn(&str) -> Option<String>, os: Os) -> Option<PathBuf> {
+    match os {
+        Os::Linux => absolute_env(env, "XDG_STATE_HOME")
+            .or_else(|| absolute_env(env, "HOME").map(|home| home.join(".local").join("state")))
+            .map(|base| base.join("agent-hub").join("hub.log")),
+        Os::Macos => absolute_env(env, "HOME").map(|home| {
+            home.join("Library")
+                .join("Logs")
+                .join("agent-hub")
+                .join("hub.log")
+        }),
+        Os::Windows => absolute_env(env, "LOCALAPPDATA")
+            .map(|base| base.join("agent-hub").join("logs").join("hub.log")),
+    }
+}
+
+/// The settings the lifecycle commands (`start`, `stop`, `status`, `logs`)
+/// act on.
+///
+/// They read the same layered configuration `serve` does, but a data directory
+/// or log file nobody set resolves to the platform's own place rather than
+/// `./data`, so `agent-hub start` run from any directory finds the same hub.
+/// `serve` itself keeps `./data`. A value that is set is used as it is, and the
+/// `*_set` flags say which case it was, so a child process is handed only what
+/// the configuration left open.
+#[derive(Debug, Clone)]
+pub struct LifecycleSettings {
+    pub data_dir: PathBuf,
+    pub data_dir_set: bool,
+    pub log_file: PathBuf,
+    pub log_file_set: bool,
+    pub bind: SocketAddr,
+    /// The config files the layers read, in precedence order.
+    pub config_files: Vec<PathBuf>,
+}
+
+impl LifecycleSettings {
+    /// Resolve from the process environment and the layered config files.
+    pub fn from_env() -> Result<Self> {
+        Self::resolve(&|key| std::env::var(key).ok(), Os::current())
+    }
+
+    /// Resolve from an environment lookup, for one operating system's layout.
+    pub fn resolve(env: &dyn Fn(&str) -> Option<String>, os: Os) -> Result<Self> {
+        let loaded = load_layered_configs(env)?;
+        let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
+
+        let data_dir_setting = Setting::resolved(env, "hub", "data_dir", &files, None);
+        let (data_dir, data_dir_set) = match data_dir_setting.value {
+            Some(value) => (PathBuf::from(value), true),
+            None => (
+                platform_data_dir(env, os).ok_or_else(|| {
+                    Error::Config(
+                        "no data directory: set HUB_DATA_DIR or [hub] data_dir".to_string(),
+                    )
+                })?,
+                false,
+            ),
+        };
+        let log_file_setting = Setting::resolved(env, "hub", "log_file", &files, None);
+        let (log_file, log_file_set) = match log_file_setting.value {
+            Some(value) => (PathBuf::from(value), true),
+            None => (
+                platform_log_file(env, os).ok_or_else(|| {
+                    Error::Config("no log file: set HUB_LOG_FILE or [hub] log_file".to_string())
+                })?,
+                false,
+            ),
+        };
+        let bind_str = Setting::resolved(env, "hub", "bind", &files, Some("127.0.0.1:8080"))
+            .value
+            .unwrap_or_else(|| "127.0.0.1:8080".to_string());
+        let bind: SocketAddr = bind_str
+            .parse()
+            .map_err(|err| Error::Config(format!("HUB_BIND is not a socket address: {err}")))?;
+
+        Ok(Self {
+            data_dir,
+            data_dir_set,
+            log_file,
+            log_file_set,
+            bind,
+            config_files: loaded.into_iter().map(|file| file.path).collect(),
+        })
+    }
+}
+
+/// Read only the log file a serving hub writes to, when one is set.
+pub fn log_file_from_env() -> Result<Option<PathBuf>> {
+    let env = |key: &str| std::env::var(key).ok();
+    let loaded = load_layered_configs(&env)?;
+    let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
+    Ok(Setting::resolved(&env, "hub", "log_file", &files, None)
+        .value
+        .map(PathBuf::from))
+}
+
 /// A parsed TOML configuration file.
 #[derive(Debug, Clone, Default)]
 pub struct ParsedConfigFile {
@@ -1147,6 +1293,7 @@ pub fn generate_config_rows(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<
             false,
         ),
         ("hub", "backup_dir", "HUB_BACKUP_DIR", None, false),
+        ("hub", "log_file", "HUB_LOG_FILE", None, false),
         ("client", "url", "HUB_URL", None, false),
         ("client", "token", "HUB_TOKEN", None, true),
         ("client", "agent_id", "HUB_AGENT_ID", None, false),
@@ -1737,5 +1884,109 @@ mod private_mode_tests {
         );
 
         std::fs::remove_dir_all(&dir).expect("clean up");
+    }
+}
+
+#[cfg(test)]
+mod platform_tests {
+    use super::{Os, platform_data_dir, platform_log_file};
+    use std::path::PathBuf;
+
+    /// An absolute directory on every platform, so the environment values
+    /// below are accepted whatever the separator is.
+    fn base(name: &str) -> PathBuf {
+        let root = if cfg!(windows) { "C:\\" } else { "/" };
+        PathBuf::from(root).join(name)
+    }
+
+    fn env(pairs: &[(&str, &PathBuf)]) -> impl Fn(&str) -> Option<String> + use<> {
+        let pairs: Vec<(String, String)> = pairs
+            .iter()
+            .map(|(name, value)| (name.to_string(), value.to_string_lossy().into_owned()))
+            .collect();
+        move |key| {
+            pairs
+                .iter()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value.clone())
+        }
+    }
+
+    #[test]
+    fn linux_follows_xdg_and_falls_back_to_home() {
+        let hubhome = base("hubhome");
+        let home = env(&[("HOME", &hubhome)]);
+        assert_eq!(
+            platform_data_dir(&home, Os::Linux),
+            Some(hubhome.join(".local").join("share").join("agent-hub"))
+        );
+        assert_eq!(
+            platform_log_file(&home, Os::Linux),
+            Some(
+                hubhome
+                    .join(".local")
+                    .join("state")
+                    .join("agent-hub")
+                    .join("hub.log")
+            )
+        );
+        let data = base("srv").join("data");
+        let state = base("srv").join("state");
+        let xdg = env(&[
+            ("HOME", &hubhome),
+            ("XDG_DATA_HOME", &data),
+            ("XDG_STATE_HOME", &state),
+        ]);
+        assert_eq!(
+            platform_data_dir(&xdg, Os::Linux),
+            Some(data.join("agent-hub"))
+        );
+        assert_eq!(
+            platform_log_file(&xdg, Os::Linux),
+            Some(state.join("agent-hub").join("hub.log"))
+        );
+    }
+
+    #[test]
+    fn a_relative_xdg_base_is_ignored() {
+        let hubhome = base("hubhome");
+        let data = PathBuf::from("data");
+        let relative = env(&[("HOME", &hubhome), ("XDG_DATA_HOME", &data)]);
+        assert_eq!(
+            platform_data_dir(&relative, Os::Linux),
+            Some(hubhome.join(".local").join("share").join("agent-hub"))
+        );
+    }
+
+    #[test]
+    fn macos_uses_the_library_layout() {
+        let machome = base("machome");
+        let home = env(&[("HOME", &machome)]);
+        assert_eq!(
+            platform_data_dir(&home, Os::Macos),
+            Some(
+                machome
+                    .join("Library")
+                    .join("Application Support")
+                    .join("agent-hub")
+            )
+        );
+        assert_eq!(
+            platform_log_file(&home, Os::Macos),
+            Some(
+                machome
+                    .join("Library")
+                    .join("Logs")
+                    .join("agent-hub")
+                    .join("hub.log")
+            )
+        );
+    }
+
+    #[test]
+    fn no_home_means_no_default() {
+        let none = env(&[]);
+        assert_eq!(platform_data_dir(&none, Os::Linux), None);
+        assert_eq!(platform_log_file(&none, Os::Macos), None);
     }
 }

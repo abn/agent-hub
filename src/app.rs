@@ -581,6 +581,29 @@ impl AppState {
 /// not a supported topology; the engine's exclusive file lock rejects it at
 /// startup rather than letting the two corrupt data.
 pub async fn run(config: Config) -> Result<()> {
+    run_with(config, |_| {}).await.map(|_| ())
+}
+
+/// How a hub that served and stopped without error left its store.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Stopped {
+    /// True only when every request drained inside the window, the background
+    /// writers had finished, and the store's checkpoint returned success: the
+    /// state a next start can trust without a check.
+    pub checkpointed: bool,
+}
+
+/// As [`run`], telling `on_bound` the address the listener got as soon as the
+/// bind succeeds, before the first request is served.
+///
+/// The lock holder's record carries that address so `status` and `start` can name it.
+/// The stop signals are watched before the store opens, so by the time the
+/// address is published the hub already answers a stop.
+pub async fn run_with(
+    config: Config,
+    on_bound: impl FnOnce(std::net::SocketAddr),
+) -> Result<Stopped> {
+    let stop_signal = watch_stop_signals();
     let state = AppState::open(config).await?;
     let bind = state.config.bind;
     let schema_version = state.schema_version;
@@ -662,6 +685,7 @@ pub async fn run(config: Config) -> Result<()> {
     // operator asked for port 0.
     let address = listener.local_addr()?;
     tracing::info!(bind = %address, schema_version, "hub listening");
+    on_bound(address);
 
     // One line unconditionally, at whatever log level, so an operator who set
     // nothing still sees the hub start and can read the address a port-0 bind
@@ -681,7 +705,7 @@ pub async fn run(config: Config) -> Result<()> {
     // is simply serving is never stopped by it.
     let (stopping_tx, stopping_rx) = tokio::sync::oneshot::channel();
     let shutdown = async move {
-        shutdown_signal().await;
+        stop_signal.await;
         let _ = stopping_tx.send(());
     };
     let server = std::future::IntoFuture::into_future(
@@ -700,32 +724,51 @@ pub async fn run(config: Config) -> Result<()> {
         );
     };
     tokio::pin!(server);
+    let mut drained = true;
     tokio::select! {
         result = &mut server => result.map_err(crate::error::Error::from)?,
-        _ = drain => {}
+        _ = drain => drained = false,
     }
 
     // Stop the background writers before checkpointing, so the fold sees a
-    // store no one else is touching.
+    // store no one else is touching. An abort only takes effect at the task's
+    // next await point, so each handle is awaited until the task is gone.
     sweeper_task.abort();
     deadline_task.abort();
+    let _ = sweeper_task.await;
+    let _ = deadline_task.await;
     // The tailnet endpoint is a separate serve with its own reconnect-and-rebuild
     // loop and no shutdown handle, so it is dropped here rather than drained.
     // Stdio MCP is a different path entirely and never reaches this code.
     if let Some(task) = tailnet_task {
         task.abort();
+        let _ = task.await;
     }
 
-    // Fold the log and record the id high-water mark, so the next start opens
-    // a store whose log is already folded and whose ids continue from here.
-    if let Err(err) = store::persist_id_high_water(&state.db).await {
-        tracing::warn!(error = %err, "could not persist the id high-water mark");
-    }
-    if let Err(err) = store::checkpoint_hub(&state.db).await {
-        tracing::warn!(error = %err, "could not checkpoint the hub store");
-    }
+    let checkpointed = fold_on_stop(&state.db, drained).await;
+    tracing::info!(checkpointed, "hub stopped");
     eprintln!("agent-hub serve: stopped");
-    Ok(())
+    Ok(Stopped { checkpointed })
+}
+
+/// Fold the log and record the id high-water mark, so the next start opens a
+/// store whose log is already folded and whose ids continue from here.
+///
+/// True only when `drained` (every request finished inside the window) and
+/// both steps succeeded, including a checkpoint that reported no busy log: the
+/// state a stopping hub may record as a clean stop.
+#[doc(hidden)]
+pub async fn fold_on_stop(db: &turso::Database, drained: bool) -> bool {
+    let mut checkpointed = drained;
+    if let Err(err) = store::persist_id_high_water(db).await {
+        tracing::warn!(error = %err, "could not persist the id high-water mark");
+        checkpointed = false;
+    }
+    if let Err(err) = store::checkpoint_hub(db).await {
+        tracing::warn!(error = %err, "could not checkpoint the hub store");
+        checkpointed = false;
+    }
+    checkpointed
 }
 
 /// How long a stopping hub waits for in-flight requests to finish.
@@ -747,41 +790,57 @@ async fn count_http(
     response
 }
 
-/// Resolve when the process is asked to stop.
+/// Start watching for the signals that stop the hub, and return the future
+/// that resolves when one arrives.
 ///
 /// SIGTERM is what a supervised container or service manager sends; SIGINT is
-/// Ctrl-C. Both drain the same way.
-async fn shutdown_signal() {
+/// Ctrl-C. Both drain the same way. The handlers are installed here, when the
+/// function is called, not when the future is first polled, so a signal that
+/// lands while the store is still opening is held and acted on once it is.
+fn watch_stop_signals() -> impl std::future::Future<Output = ()> {
     #[cfg(unix)]
-    {
+    let signals = {
         use tokio::signal::unix::{SignalKind, signal};
-
-        let mut terminate = match signal(SignalKind::terminate()) {
-            Ok(signal) => signal,
+        let watch = |kind: SignalKind, name: &str| match signal(kind) {
+            Ok(stream) => Some(stream),
             Err(err) => {
-                tracing::warn!(error = %err, "could not watch for SIGTERM");
-                return std::future::pending().await;
+                tracing::warn!(error = %err, "could not watch for {name}");
+                None
             }
         };
-        let mut interrupt = match signal(SignalKind::interrupt()) {
-            Ok(signal) => signal,
-            Err(err) => {
-                tracing::warn!(error = %err, "could not watch for SIGINT");
+        (
+            watch(SignalKind::terminate(), "SIGTERM"),
+            watch(SignalKind::interrupt(), "SIGINT"),
+        )
+    };
+    async move {
+        #[cfg(unix)]
+        {
+            let (mut terminate, mut interrupt) = signals;
+            let wait = |stream: &mut Option<tokio::signal::unix::Signal>| {
+                let stream = stream.take();
+                async move {
+                    match stream {
+                        Some(mut stream) => {
+                            stream.recv().await;
+                        }
+                        None => std::future::pending().await,
+                    }
+                }
+            };
+            tokio::select! {
+                _ = wait(&mut terminate) => tracing::info!("SIGTERM received, draining"),
+                _ = wait(&mut interrupt) => tracing::info!("SIGINT received, draining"),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            if let Err(err) = tokio::signal::ctrl_c().await {
+                tracing::warn!(error = %err, "could not watch for Ctrl-C");
                 return std::future::pending().await;
             }
-        };
-        tokio::select! {
-            _ = terminate.recv() => tracing::info!("SIGTERM received, draining"),
-            _ = interrupt.recv() => tracing::info!("SIGINT received, draining"),
+            tracing::info!("interrupt received, draining");
         }
-    }
-    #[cfg(not(unix))]
-    {
-        if let Err(err) = tokio::signal::ctrl_c().await {
-            tracing::warn!(error = %err, "could not watch for Ctrl-C");
-            return std::future::pending().await;
-        }
-        tracing::info!("interrupt received, draining");
     }
 }
 

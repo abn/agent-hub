@@ -114,7 +114,8 @@ fn embedded_stdio_against_running_hub_refuses() {
         "the mode says out loud what it is: {stderr}"
     );
     assert!(
-        stderr.contains("a hub is already using this directory; set HUB_URL to reach it instead"),
+        stderr.contains("a hub is already serving")
+            && stderr.contains("use agent-hub stop, or set HUB_URL to reach it"),
         "the refusal names the situation and what to do: {stderr}"
     );
 }

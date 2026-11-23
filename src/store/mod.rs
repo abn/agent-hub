@@ -309,7 +309,11 @@ pub async fn probe_content(db: &turso::Database) -> Result<i64> {
 /// Checkpoint the hub store's write-ahead log and truncate it.
 ///
 /// Called once at clean shutdown, after every writer has stopped, so the next
-/// process opens a store whose log is already folded into the database.
+/// process opens a store whose log is already folded into the database. The
+/// pragma reports a checkpoint it could not finish (a reader or writer still
+/// on the log) in its result row rather than as an error: a non-zero first
+/// column is that, and it is returned as an error so no caller records a clean
+/// stop the log does not back.
 pub async fn checkpoint_hub(db: &turso::Database) -> Result<()> {
     let conn = connect(db)?;
     // The pragma answers with a result row, so it is stepped to completion
@@ -318,7 +322,15 @@ pub async fn checkpoint_hub(db: &turso::Database) -> Result<()> {
         .query("PRAGMA wal_checkpoint(TRUNCATE)", ())
         .await
         .map_err(engine)?;
-    while rows.next().await.map_err(engine)?.is_some() {}
+    let mut busy = false;
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        busy |= row.get::<i64>(0).map_err(engine)? != 0;
+    }
+    if busy {
+        return Err(Error::Engine(
+            "the checkpoint did not finish: the log is still in use".to_string(),
+        ));
+    }
     Ok(())
 }
 

@@ -19,8 +19,8 @@ use common::temp::TempDir;
 ///
 /// The empty entry is the binary on its own, which is how an operator who forgot
 /// the subcommand asks.
-const COMMANDS: [(&str, &str); 17] = [
-    ("", "agent-hub [serve]"),
+const COMMANDS: [(&str, &str); 23] = [
+    ("", "show the hub's status and this usage"),
     ("serve", "agent-hub serve"),
     ("mcp", "agent-hub mcp [--proxy]"),
     ("call", "agent-hub call"),
@@ -37,6 +37,12 @@ const COMMANDS: [(&str, &str); 17] = [
     ("check", "agent-hub check"),
     ("doctor", "agent-hub doctor"),
     ("health", "agent-hub health"),
+    ("start", "Start the hub in the background"),
+    ("stop", "agent-hub stop [--timeout SECONDS] [--force]"),
+    ("restart", "Stop the hub, then start it"),
+    ("status", "agent-hub status [--json]"),
+    ("logs", "agent-hub logs [-f] [-n LINES]"),
+    ("version", "agent-hub --version"),
 ];
 
 /// The built binary with nothing configured: one HOME, one data directory, and
