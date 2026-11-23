@@ -239,7 +239,7 @@ export async function projectsIndexScreen(gen, passedProjects) {
 
   const totalUsedBytes = storage?.used_bytes ?? 0;
   const totalFootprint = size(totalUsedBytes);
-  const anyActive = projects.some((p) => (statsMap.get(p.id)?.agents_active || 0) > 0);
+  const anyActive = projects.some((p) => (statsMap.get(p.id)?.sessions_live || 0) > 0);
   const headerMeta = !anyActive
     ? `${projects.length} · ${totalFootprint} · no agents active`
     : `${projects.length} · ${totalFootprint}`;

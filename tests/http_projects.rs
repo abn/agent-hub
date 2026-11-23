@@ -348,7 +348,7 @@ async fn the_listing_marks_a_personal_space_and_not_an_ordinary_project() {
         "a personal space is marked as one: {personal}"
     );
     assert_eq!(
-        personal["owner_agent"], "other",
+        personal["owner_member"], "other",
         "the space still names the agent that owns it"
     );
 
@@ -358,7 +358,7 @@ async fn the_listing_marks_a_personal_space_and_not_an_ordinary_project() {
         "an ordinary project is not: {ordinary}"
     );
     assert!(
-        ordinary["owner_agent"].is_null(),
+        ordinary["owner_member"].is_null(),
         "and it is owned by no agent: {ordinary}"
     );
 
@@ -446,7 +446,7 @@ async fn a_patch_that_writes_nothing_does_not_wake_the_clients() {
 }
 
 #[tokio::test]
-async fn project_stats_report_threads_agents_written_and_disk_bytes() {
+async fn project_stats_report_threads_members_written_and_disk_bytes() {
     let state = state().await;
     projects::create(&state.db, "homelab", "Homelab")
         .await
@@ -510,7 +510,7 @@ async fn project_stats_report_threads_agents_written_and_disk_bytes() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = json_body(response).await;
     assert_eq!(body["threads"], 2);
-    assert_eq!(body["agents_written"], 2);
+    assert_eq!(body["members_written"], 2);
     assert!(body["disk_bytes"].is_number());
 }
 

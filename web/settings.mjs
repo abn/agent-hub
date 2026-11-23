@@ -183,10 +183,10 @@ function desktopAlertsRow() {
 
 export async function settingsScreen(gen) {
   const [agentsRes, storage] = await Promise.all([
-    api("/api/v1/agents").catch(() => ({ agents: [] })),
+    api("/api/v1/members").catch(() => ({ members: [] })),
     api("/api/v1/storage").catch(() => null),
   ]);
-  const agents = agentsRes.agents || [];
+  const agents = agentsRes.members || [];
   let latestSeen = null;
   for (const a of agents) {
     if (a.last_seen_at && (!latestSeen || a.last_seen_at > latestSeen)) latestSeen = a.last_seen_at;

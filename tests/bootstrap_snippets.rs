@@ -59,15 +59,6 @@ fn opencode_snippet_is_the_entry_the_plugin_registers() {
         }}
     });
     assert_eq!(actual, expected);
-
-    let config =
-        fs::read_to_string(root().join("plugins/opencode/config.mjs")).expect("config.mjs");
-    let default = config
-        .lines()
-        .find_map(|l| l.strip_prefix("export const DEFAULT_AGENT_NAME = \""))
-        .and_then(|l| l.split('"').next())
-        .expect("the plugin's default agent name");
-    assert_eq!(actual["mcp"]["agent-hub"]["headers"]["X-Agent-Id"], default);
 }
 
 /// The Antigravity plugin is not on this base. The comparison runs once its

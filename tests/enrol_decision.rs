@@ -27,7 +27,7 @@ async fn enrol(app: &axum::Router, id: &str, name: &str) -> String {
             "/api/v1/enrol",
             None,
             &json!({
-                "suggested_id": id,
+                "member": id,
                 "display_name": name,
                 "why": "ready to work",
             })
@@ -42,8 +42,8 @@ async fn enrol(app: &axum::Router, id: &str, name: &str) -> String {
         .to_string()
 }
 
-/// The inbox event id of the `enrol_request` approval that names `agent_id`.
-async fn approval_id_for(state: &TestState, agent_id: &str) -> String {
+/// The inbox event id of the `enrol_request` approval that names `member`.
+async fn approval_id_for(state: &TestState, member: &str) -> String {
     inbox::list(&state.db, None, None, 100)
         .await
         .expect("list inbox")
@@ -53,10 +53,10 @@ async fn approval_id_for(state: &TestState, agent_id: &str) -> String {
                 && item
                     .payload
                     .as_ref()
-                    .and_then(|payload| payload["agent_id"].as_str())
-                    == Some(agent_id)
+                    .and_then(|payload| payload["member"].as_str())
+                    == Some(member)
         })
-        .unwrap_or_else(|| panic!("inbox has an enrolment approval for {agent_id}"))
+        .unwrap_or_else(|| panic!("inbox has an enrolment approval for {member}"))
         .event_id
 }
 
@@ -124,7 +124,7 @@ async fn approving_an_enrolment_through_the_decision_route_admits_the_agent() {
     assert_eq!(status.status(), StatusCode::OK);
     let body = json_body(status).await;
     assert_eq!(body["status"], "approved");
-    assert_eq!(body["agent_id"], "join-agent");
+    assert_eq!(body["member"], "join-agent");
     assert_eq!(body["share"], true);
 }
 
@@ -185,7 +185,7 @@ async fn a_forged_enrolment_approval_from_an_active_agent_admits_nobody() {
             summary: "Victim Agent wants to join".to_string(),
             payload: Some(json!({
                 "action": "enrol_request",
-                "agent_id": "victim-agent",
+                "member": "victim-agent",
                 "display_name": "Victim Agent",
             })),
             needs_action: true,
@@ -243,5 +243,63 @@ async fn a_second_decision_on_an_admitted_enrolment_conflicts() {
     assert_eq!(
         agent.state, "active",
         "the second decision must not change the outcome"
+    );
+}
+
+/// The token hashes sent on the revocation channel within a second.
+async fn revoked_hashes(receiver: &mut tokio::sync::broadcast::Receiver<String>) -> Vec<String> {
+    let mut hashes = Vec::new();
+    while let Ok(Ok(hash)) =
+        tokio::time::timeout(std::time::Duration::from_secs(1), receiver.recv()).await
+    {
+        hashes.push(hash);
+    }
+    hashes
+}
+
+#[tokio::test]
+async fn declining_an_enrolment_closes_the_pending_tokens_streams() {
+    let state = state().await;
+    let app = router(state.clone());
+    let token = enrol(&app, "declined-streams", "Declined Streams").await;
+    let approval_id = approval_id_for(&state, "declined-streams").await;
+    let mut revoked = state.revocations.subscribe();
+
+    let response = decide(&app, &approval_id, "decline").await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    assert!(
+        revoked_hashes(&mut revoked)
+            .await
+            .contains(&identity::hash_token(&token)),
+        "the declined pending token is announced as revoked"
+    );
+}
+
+#[tokio::test]
+async fn refusing_an_enrolment_closes_the_pending_tokens_streams() {
+    let state = state().await;
+    let app = router(state.clone());
+    let token = enrol(&app, "refused-streams", "Refused Streams").await;
+    let mut revoked = state.revocations.subscribe();
+
+    let admin_auth = format!("Bearer {ADMIN_TOKEN}");
+    let response = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            "/api/v1/enrol/refused-streams/refuse",
+            Some(&admin_auth),
+            "{}",
+        ))
+        .await
+        .expect("refuse request");
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    assert!(
+        revoked_hashes(&mut revoked)
+            .await
+            .contains(&identity::hash_token(&token)),
+        "the refused pending token is announced as revoked"
     );
 }

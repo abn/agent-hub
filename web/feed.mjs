@@ -304,8 +304,6 @@ export function formatEventSummary(event) {
     if (picked) return `picked up ${picked[1]} from ${picked[2]}`;
     const forked = summary.match(/^session\s+(.+?)\s+forked from\s+(.+)$/i);
     if (forked) return `forked ${forked[1]} from ${forked[2]}`;
-    const reassigned = summary.match(/^session\s+(.+?)\s+reassigned to\s+(.+)$/i);
-    if (reassigned) return `reassigned ${reassigned[1]} to ${reassigned[2]}`;
     const capVerb = summary.match(/^([A-Z][a-z]+ed)\s+(.*)$/);
     if (capVerb) return `${capVerb[1].toLowerCase()} ${capVerb[2]}`;
     return summary;
@@ -880,7 +878,7 @@ export async function eventStage(event, projectId) {
 function sessionName(event) {
   const stored = event.payload?.session_name;
   if (typeof stored === "string" && stored.trim()) return stored.trim();
-  const named = (event.summary || "").match(/^session\s+(.+?)\s+(?:started|ended|picked up|forked|reassigned)\b/i);
+  const named = (event.summary || "").match(/^session\s+(.+?)\s+(?:started|ended|picked up|forked)\b/i);
   return named ? named[1] : "";
 }
 

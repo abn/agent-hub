@@ -271,10 +271,7 @@ pub async fn delete(
     ProblemPath(id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<StatusCode, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     projects::delete(&state.db, &state.data_dir, &id)
         .await

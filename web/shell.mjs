@@ -193,7 +193,7 @@ if (tabBadge && "MutationObserver" in window) {
   });
 }
 
-// A personal space is a project an agent owns, and `owner_agent` is what says
+// A personal space is a project an agent owns, and `owner_member` is what says
 // so: the hub sets it, and deleting a project refuses on it. By owner ruling
 // these never appear in the rail.
 //
@@ -202,7 +202,7 @@ if (tabBadge && "MutationObserver" in window) {
 // ordinary project that happens to be called `space-invaders`: it would
 // vanish from the reader's navigation with nothing on screen to say why.
 function isPersonalSpace(p) {
-  return Boolean(p.owner_agent);
+  return Boolean(p.owner_member);
 }
 
 // Render regular projects into the rail's PROJECTS list.
@@ -254,7 +254,7 @@ export async function renderRailProjects() {
 
     for (let i = 0; i < regular.length; i++) {
       const p = regular[i];
-      const isLive = (p.agents_active || 0) > 0;
+      const isLive = (p.sessions_live || 0) > 0;
       const waiting = waitingMap.get(p.id) || 0;
       const isCurrent = currentHash.startsWith(`/projects/${encodeURIComponent(p.id)}`);
 

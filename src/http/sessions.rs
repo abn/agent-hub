@@ -6,25 +6,62 @@ use axum::http::{HeaderMap, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::app::AppState;
+use crate::author::AuthorView;
 use crate::brain::EntryKind;
 use crate::error::Error;
 use crate::http::auth::bearer_token;
 use crate::http::problem::{Problem, ProblemPath, ProblemQuery};
 use crate::store::sessions as session_store;
-use crate::store::sessions::Session;
+use crate::store::sessions::{ListedSession as StoreListed, Participant, Session, SessionFilter};
 
-/// The project filter for a session listing.
-#[derive(Debug, Deserialize)]
+/// The filters of a session listing.
+#[derive(Debug, Default, Deserialize)]
 pub struct ListParams {
     /// The project whose sessions are listed.
+    #[serde(alias = "project_id")]
     pub project: Option<String>,
+    /// `active` or `ended`.
+    pub status: Option<String>,
+    /// Sessions this member took part in.
+    pub member: Option<String>,
+    /// Sessions this agent took part in, by any spelling of its name.
+    pub agent: Option<String>,
+    /// `1` for the sessions live now.
+    pub live: Option<String>,
+    /// Children of this session id.
+    pub parent: Option<String>,
 }
 
-/// A project's sessions.
+/// The sessions a listing found.
 #[derive(Debug, Serialize)]
 pub struct SessionList {
     /// The sessions, most recently active first.
     pub sessions: Vec<ListedSession>,
+}
+
+/// A participant as the screens read it: `last_active_at` is the time the
+/// store keeps as `last_seen_at`, under the name the interface asks for.
+#[derive(Debug, Serialize)]
+pub struct ParticipantRow {
+    pub member: String,
+    pub agent: String,
+    pub joined_at: String,
+    pub last_seen_at: String,
+    pub last_active_at: String,
+    pub left_at: Option<String>,
+}
+
+impl From<Participant> for ParticipantRow {
+    fn from(participant: Participant) -> Self {
+        Self {
+            last_active_at: participant.last_seen_at.clone(),
+            member: participant.member,
+            agent: participant.agent,
+            joined_at: participant.joined_at,
+            last_seen_at: participant.last_seen_at,
+            left_at: participant.left_at,
+        }
+    }
 }
 
 /// One session as the human's surface reads it.
@@ -32,6 +69,14 @@ pub struct SessionList {
 pub struct ListedSession {
     #[serde(flatten)]
     pub session: Session,
+    /// Who took part, newest first.
+    pub participants: Vec<ParticipantRow>,
+    /// Live children of this session.
+    pub children_count: i64,
+    /// Who started it.
+    pub started_by: AuthorView,
+    /// The name of the project it belongs to.
+    pub project_display_name: Option<String>,
     /// Where the work came from, resolved so the screen can render it without
     /// a second lookup.
     pub lineage: Option<Lineage>,
@@ -60,24 +105,17 @@ pub struct LastEvent {
     pub summary: String,
 }
 
-/// The session this one was picked up from.
+/// The session this one was forked from.
 #[derive(Debug, Serialize)]
 pub struct Lineage {
-    /// `adopted` or `forked`.
+    /// `forked`, or `adopted` for a session picked up before members.
     pub kind: &'static str,
     /// The source session id, which is kept even once the source is gone.
     pub session_id: String,
-    /// The source's current owner, absent once the source has been swept.
-    pub agent: Option<String>,
+    /// The source's name, absent once the source has been swept.
+    pub session_name: Option<String>,
     /// Whether the source is no longer there.
     pub pruned: bool,
-}
-
-/// The new owner of a session.
-#[derive(Debug, Deserialize)]
-pub struct Reassignment {
-    /// The agent the session moves to.
-    pub agent: String,
 }
 
 /// The acknowledgement returned when a session is ended.
@@ -85,6 +123,8 @@ pub struct Reassignment {
 pub struct EndResult {
     /// Always true on success.
     pub ok: bool,
+    /// The sessions ended: this one and its live children.
+    pub ended: Vec<String>,
 }
 
 /// The prefix whose brain entries are listed.
@@ -129,29 +169,45 @@ pub struct BrainEntry {
     pub written_at: Option<String>,
 }
 
-/// `GET /api/v1/sessions?project=<id>`
+/// `GET /api/v1/sessions?project=&status=&member=&agent=&live=1&parent=`
 ///
-/// A valid bearer token is required. The `project` filter is mandatory.
+/// A valid bearer token is required. At least one filter is required, so a
+/// listing never walks every session of the hub by accident.
 pub async fn list(
     State(state): State<AppState>,
     headers: HeaderMap,
     ProblemQuery(params): ProblemQuery<ListParams>,
 ) -> std::result::Result<Json<SessionList>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
-    let project = params
-        .project
-        .filter(|project| !project.is_empty())
-        .ok_or_else(|| {
-            Problem::from_error(&Error::InvalidArgument(
-                "the project query parameter is required".to_string(),
-            ))
-        })?;
+    fn non_empty(value: &Option<String>) -> Option<&str> {
+        value.as_deref().filter(|v| !v.is_empty())
+    }
+    let live = matches!(non_empty(&params.live), Some("1" | "true"));
+    let agent = non_empty(&params.agent).map(crate::agent_name::canonical);
+    let since = state.config.active_since();
+    let filter = SessionFilter {
+        project_id: non_empty(&params.project),
+        status: non_empty(&params.status),
+        member: non_empty(&params.member),
+        agent: agent.as_deref(),
+        live,
+        parent: non_empty(&params.parent),
+        since: Some(&since),
+        limit: None,
+    };
+    if filter.project_id.is_none()
+        && filter.member.is_none()
+        && filter.agent.is_none()
+        && filter.parent.is_none()
+        && !filter.live
+    {
+        return Err(Problem::from_error(&Error::InvalidArgument(
+            "name a project, member, agent or parent, or ask for live=1".to_string(),
+        )));
+    }
 
-    let sessions = session_store::list(&state.db, &project)
+    let sessions = session_store::list_filtered(&state.db, &filter)
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
@@ -175,10 +231,7 @@ pub async fn detail(
     ProblemPath(session_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<SessionDetail>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let session = live(&state, &session_id).await?;
     let events = crate::store::events::count_for_session(&state.db, &session.id)
@@ -192,7 +245,13 @@ pub async fn detail(
             actor: event.actor,
             summary: event.summary,
         });
-    let listed = list_entry(&state, session)
+    let row = session_store::get_listed(&state.db, &session.id)
+        .await
+        .map_err(|err| Problem::from_error(&err))?
+        .ok_or_else(|| {
+            Problem::from_error(&Error::NotFound(format!("session {session_id} not found")))
+        })?;
+    let listed = list_entry(&state, row)
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
@@ -204,7 +263,14 @@ pub async fn detail(
 }
 
 /// One listing row: the session, where it came from, and what it occupies.
-async fn list_entry(state: &AppState, session: Session) -> crate::error::Result<ListedSession> {
+async fn list_entry(state: &AppState, row: StoreListed) -> crate::error::Result<ListedSession> {
+    let StoreListed {
+        session,
+        participants,
+        children_count,
+        started_by,
+        project_display_name,
+    } = row;
     let lineage = lineage(state, &session).await?;
     let brain_bytes = match state.brain.brain_path(&session.project_id, &session.id) {
         Ok(path) => crate::brain::file_bytes(&path),
@@ -217,14 +283,19 @@ async fn list_entry(state: &AppState, session: Session) -> crate::error::Result<
     };
     Ok(ListedSession {
         session,
+        participants: participants.into_iter().map(ParticipantRow::from).collect(),
+        children_count,
+        started_by,
+        project_display_name,
         lineage,
         brain_bytes,
     })
 }
 
-/// The session a route names, while it is still there.
+/// The session a route names, while it is still there. An id a merge retired
+/// reaches the session that took its place.
 async fn live(state: &AppState, session_id: &str) -> std::result::Result<Session, Problem> {
-    session_store::get(&state.db, session_id)
+    session_store::lookup_id(&state.db, session_id)
         .await
         .map_err(|err| Problem::from_error(&err))?
         .filter(|session| session.deleted_at.is_none())
@@ -233,7 +304,7 @@ async fn live(state: &AppState, session_id: &str) -> std::result::Result<Session
         })
 }
 
-/// Resolve where a session was picked up from.
+/// Resolve where a session was forked from.
 ///
 /// A lineage id outlives the session it names, so a source that has been
 /// pruned reads as pruned rather than as a missing name.
@@ -243,78 +314,61 @@ async fn lineage(state: &AppState, session: &Session) -> crate::error::Result<Op
         (None, Some(id)) => ("forked", id),
         (None, None) => return Ok(None),
     };
-    let source = session_store::get(&state.db, session_id).await?;
+    let source = session_store::lookup_id(&state.db, session_id).await?;
     Ok(Some(Lineage {
         kind,
         session_id: session_id.clone(),
-        agent: source.as_ref().map(|source| source.agent.clone()),
+        session_name: source
+            .as_ref()
+            .filter(|source| source.deleted_at.is_none())
+            .map(|source| source.session_name.clone()),
         pruned: source.is_none_or(|source| source.deleted_at.is_some()),
     }))
 }
 
-/// `POST /api/v1/sessions/{id}/reassign`
-///
-/// A valid bearer token is required. The human moves a session to another
-/// agent when the one that holds it is not coming back; agents pick work up
-/// themselves and never need this.
-pub async fn reassign(
-    State(state): State<AppState>,
-    ProblemPath(session_id): ProblemPath<String>,
-    headers: HeaderMap,
-    body: std::result::Result<Json<Reassignment>, axum::extract::rejection::JsonRejection>,
-) -> std::result::Result<Json<Session>, Problem> {
-    let principal = state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
-
-    let payload = body.map_err(|_| {
-        Problem::from_error(&Error::InvalidArgument(
-            "the body must be JSON naming the agent the session moves to".to_string(),
-        ))
-    })?;
-
-    let session = session_store::reassign(&state.db, &session_id, &payload.agent, &principal.actor)
-        .await
-        .map_err(|err| Problem::from_error(&err))?;
-
-    state.notify();
-    Ok(Json(session))
-}
-
 /// `POST /api/v1/sessions/{id}/end`
 ///
-/// A valid bearer token is required. An unknown session is a 404.
+/// A valid bearer token is required. An unknown session is a 404. The human
+/// ends the session for everyone, with its live children, holding the session
+/// gates exclusively so no brain or artifact write is half done under it.
 pub async fn end(
     State(state): State<AppState>,
     ProblemPath(session_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<EndResult>, Problem> {
-    let principal = state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
+    let session = live(&state, &session_id).await?;
 
-    // The human ends a session from the control surface; the note is the
-    // agent's to leave, so this route takes none.
-    session_store::end(&state.db, &session_id, &principal.actor, None, None)
+    let family = session_store::family(&state.db, &session.id)
         .await
         .map_err(|err| Problem::from_error(&err))?;
+    let gates = state.session_gates.exclusive_all(&family).await;
+    // The human ends a session from the control surface; the note is the
+    // agent's to leave, so this route takes none.
+    let ended = session_store::end_session(
+        &state.db,
+        &gates,
+        &session.id,
+        &crate::author::Writer::human(),
+        None,
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
 
     // A finished brain becomes one file: the log is folded in and truncated so
     // its size is the data it holds.
-    if let Ok(Some(session)) = session_store::get(&state.db, &session_id).await
-        && let Ok(Some(brain)) = state
-            .brain
-            .open_existing(&session.project_id, &session_id)
-            .await
-        && let Err(err) = brain.checkpoint().await
-    {
-        tracing::warn!(session_id = %session_id, error = %err, "could not checkpoint the brain after end");
+    for id in &ended {
+        if let Ok(Some(row)) = session_store::lookup_id(&state.db, id).await
+            && let Ok(Some(brain)) = state.brain.open_existing(&row.project_id, &row.id).await
+            && let Err(err) = brain.checkpoint().await
+        {
+            tracing::warn!(session_id = %id, error = %err, "could not checkpoint the brain after end");
+        }
     }
+    drop(gates);
 
     state.notify();
-    Ok(Json(EndResult { ok: true }))
+    Ok(Json(EndResult { ok: true, ended }))
 }
 
 /// `GET /api/v1/sessions/{id}/brain?path=`
@@ -327,10 +381,7 @@ pub async fn brain(
     headers: HeaderMap,
     ProblemQuery(params): ProblemQuery<BrainParams>,
 ) -> std::result::Result<Json<BrainList>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let session = live(&state, &session_id).await?;
     let prefix = params.path.as_deref().unwrap_or(BOTH_NAMESPACES);
@@ -382,10 +433,7 @@ pub async fn brain_entry(
     headers: HeaderMap,
     ProblemQuery(params): ProblemQuery<BrainEntryParams>,
 ) -> std::result::Result<Json<BrainEntry>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let path = params.path.filter(|path| !path.is_empty()).ok_or_else(|| {
         Problem::from_error(&Error::InvalidArgument(
@@ -467,10 +515,7 @@ pub async fn replay(
     ProblemPath(session_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<SessionReplay>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let session = live(&state, &session_id).await?;
 
@@ -524,10 +569,7 @@ pub async fn resume(
     ProblemPath(session_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<crate::store::anchors::Resume>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let session = live(&state, &session_id).await?;
     let resumed =
@@ -547,10 +589,7 @@ pub async fn score(
     headers: HeaderMap,
     body: std::result::Result<Json<ScoreBody>, axum::extract::rejection::JsonRejection>,
 ) -> std::result::Result<Json<crate::store::anchors::Score>, Problem> {
-    let principal = state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    let principal = crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let Json(payload) = body.map_err(|_| {
         Problem::from_error(&Error::InvalidArgument(

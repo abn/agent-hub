@@ -107,34 +107,6 @@ test.describe("project tools and sessions", () => {
     ).toBe(0);
   });
 
-  test("Reassign moves the session owner", async ({ hub, page }) => {
-    const target = "reassign-probe";
-    await api(hub, "POST", "/api/v1/agents", { id: target, display_name: "Reassign probe" });
-    const session = await newSession(hub);
-    const started = await toolCall(hub, session, "session_start", {
-      project_id: hub.projectId,
-      session_name: "reassign-check",
-    });
-    const sessionId = structured(started).session_id || "";
-    expect(sessionId, "the reassign check could not start a session to move").toBeTruthy();
-
-    await goto(page, `#/projects/${encodeURIComponent(hub.projectId)}/sessions?id=${encodeURIComponent(sessionId)}`);
-    await expect(page.locator('[data-action="reassign-open"]')).toBeVisible();
-    const ownerBefore = await page.locator(".session-detail-header .meta[data-owner]").getAttribute("data-owner");
-    expect(ownerBefore, "the probe session already belongs to the target agent").not.toBe(target);
-    await page.click('[data-action="reassign-open"]');
-    const item = `[data-action="reassign"][data-agent="${target}"]`;
-    await expect(page.locator(item), "the Reassign control offered no agent to move to").toBeVisible({ timeout: 5000 });
-    await page.click(item);
-    const dialog = page.locator("dialog.dialog[open]");
-    await expect(dialog, "choosing an agent opened no confirmation dialog").toBeVisible({ timeout: 5000 });
-    expect(await dialog.innerText(), "the dialog does not name the agent it moves to").toContain(target);
-    await dialog.locator(".dialog-commit").click();
-    await expect(page.locator(".session-detail-header .meta[data-owner]")).toHaveAttribute("data-owner", target, {
-      timeout: 8000,
-    });
-  });
-
   test("a kv key is read in the aside and not in the stage", async ({ hub, page }) => {
     await goto(
       page,

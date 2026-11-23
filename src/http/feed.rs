@@ -54,10 +54,7 @@ pub async fn read(
     RawQuery(raw): RawQuery,
 ) -> std::result::Result<Json<FeedPage>, Problem> {
     let token = bearer_token(&headers);
-    state
-        .auth
-        .require_admin(token.as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, token.as_deref())?;
 
     let mut query = parse_query(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;
     // The human feed hides the hub's own audit events unless they are asked
@@ -93,10 +90,7 @@ pub async fn read_global(
     RawQuery(raw): RawQuery,
 ) -> std::result::Result<Json<FeedPage>, Problem> {
     let token = bearer_token(&headers);
-    state
-        .auth
-        .require_admin(token.as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, token.as_deref())?;
 
     let mut query = parse_query(raw.as_deref()).map_err(|err| Problem::from_error(&err))?;
     if query.kinds.is_none() {
@@ -128,10 +122,7 @@ pub async fn seen(
     headers: HeaderMap,
     body: std::result::Result<Json<SeenBody>, JsonRejection>,
 ) -> std::result::Result<Json<events::Seen>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let payload = json_body(body, "body must be JSON with an event_id field")?;
 
@@ -160,10 +151,7 @@ pub async fn dismiss(
     headers: HeaderMap,
     body: std::result::Result<Json<DismissBody>, JsonRejection>,
 ) -> std::result::Result<Json<events::Dismissed>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     let payload = json_body(body, "body must be JSON with an event_ids field")?;
     if payload.event_ids.is_empty() {
@@ -200,10 +188,7 @@ pub async fn dismiss_read(
     ProblemPath(project_id): ProblemPath<String>,
     headers: HeaderMap,
 ) -> std::result::Result<Json<events::Dismissed>, Problem> {
-    state
-        .auth
-        .require_admin(bearer_token(&headers).as_deref())
-        .map_err(|err| Problem::from_error(&err))?;
+    crate::http::auth::admin(&state, bearer_token(&headers).as_deref())?;
 
     ensure_project(&state, &project_id).await?;
 
@@ -236,14 +221,13 @@ fn parse_query(raw: Option<&str>) -> std::result::Result<FeedQuery, Error> {
     let mut since = None;
     let mut before = None;
     let mut limit = None;
-    let mut session_id = None;
+    let mut filters = crate::http::filters::Params::default();
     let mut kinds: Vec<String> = Vec::new();
 
     for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
         match key.as_ref() {
             "since" => since = Some(value.into_owned()),
             "before" => before = Some(value.into_owned()),
-            "session" | "session_id" => session_id = Some(value.into_owned()),
             "limit" => {
                 limit = Some(value.parse::<i64>().map_err(|_| {
                     Error::InvalidArgument(format!("limit must be an integer, got '{value}'"))
@@ -263,12 +247,15 @@ fn parse_query(raw: Option<&str>) -> std::result::Result<FeedQuery, Error> {
                 kinds.push(value.into_owned());
             }
             other => {
-                return Err(Error::InvalidArgument(format!(
-                    "unknown query parameter '{other}'"
-                )));
+                if !filters.take(other, &value)? {
+                    return Err(Error::InvalidArgument(format!(
+                        "unknown query parameter '{other}'"
+                    )));
+                }
             }
         }
     }
+    let session_id = filters.session.clone();
 
     Ok(FeedQuery {
         since,
@@ -281,6 +268,6 @@ fn parse_query(raw: Option<&str>) -> std::result::Result<FeedQuery, Error> {
         // These are the human's surfaces: what the human dismissed stays out.
         // An agent's read builds its own query and still sees every event.
         hide_dismissed: true,
-        author: Default::default(),
+        author: filters.author(),
     })
 }

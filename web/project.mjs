@@ -407,7 +407,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "", project = n
   const title = project?.display_name || id;
   const meta = [
     "feed",
-    stats && stats.agents_active != null ? `${count(stats.agents_active, "agent", "agents")} active` : "",
+    stats && stats.sessions_live != null ? `${count(stats.sessions_live, "agent", "agents")} active` : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -503,7 +503,7 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, pr
   // a slow paint off the screen, and without it every detail returned empty.
   if (selectedSession) detailHTML = await sessionDetailView(id, selectedSession.id, gen, resumeMode);
   const meta = selectedSession
-    ? `${selectedSession.agent} · ${formatBytes(selectedSession.brain_bytes || 0)}`
+    ? `${selectedSession.started_label ?? ""} · ${formatBytes(selectedSession.brain_bytes || 0)}`
     : "";
 
   let stageHead = shellStageHead(
@@ -657,7 +657,7 @@ export async function projectScreen(params, gen, path) {
   if (stale(gen)) return;
 
   const agentsText =
-    stats && stats.agents_active != null ? `${count(stats.agents_active, "agent", "agents")} active` : "";
+    stats && stats.sessions_live != null ? `${count(stats.sessions_live, "agent", "agents")} active` : "";
   const mobileBar = shellMobileBar(
     project.display_name || id,
     [agentsText, footprint].filter(Boolean).join(" · "),
