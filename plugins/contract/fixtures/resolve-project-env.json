@@ -11,7 +11,7 @@
       "is_repo": true,
       "top_level": "/work/agent-hub",
       "origin_url": "git@github.com:agync/agent-hub.git",
-      "branch": "feat/claude-mod",
+      "branch": "feat/login-flow",
       "detached": false
     },
     "files": {
@@ -22,12 +22,12 @@
       "pinned",
       "agent-hub"
     ],
-    "personal_project": "abn-claude"
+    "personal_project": "dev-claude"
   },
   "expected": {
     "project_id": "ops",
     "project_source": "env",
-    "session_name": "feat-claude-mod",
+    "session_name": "feat-login-flow",
     "session_source": "branch",
     "context_line": null
   }

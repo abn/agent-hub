@@ -190,8 +190,8 @@ the session is doing rather than where it got to.
 `session_brief(project_id)` puts what an agent would otherwise gather from
 `inbox_read`, `session_list`, `feed_read` and the knowledge base into one compact
 result. It needs read access to the project, so a confidential project needs a
-grant. It makes no record and moves no feed cursor; the answers it lists count as
-delivered. Every entry is a pointer with its text cut to 200 characters,
+grant. It makes no record and moves no feed cursor; it marks nothing delivered, and its own
+trailer leaves out the answers it lists. Every entry is a pointer with its text cut to 200 characters,
 `truncated: true` when cut, except the previous session's handoff note, which is
 carried in full because it is what the brief is for. Each section counts what it
 left out in `more`. A count stops at 10,000, and a section whose count stopped
@@ -219,10 +219,11 @@ before it, and an agent that has never read the feed then gets events from that
 older session's last activity rather than from the resumed one's. After starting
 a new session name the two orders agree.
 
-The notification trailer rides on the brief as on any tool and advances the
-caller's attention cursor, so an answer the brief carries counts as delivered:
-the trailer leaves it out rather than repeat it, though a delivery whose cursor
-write fails may repeat. The brief itself does not depend on that cursor, so an
+The notification trailer rides on the brief as on any tool, but the brief marks
+nothing delivered: the trailer on that call leaves out the answers it lists, and a
+later session's trailer still reports an answer to a question asked in that
+session. Other calls advance the caller's attention cursor as before, and a
+delivery whose cursor write fails may repeat. The brief itself does not depend on that cursor, so an
 answer already nudged on an earlier call is still in it, and a later brief over
 the same window shows it again. The feed cursor is left alone, so a `feed_read`
 after a brief reads the same events in full.

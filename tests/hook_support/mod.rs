@@ -80,6 +80,9 @@ impl Rig {
             .env_remove("HUB_SESSION")
             .env_remove("HUB_AGENT_ID")
             .env_remove("HUB_WAKE")
+            // A test run from inside a headless Claude Code run must not
+            // read as one: the watcher steps aside there.
+            .env_remove("CLAUDE_CODE_ENTRYPOINT")
             .env_remove("CLAUDE_PLUGIN_OPTION_HUB_URL")
             .env_remove("CLAUDE_PLUGIN_OPTION_HUB_TOKEN")
             .env_remove("CLAUDE_PLUGIN_OPTION_AGENT_NAME")

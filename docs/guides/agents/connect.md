@@ -85,7 +85,8 @@ config fails loudly instead of opening a store as the local admin.
 ## OpenCode and Antigravity
 
 OpenCode takes a remote HTTP entry in `opencode.jsonc`, with the token read from
-a file:
+the `HUB_TOKEN` environment variable. Copy it from `[client] token` in
+`config.toml`, which `agent-hub enrol` writes:
 
 ```jsonc
 {
@@ -94,7 +95,7 @@ a file:
       "type": "remote",
       "url": "http://hub.lan:8080/mcp",
       "headers": {
-        "Authorization": "Bearer {file:~/.config/agent-hub/token}",
+        "Authorization": "Bearer {env:HUB_TOKEN}",
         "X-Agent-Id": "opencode"
       }
     }

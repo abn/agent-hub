@@ -27,7 +27,8 @@ arrives it drains what is pending, prints each item on stderr, direct items
 first, and exits 2. A second watcher for the same session exits 0 at once.
 
 HUB_WAKE chooses which items wake the agent: direct (the default), all or
-never. One wake is allowed per 300 seconds per session.
+never. One wake is allowed per 300 seconds per session. A run Claude Code makes
+headless (claude -p, the Agent SDK) exits 0 at once, so it can end.
 
 exit 0 nothing to report, 2 items to show, 64 usage.
 ";
@@ -75,6 +76,17 @@ fn parse_args(args: &[String]) -> Result<(Harness, u64), String> {
     }
 }
 
+/// Whether Claude Code is running headless: `claude -p` and the Agent SDKs set
+/// `CLAUDE_CODE_ENTRYPOINT` to `sdk-cli`, `sdk-ts` or `sdk-py`. An idle wake has
+/// no one to wake there, and a watcher still holding a peek keeps the run from
+/// ending.
+fn headless(env: &dyn Fn(&str) -> Option<String>) -> bool {
+    matches!(
+        env("CLAUDE_CODE_ENTRYPOINT").as_deref(),
+        Some("sdk-cli" | "sdk-ts" | "sdk-py")
+    )
+}
+
 /// Run the watcher and return its exit code. The time `--max-seconds` allows
 /// counts from the start of the process, so reading stdin is part of it.
 pub fn run_watch(args: &[String]) -> u8 {
@@ -86,6 +98,9 @@ pub fn run_watch(args: &[String]) -> u8 {
             return 64;
         }
     };
+    if headless(&process_env) {
+        return 0;
+    }
     let deadline = started + Duration::from_secs(max_seconds);
     let attempt = std::panic::catch_unwind(|| {
         let wait = STDIN_WAIT.min(deadline.saturating_duration_since(Instant::now()));
@@ -136,7 +151,9 @@ pub enum Outcome {
 /// started unless a call's budget still fits. A watcher stops, cooperatively,
 /// when the session's state is gone or names another hub session, which is how
 /// `session-end` ends it. That is checked after every peek returns, so a
-/// watcher can outlast the end of its session by one held peek.
+/// watcher can outlast the end of its session by one held peek. A hub that
+/// answers that the session has ended stops it too, and the stored session id
+/// is forgotten so the next prompt starts the session again.
 ///
 /// The watcher lock comes back beside the outcome, so the caller holds it until
 /// the outcome has been shown.
@@ -191,6 +208,10 @@ async fn hold(
         let began = Instant::now();
         let peek = match hub.peek(Some(session_id), wait, cursor.as_deref()).await {
             Ok(peek) => peek,
+            Err(failure) if super::session_ended(&failure) => {
+                forget(store, session_id);
+                return Outcome::Quiet;
+            }
             Err(failure) => {
                 warn("watch", &super::describe(&failure));
                 pause(&mut backoff, left()).await;
@@ -238,12 +259,26 @@ async fn hold(
                     Outcome::Quiet
                 };
             }
+            Err(failure) if super::session_ended(&failure) => {
+                forget(store, session_id);
+                return Outcome::Quiet;
+            }
             Err(failure) => {
                 warn("watch", &super::describe(&failure));
                 pause(&mut backoff, left()).await;
             }
         }
     }
+}
+
+/// Drop the stored hub session id when it is still `session_id`, which the hub
+/// has ended. The state stays, so the next prompt starts a session again.
+fn forget(store: &Store, session_id: &str) {
+    store.update_existing(|state| {
+        if state.session_id.as_deref() == Some(session_id) {
+            state.session_id = None;
+        }
+    });
 }
 
 /// Sleep the backoff, bounded by what is left of the watch, and double it.

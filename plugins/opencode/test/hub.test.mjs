@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import { createHub, HubError } from "../hub.mjs";
+import { CLIENT_INFO, createHub, HubError } from "../hub.mjs";
 import { startFakeHub } from "./fake-hub.mjs";
 
 let fake;
@@ -185,6 +186,13 @@ describe("replies that are not a clean success", () => {
     expect(posts[0].headers["mcp-protocol-version"]).toBeUndefined();
     expect(posts[1].headers["mcp-protocol-version"]).toBe("2025-03-26");
     expect(posts[2].headers["mcp-protocol-version"]).toBe("2025-03-26");
+  });
+});
+
+describe("the client identity", () => {
+  it("reports the version in package.json", () => {
+    const { version } = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    expect(CLIENT_INFO).toEqual({ name: "agent-hub-opencode", version });
   });
 });
 

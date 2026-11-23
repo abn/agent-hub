@@ -41,6 +41,9 @@ macro_rules! embed {
     };
 }
 
+/// Everything the release archive carries: `plugins/antigravity` less its
+/// README, and the whole of `skills/agent-hub`. The `skill_tree_is_installed`
+/// test walks the skill directory, so a file added there and missing here fails.
 const PLUGIN_FILES: &[Embedded] = &[
     embed!("plugin.json", "../../../plugins/antigravity/plugin.json"),
     embed!(
@@ -58,6 +61,10 @@ const PLUGIN_FILES: &[Embedded] = &[
         "../../../skills/agent-hub/SKILL.md"
     ),
     embed!(
+        "skills/agent-hub/bootstrap.md",
+        "../../../skills/agent-hub/bootstrap.md"
+    ),
+    embed!(
         "skills/agent-hub/references/artifacts.md",
         "../../../skills/agent-hub/references/artifacts.md"
     ),
@@ -68,6 +75,10 @@ const PLUGIN_FILES: &[Embedded] = &[
     embed!(
         "skills/agent-hub/references/feed-inbox.md",
         "../../../skills/agent-hub/references/feed-inbox.md"
+    ),
+    embed!(
+        "skills/agent-hub/references/harness.md",
+        "../../../skills/agent-hub/references/harness.md"
     ),
     embed!(
         "skills/agent-hub/references/knowledge-base.md",

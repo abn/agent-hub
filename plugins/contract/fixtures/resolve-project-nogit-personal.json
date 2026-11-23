@@ -14,10 +14,10 @@
     },
     "files": {},
     "known_projects": [],
-    "personal_project": "abn-claude"
+    "personal_project": "dev-claude"
   },
   "expected": {
-    "project_id": "abn-claude",
+    "project_id": "dev-claude",
     "project_source": "personal",
     "session_name": "claude-3f9a1c27",
     "session_source": "harness_session",

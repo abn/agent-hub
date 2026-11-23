@@ -15,7 +15,7 @@
       {
         "id": "evt_01B",
         "kind": "comment",
-        "title": "human on \"The board\": move the docs task to now",
+        "title": "human on \"Task list\": move the docs task to now",
         "project": "agent-hub",
         "direct": true
       },
@@ -38,14 +38,14 @@
   "expected": {
     "lines": [
       "- [answer] Answer to: which port? (agent-hub, evt_01A)",
-      "- [comment] human on \"The board\": move the docs task to now (agent-hub, evt_01B)",
+      "- [comment] human on \"Task list\": move the docs task to now (agent-hub, evt_01B)",
       "- [page] Page changed: /fs/ops.md (agent-hub, evt_01C)",
       "- [artifact] Artifact updated: Roadmap (agent-hub, evt_01D)"
     ],
     "wake": true,
     "watch_lines": [
       "- [answer] Answer to: which port? (agent-hub, evt_01A)",
-      "- [comment] human on \"The board\": move the docs task to now (agent-hub, evt_01B)",
+      "- [comment] human on \"Task list\": move the docs task to now (agent-hub, evt_01B)",
       "- [page] Page changed: /fs/ops.md (agent-hub, evt_01C)",
       "- [artifact] Artifact updated: Roadmap (agent-hub, evt_01D)"
     ]

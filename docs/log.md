@@ -4,6 +4,53 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-11-23
+
+### Hook CLI: one agent name, shared sessions, headless runs
+
+* **Update**: the [hook CLI contract](/reference/hook-cli.md) resolves the
+  Claude plugin options before `HUB_*`, so hooks and the plugin's MCP entry act
+  as one agent, and fixes the Antigravity agent name to `antigravity` unless
+  `HUB_AGENT_ID` is set. The session block carries one line when the hooks run
+  under another name than the harness's MCP connection.
+* **Update**: a prompt whose session the hub reports as ended starts it again,
+  `session-end` leaves a hub session open while another live instance of the
+  harness shares it, and `session-end` removes a watcher lock file no watcher
+  holds.
+* **Update**: `watch` exits at once for a headless Claude Code run
+  (`CLAUDE_CODE_ENTRYPOINT` of `sdk-cli`, `sdk-ts` or `sdk-py`), with
+  `HUB_WAKE=never` as the manual switch. The wake cooldown text now reads
+  `last_wake_ms` and says a blocked item waits for the next prompt. The
+  Antigravity hook timeout is `20000`.
+
+### Harness plugins: review fixes
+
+* **Update**: [Harness plugins](/guides/agents/plugins.md), the Claude Code and
+  Antigravity plugin READMEs and the bootstrap guide say to remove a hand-written
+  `agent-hub` MCP entry and hooks before installing a plugin, and to set
+  `HUB_WAKE=never` for headless `claude -p` runs.
+* **Update**: [Connect your first agent](/start/connect-first-agent.md) and the
+  README lead with the plugin and pass `--proxy` on every stdio entry. The Gemini
+  mention is now Antigravity.
+* **Update**: the OpenCode examples read the token from `HUB_TOKEN`, and the
+  guides name `config.toml` as what `enrol` writes. No page mentions a token file
+  that `enrol` creates.
+
+### OpenCode plugin: block through the context hook
+
+* **Update**: the [OpenCode plugin](/guides/agents/plugins.md) injects the
+  session block through the context hook when the host has no instructions API
+  (OpenCode 2.1.2 has none), and every optional host API is guarded. A session
+  first met on a context call adopts it there, and the block is injected on the
+  first call and after compaction.
+* **Update**: the OpenCode README's `tokenFile` example names a file the user
+  creates, and the client version is read from `package.json`.
+* **Update**: `session_brief` marks nothing delivered. Its trailer leaves out
+  the answers it lists, and a later session's trailer still reports answers
+  asked in that session. The skill, the tools reference and the operating guide
+  say so.
+* **Update**: the Antigravity README gives the hook timeout as `20000`.
+
 ## 2026-11-22
 
 ### Landing page: harness plugins

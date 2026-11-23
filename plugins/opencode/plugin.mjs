@@ -25,6 +25,7 @@ const EVENT_TYPES = [
 const pendingText = (lines) => `<agent-hub>\nPending:\n${lines.join("\n")}\n</agent-hub>`;
 
 const RETRY_START_MS = 60_000;
+const ADOPT_WAIT_MS = 3000;
 
 export function createPlugin({
   env = process.env,
@@ -47,15 +48,33 @@ export function createPlugin({
       const sessions = new Map();
       const wakes = new Map();
 
-      await ctx.mcp.transform((editor) => {
-        if (editor.get(MCP_NAME)) return;
-        const headers = { "X-Agent-Id": config.agentName };
-        if (config.token) headers.Authorization = `Bearer ${config.token}`;
-        editor.set(MCP_NAME, { type: "remote", url: `${config.url}/mcp`, headers });
-      });
+      // Every host API beyond the context hook is optional: a host that lacks one
+      // loses that feature and the plugin still follows the session.
+      if (typeof ctx.mcp?.transform === "function") {
+        await ctx.mcp.transform((editor) => {
+          if (editor.get(MCP_NAME)) return;
+          const headers = { "X-Agent-Id": config.agentName };
+          if (config.token) headers.Authorization = `Bearer ${config.token}`;
+          editor.set(MCP_NAME, { type: "remote", url: `${config.url}/mcp`, headers });
+        });
+      }
 
-      const putEntry = (sessionID, value) =>
-        ctx.session.instructions.entry.put({ sessionID, key: ENTRY_KEY, value }).catch(() => {});
+      // The stable text goes into the session's instructions when the host has
+      // them. Without them, or when the put is refused, it waits on the session
+      // and the context hook injects it on the next call.
+      async function putEntry(session, value) {
+        const put = ctx.session?.instructions?.entry?.put;
+        if (typeof put === "function") {
+          try {
+            await put.call(ctx.session.instructions.entry, { sessionID: session.key, key: ENTRY_KEY, value });
+            session.stable = null;
+            return;
+          } catch {
+            // falls back to the context hook below
+          }
+        }
+        session.stable = value;
+      }
 
       // The cooldown lives in the state file and in memory, so an unwritable state
       // directory still holds it for this process.
@@ -75,7 +94,7 @@ export function createPlugin({
       // One wake prompt is in flight per session, and a second wake inside the
       // cooldown waits in the queue for the context hook.
       async function flush(session) {
-        if (!session.queue.length || session.busy || session.waking) return;
+        if (!session.queue.length || session.busy || session.waking || typeof ctx.session?.prompt !== "function") return;
         const last = lastWake(session.key);
         if (last !== null && Math.floor(now() / 1000) - last < WAKE_COOLDOWN_SECONDS) return;
         const lines = session.queue.splice(0);
@@ -114,7 +133,7 @@ export function createPlugin({
         if (session.parentID) {
           const parent = sessions.get(session.parentID);
           await parent?.running?.catch(() => {});
-          if (alive(session)) await putEntry(session.key, subagentText(parent?.info?.hubSessionId));
+          if (alive(session)) await putEntry(session, subagentText(parent?.info?.hubSessionId));
           return;
         }
         let info;
@@ -139,7 +158,7 @@ export function createPlugin({
           session_name: info.sessionName,
           session_id: info.hubSessionId,
         });
-        await putEntry(session.key, info.block);
+        await putEntry(session, info.block);
         if (alive(session) && info.hubSessionId) loop.follow(session.key, info.hubSessionId);
       }
 
@@ -164,6 +183,7 @@ export function createPlugin({
           directory,
           queue: [],
           startup: [],
+          stable: null,
           busy: false,
           waking: false,
           info: null,
@@ -183,7 +203,7 @@ export function createPlugin({
 
       // A session that was open before the plugin loaded never raised created.
       function adopt(sessionID) {
-        if (sessions.has(sessionID)) return;
+        if (sessions.has(sessionID)) return undefined;
         const session = createSession(sessionID, null, ctx.location?.directory ?? process.cwd());
         session.running = (async () => {
           let found;
@@ -201,6 +221,7 @@ export function createPlugin({
           session.running = null;
         });
         track(session.running);
+        return session;
       }
 
       function refocus() {
@@ -228,20 +249,42 @@ export function createPlugin({
         await hub.callTool("session_end", { session_id: session.info.hubSessionId }, { deadline: "hook" }).catch(() => {});
       }
 
-      await ctx.session.hook("context", (event) => {
-        const session = sessions.get(event.sessionID);
-        if (!session) {
-          adopt(event.sessionID);
-          return;
-        }
+      const hook = async (name, callback) => {
+        if (typeof ctx.session?.hook === "function") await ctx.session.hook(name, callback);
+      };
+
+      function inject(session, event) {
         touch(session);
         const seen = new Set();
         const startup = session.startup.splice(0).filter((item) => !seen.has(item.id) && seen.add(item.id));
+        if (session.stable) {
+          event.system.push({ type: "text", text: session.stable });
+          session.stable = null;
+        }
         const lines = [...startup.map(noticeLine), ...session.queue.splice(0)];
         if (lines.length) event.system.push({ type: "text", text: pendingText(lines) });
+      }
+
+      // A context call for a session the plugin has not met means a turn is
+      // already running, so the session starts busy. The call waits a moment for
+      // the start, so the first model call of the session carries the block.
+      await hook("context", (event) => {
+        const session = sessions.get(event.sessionID);
+        if (session) return inject(session, event);
+        const adopted = adopt(event.sessionID);
+        if (!adopted) return undefined;
+        adopted.busy = true;
+        let timer;
+        const limit = new Promise((resolve) => {
+          timer = setTimeout(resolve, ADOPT_WAIT_MS);
+        });
+        return Promise.race([adopted.running?.catch(() => {}), limit]).then(() => {
+          clearTimeout(timer);
+          if (alive(adopted)) inject(adopted, event);
+        });
       });
 
-      await ctx.session.hook("prompt", async (event) => {
+      await hook("prompt", async (event) => {
         const session = sessions.get(event.sessionID);
         if (!session) return;
         touch(session);
@@ -254,7 +297,7 @@ export function createPlugin({
         }
       });
 
-      await ctx.session.hook("compaction", (event) => {
+      await hook("compaction", (event) => {
         const session = sessions.get(event.sessionID);
         if (session?.info) event.system.push({ type: "text", text: keepInstruction(session.info) });
       });
@@ -282,7 +325,7 @@ export function createPlugin({
             }
             break;
           case "session.compaction.ended":
-            if (session?.info) await putEntry(session.key, session.info.block);
+            if (session?.info) await putEntry(session, session.info.block);
             break;
           case "session.deleted":
             if (!session) break;
@@ -297,7 +340,7 @@ export function createPlugin({
       }
 
       const events = (async () => {
-        while (!controller.signal.aborted) {
+        while (!controller.signal.aborted && typeof ctx.event?.subscribe === "function") {
           try {
             for await (const event of ctx.event.subscribe({ types: EVENT_TYPES, signal: controller.signal })) {
               await onEvent(event).catch(() => {});

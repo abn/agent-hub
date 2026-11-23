@@ -311,7 +311,7 @@ fn session_end_stops_the_watcher_without_waking_the_session() {
     assert!(!rig.state_file("claude", SESSION).exists());
     assert!(
         rig.watch_lock_file("claude", SESSION).exists(),
-        "the lock lives on one inode and is never deleted"
+        "a lock a watcher holds is never deleted"
     );
 
     human_comment(&rig, &artifact, "Anyone there?");
@@ -458,5 +458,81 @@ fn a_watcher_with_no_hub_session_or_a_bad_option_never_wakes() {
         output.status.code(),
         Some(64),
         "exit 2 would wake the agent: {output:?}"
+    );
+}
+
+fn end_session(rig: &Rig) {
+    let ended = rig.hook(
+        "claude",
+        "session-end",
+        &json!({"session_id": SESSION, "cwd": rig.work_dir()}),
+    );
+    assert_eq!(ended.status.code(), Some(0), "{ended:?}");
+}
+
+#[test]
+fn session_end_removes_a_watch_lock_nobody_holds_and_keeps_one_that_is_held() {
+    let (rig, _) = started("watch-lock-cleanup");
+    let lock = rig.watch_lock_file("claude", SESSION);
+    std::fs::write(&lock, "").expect("leave a lock file behind");
+    end_session(&rig);
+    assert!(!lock.exists(), "a lock file nobody holds is swept");
+
+    let (rig, _) = started("watch-lock-kept");
+    let _held = hold_watch_lock(&rig);
+    end_session(&rig);
+    assert!(
+        rig.watch_lock_file("claude", SESSION).exists(),
+        "a lock another process holds is never deleted"
+    );
+}
+
+#[test]
+fn a_headless_claude_run_gets_no_watcher() {
+    let (rig, _) = started("watch-headless");
+    for entrypoint in ["sdk-cli", "sdk-ts", "sdk-py"] {
+        let mut command = rig.command(&["watch", "--harness", "claude"]);
+        command.env("CLAUDE_CODE_ENTRYPOINT", entrypoint);
+        let began = Instant::now();
+        let (output, _) = spawn_with_stdin(command, &stdin(&rig)).finish(Duration::from_secs(5));
+        assert_eq!(output.status.code(), Some(0), "{entrypoint}: {output:?}");
+        assert!(began.elapsed() < Duration::from_secs(3), "{entrypoint}");
+        assert!(
+            !rig.watch_lock_file("claude", SESSION).exists(),
+            "{entrypoint}: nothing was watched"
+        );
+    }
+
+    let mut interactive = rig.command(&["watch", "--harness", "claude", "--max-seconds", "3"]);
+    interactive.env("CLAUDE_CODE_ENTRYPOINT", "cli");
+    let (output, took) =
+        spawn_with_stdin(interactive, &stdin(&rig)).finish(Duration::from_secs(10));
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(
+        rig.watch_lock_file("claude", SESSION).exists(),
+        "an interactive run is watched, took {took:?}"
+    );
+}
+
+#[test]
+fn a_watcher_whose_hub_session_has_ended_stops_and_forgets_it() {
+    let (rig, _) = started("watch-ended");
+    let hub_session = rig.state("claude", SESSION)["session_id"]
+        .as_str()
+        .expect("a hub session id")
+        .to_string();
+    rig.call_as_claude("session_end", &json!({"session_id": hub_session}));
+
+    let child = watch(&rig, &["--max-seconds", "30"]);
+    let (output, took) = child.finish(Duration::from_secs(8));
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(
+        took < Duration::from_secs(6),
+        "it did not loop on the refusal: {took:?}"
+    );
+    assert!(
+        rig.state("claude", SESSION).get("session_id").is_none(),
+        "the next prompt starts the session again"
     );
 }

@@ -283,3 +283,50 @@ fn the_installed_plugin_passes_the_antigravity_validator() {
         .expect("run agy");
     assert!(out.status.success(), "{out:?}");
 }
+
+/// Every file under `dir`, as a path relative to it.
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+        for entry in fs::read_dir(dir).expect("read a directory") {
+            let path = entry.expect("a directory entry").path();
+            if path.is_dir() {
+                walk(root, &path, out);
+            } else {
+                out.push(
+                    path.strip_prefix(root)
+                        .expect("under the root")
+                        .to_path_buf(),
+                );
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(dir, dir, &mut out);
+    out.sort();
+    out
+}
+
+#[test]
+fn the_installed_skill_is_the_skill_directory_the_release_archive_carries() {
+    let home = TempDir::new("setup-agy-skill");
+    assert!(setup(&home, &["antigravity"]).status.success());
+    let shipped = Path::new(env!("CARGO_MANIFEST_DIR")).join("skills/agent-hub");
+    let installed = plugin_dir(&home).join("skills/agent-hub");
+
+    let wanted = files_under(&shipped);
+    assert!(
+        wanted
+            .iter()
+            .any(|path| path.ends_with("references/harness.md")),
+        "the directory under test holds the harness reference: {wanted:?}"
+    );
+    assert_eq!(files_under(&installed), wanted, "the same set of files");
+    for relative in &wanted {
+        assert_eq!(
+            fs::read(installed.join(relative)).unwrap(),
+            fs::read(shipped.join(relative)).unwrap(),
+            "{} is byte for byte the shipped file",
+            relative.display()
+        );
+    }
+}

@@ -36,11 +36,12 @@ The harness's hook JSON is read on stdin and its hook output is printed on
 stdout. The command always exits 0 and always prints valid output: on any
 failure it prints the harness's no-op and one line on stderr.
 
-The hub and token come from HUB_URL and HUB_TOKEN, then for claude from
+The hub, the token and the agent name come, for claude, from
 CLAUDE_PLUGIN_OPTION_HUB_URL, CLAUDE_PLUGIN_OPTION_HUB_TOKEN and
-CLAUDE_PLUGIN_OPTION_AGENT_NAME, then from config.toml. HUB_AGENT_ID names the
-agent and defaults to the harness. HUB_PROJECT and HUB_SESSION pin the project
-and the session name.
+CLAUDE_PLUGIN_OPTION_AGENT_NAME, which the plugin's MCP entry uses too, then
+from HUB_URL, HUB_TOKEN and HUB_AGENT_ID, then from config.toml. For
+antigravity the agent name is HUB_AGENT_ID or antigravity. The name defaults to
+the harness. HUB_PROJECT and HUB_SESSION pin the project and the session name.
 ";
 
 /// Peeks on an Antigravity prompt are at least this many milliseconds apart.
@@ -49,6 +50,9 @@ const ANTIGRAVITY_PEEK_GAP_MS: u64 = 5_000;
 const START_RETRY_GAP_MS: u64 = 60_000;
 /// The whole of a session start, from the process start to its last byte.
 const START_DEADLINE: Duration = Duration::from_secs(15);
+/// A state file untouched for this long is a crashed instance's leftover, not
+/// another live instance of the session.
+const SHARED_SESSION_WINDOW: Duration = Duration::from_secs(24 * 60 * 60);
 /// The whole of every other event.
 const HOOK_DEADLINE: Duration = Duration::from_secs(10);
 /// How far past its deadline the process lets the run finish before it gives
@@ -413,6 +417,7 @@ async fn begin(run: &Run<'_>) -> Result<bundle::Started, String> {
         hub: &hub,
         harness_name: run.harness.name(),
         agent_name: &agent_name,
+        name_note: hub.settings().name_note(),
         harness_session_id: &run.input.harness_session_id,
         cwd: &cwd,
         env: run.env,
@@ -436,14 +441,49 @@ fn describe(failure: &crate::client::Failure) -> String {
     }
 }
 
+/// Why a prompt could not read what is waiting.
+enum Unread {
+    /// The hub says the session has ended.
+    Ended,
+    Failed(String),
+}
+
+impl From<String> for Unread {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+/// Whether the hub refused because the session has ended, which another
+/// instance sharing the session may have done.
+pub(crate) fn session_ended(failure: &crate::client::Failure) -> bool {
+    let crate::client::Failure::Tool(error) = failure else {
+        return false;
+    };
+    error
+        .pointer("/error/code")
+        .and_then(serde_json::Value::as_str)
+        == Some("conflict")
+        && error
+            .pointer("/error/message")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|message| message.contains("has ended"))
+}
+
 /// Peek at what is waiting for the session and, only when something is,
 /// deliver it once. The lines are the notices, in the order the hub gave them.
-async fn peek_and_drain(run: &Run<'_>, session_id: &str) -> Result<Vec<String>, String> {
+async fn peek_and_drain(run: &Run<'_>, session_id: &str) -> Result<Vec<String>, Unread> {
     let (hub, _) = run.hub()?;
     let waiting = hub
         .peek(Some(session_id), 0, None)
         .await
-        .map_err(|f| describe(&f))?
+        .map_err(|failure| {
+            if session_ended(&failure) {
+                Unread::Ended
+            } else {
+                Unread::Failed(describe(&failure))
+            }
+        })?
         .count;
     if waiting == 0 {
         return Ok(Vec::new());
@@ -464,21 +504,27 @@ async fn peek_and_drain(run: &Run<'_>, session_id: &str) -> Result<Vec<String>, 
     }
 }
 
+/// Start the hub session a prompt finds missing, unless a start failed within
+/// the last minute. The first call of an Antigravity conversation always starts.
+async fn restart(run: &Run<'_>, state: &State, first_call: bool) -> Result<Output, String> {
+    let recently_failed = state
+        .start_failed_ms
+        .is_some_and(|at| run.now_ms.saturating_sub(at) < START_RETRY_GAP_MS);
+    if recently_failed && !first_call {
+        return Ok(Output::default());
+    }
+    let output = start(run).await?;
+    run.store.update(|state| state.prompts = 1);
+    Ok(output)
+}
+
 async fn prompt(run: &Run<'_>) -> Result<Output, String> {
     let antigravity = run.harness == Harness::Antigravity;
     let state = run.store.read();
 
     let first_call = antigravity && run.input.invocation_num == Some(0);
     if state.session_id.is_none() || first_call {
-        let recently_failed = state
-            .start_failed_ms
-            .is_some_and(|at| run.now_ms.saturating_sub(at) < START_RETRY_GAP_MS);
-        if recently_failed && !first_call {
-            return Ok(Output::default());
-        }
-        let output = start(run).await?;
-        run.store.update(|state| state.prompts = 1);
-        return Ok(output);
+        return restart(run, &state, first_call).await;
     }
 
     let state = run.store.update(|state| state.prompts += 1);
@@ -508,11 +554,17 @@ async fn prompt(run: &Run<'_>) -> Result<Output, String> {
 
     let lines = match peek_and_drain(run, &session_id).await {
         Ok(lines) => lines,
-        Err(message) if antigravity => {
+        Err(Unread::Ended) => {
+            // Another instance of the harness ended the session they share.
+            // Forget it and start again, as for a conversation with none.
+            let state = run.store.update(|state| state.session_id = None);
+            return restart(run, &state, false).await;
+        }
+        Err(Unread::Failed(message)) if antigravity => {
             warn("hook", &message);
             Vec::new()
         }
-        Err(message) => return Err(message),
+        Err(Unread::Failed(message)) => return Err(message),
     };
 
     let context = if antigravity {
@@ -676,10 +728,13 @@ fn message_text(entry: &serde_json::Value) -> Option<String> {
 /// End the hub session. The state goes first: a watcher of the session reads
 /// its absence as the order to stop, so it stops even when the hub is not
 /// answering. When the state lock cannot be taken the state stays and the
-/// watcher stops at its own time.
+/// watcher stops at its own time. The hub session is left open when another
+/// live instance of the harness shares it, as two on one branch do.
 async fn session_end(run: &Run<'_>) -> Result<Output, String> {
     let state = run.store.read();
-    if !run.store.remove() {
+    if run.store.remove() {
+        run.store.remove_watch_lock_if_free();
+    } else {
         warn(
             "hook",
             "the session state is locked; the watcher stops on its own",
@@ -688,6 +743,12 @@ async fn session_end(run: &Run<'_>) -> Result<Output, String> {
     let Some(session_id) = &state.session_id else {
         return Ok(Output::default());
     };
+    if run
+        .store
+        .shared_with_another(session_id, SHARED_SESSION_WINDOW)
+    {
+        return Ok(Output::default());
+    }
     let (hub, _) = run.hub()?;
     let mut conn = hub.open(HOOK_BUDGET).await.map_err(|f| describe(&f))?;
     let result = conn

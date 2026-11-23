@@ -2,9 +2,9 @@
   "name": "context-no-session-id",
   "input": {
     "project_id": "agent-hub",
-    "session_name": "feat-claude-mod",
+    "session_name": "feat-login-flow",
     "session_id": null,
-    "actor": "abn/claude",
+    "actor": "dev/claude",
     "brief": [],
     "anchor": null,
     "handoff": [],
@@ -12,7 +12,7 @@
     "pending": []
   },
   "expected": {
-    "text": "<agent-hub>\nproject agent-hub | session feat-claude-mod | you are abn/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\nDo not call session_brief; this block is the brief.\n</agent-hub>",
+    "text": "<agent-hub>\nproject agent-hub | session feat-login-flow | you are dev/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-login-flow\").\nDo not call session_brief; this block is the brief.\n</agent-hub>",
     "truncated": false
   }
 }

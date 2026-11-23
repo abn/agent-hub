@@ -4,7 +4,7 @@
     "harness": "antigravity",
     "event": "prompt",
     "output": {
-      "context": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\nDo not call session_brief; this block is the brief.\nSince your last look: 3 answers, 2 comments on your artifacts, 1 page changed.\nLast anchor (phase \"plugins design\", 2h ago):\nDesign approved.\nNext: build the hook CLI.\nHandoff:\nResume with the hook CLI tests.\nKB index:\n# Index\n- ops.md\n- plugins.md\nPending:\n- [comment] human on \"The board\": move the docs task to now (agent-hub, evt_01B)\n</agent-hub>",
+      "context": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-login-flow\").\nDo not call session_brief; this block is the brief.\nSince your last look: 3 answers, 2 comments on your artifacts, 1 page changed.\nLast anchor (phase \"plugins design\", 2h ago):\nDesign approved.\nNext: build the hook CLI.\nHandoff:\nResume with the hook CLI tests.\nKB index:\n# Index\n- ops.md\n- plugins.md\nPending:\n- [comment] human on \"Task list\": move the docs task to now (agent-hub, evt_01B)\n</agent-hub>",
       "compaction_instructions": null
     }
   },
@@ -12,7 +12,7 @@
     "stdout_json": {
       "injectSteps": [
         {
-          "ephemeralMessage": "<agent-hub>\nproject agent-hub | session feat-claude-mod (s_01J8) | you are abn/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-claude-mod\").\nDo not call session_brief; this block is the brief.\nSince your last look: 3 answers, 2 comments on your artifacts, 1 page changed.\nLast anchor (phase \"plugins design\", 2h ago):\nDesign approved.\nNext: build the hook CLI.\nHandoff:\nResume with the hook CLI tests.\nKB index:\n# Index\n- ops.md\n- plugins.md\nPending:\n- [comment] human on \"The board\": move the docs task to now (agent-hub, evt_01B)\n</agent-hub>"
+          "ephemeralMessage": "<agent-hub>\nproject agent-hub | session feat-login-flow (s_01J8) | you are dev/claude\nBind your hub connection now: session_start(project_id: \"agent-hub\", session_name: \"feat-login-flow\").\nDo not call session_brief; this block is the brief.\nSince your last look: 3 answers, 2 comments on your artifacts, 1 page changed.\nLast anchor (phase \"plugins design\", 2h ago):\nDesign approved.\nNext: build the hook CLI.\nHandoff:\nResume with the hook CLI tests.\nKB index:\n# Index\n- ops.md\n- plugins.md\nPending:\n- [comment] human on \"Task list\": move the docs task to now (agent-hub, evt_01B)\n</agent-hub>"
         }
       ]
     },

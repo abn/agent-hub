@@ -14,6 +14,8 @@ This writes the plugin to `~/.gemini/config/plugins/agent-hub/` from files embed
 
 Running it again changes nothing. A file it replaces, and the config before it is edited, are copied to `agent-hub-backup/` beside the plugin directory first. Other keys in the config are kept. A plugin directory that is a symlink is refused.
 
+Coming from a hand-written setup, remove the old `agent-hub` entry from your `mcp_config.json` and any hub hooks first, so there are not two connections and two sets of hooks.
+
 A release archive, `agent-hub-antigravity-<version>.tar.gz`, holds the same plugin directory for `agy plugin install` or a marketplace. `make plugins/antigravity-dist` builds it.
 
 ## Prerequisites
@@ -33,7 +35,7 @@ The MCP server runs `agent-hub mcp --proxy` as agent `antigravity`. With `--prox
 
 Antigravity has no session start, compaction, subagent or end event, so the per-call pointer is how a conversation recovers. The hook always exits 0 and prints `{}` on any failure, so a hub outage never blocks the model.
 
-The hook timeout is `10`. Antigravity documents hook timeouts in seconds, default 30. Another locally installed plugin sets `10000`, which reads as milliseconds; that was not measured here, and the value this plugin sets is correct only if the documented unit holds.
+The hook timeout is `20000`. Antigravity documents hook timeouts in seconds, default 30. Another locally installed plugin sets `10000`, which reads as milliseconds; that was not measured here. `20000` is safe under either unit: as milliseconds it is 20 seconds, and as seconds it is looser than the 30 second default.
 
 ## Rules and skill
 

@@ -16,7 +16,7 @@
     "known_projects": [
       "hub-checkout"
     ],
-    "personal_project": "abn-claude"
+    "personal_project": "dev-claude"
   },
   "expected": {
     "project_id": "hub-checkout",

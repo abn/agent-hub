@@ -9,8 +9,9 @@
 //! the invocation's deadline and never waited on, so a stuck holder cannot hold
 //! a hook past its time. A watcher holds a kernel lock on its own `.watch.lock`
 //! file for its whole life, which the kernel releases when the process dies, so
-//! there is no pid to go stale. That file is never deleted: its lock lives on
-//! one stable inode.
+//! there is no pid to go stale. `session-end` deletes that file only while it
+//! holds the lock itself, and a watcher that finds its locked file no longer
+//! the one at the path does not run, so the lock always lives on one inode.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
@@ -233,6 +234,49 @@ impl Store {
         true
     }
 
+    /// Whether another state file of this harness names the hub session
+    /// `session_id` and was written within `within`: another live instance
+    /// sharing the session. This store's own file is not counted. A file older
+    /// than `within` is a crashed instance's leftover and does not keep a
+    /// session open.
+    pub fn shared_with_another(&self, session_id: &str, within: Duration) -> bool {
+        let Some(dir) = self.path.parent() else {
+            return false;
+        };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return false;
+        };
+        entries.filter_map(Result::ok).any(|entry| {
+            let path = entry.path();
+            if path == self.path || path.extension().is_none_or(|ext| ext != "json") {
+                return false;
+            }
+            let recent = entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|written| written.elapsed().ok())
+                .is_some_and(|age| age <= within);
+            recent
+                && std::fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|text| serde_json::from_str::<State>(&text).ok())
+                    .is_some_and(|state| state.session_id.as_deref() == Some(session_id))
+        })
+    }
+
+    /// Delete the watcher lock file when no watcher holds it. The lock is taken
+    /// first and the file removed while it is held, so a lock another process
+    /// holds is never deleted.
+    pub fn remove_watch_lock_if_free(&self) {
+        let Ok(file) = OpenOptions::new().write(true).open(&self.watch_lock) else {
+            return;
+        };
+        if file.try_lock().is_ok() {
+            std::fs::remove_file(&self.watch_lock).ok();
+        }
+    }
+
     /// Take the watcher lock for this process, which lasts as long as the
     /// returned value. `None` when another watcher of the session holds it, and
     /// also when the lock cannot be had for any other reason: a watcher that
@@ -246,7 +290,9 @@ impl Store {
             .open(&self.watch_lock)
             .ok()?;
         file.try_lock().ok()?;
-        Some(WatcherLock { _file: file })
+        // A cleanup that removed the file while this process waited to open it
+        // leaves a lock on a file nobody else will find.
+        same_file(&file, &self.watch_lock).then_some(WatcherLock { _file: file })
     }
 }
 

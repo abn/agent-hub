@@ -49,8 +49,9 @@ Each call answers the next question:
    events since your own last look, ranked and capped with a count of the rest;
    your previous session in the project with the handoff note it left; and the
    knowledge base pages past their `stale_after`. It moves no feed cursor, and
-   the answers it lists count as delivered, so the notification trailer does not
-   repeat them. Call it before `session_start`: after a resume, the resumed
+   marks nothing delivered: the trailer on the brief leaves out the
+   answers it lists, and a later session's trailer still reports answers asked in
+   that session. Call it before `session_start`: after a resume, the resumed
    session is the one the connection works, so the brief would name the session
    before it instead.
 2. `session_start` registers or resumes the session and returns its

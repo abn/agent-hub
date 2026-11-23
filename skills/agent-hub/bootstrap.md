@@ -10,7 +10,7 @@ is elsewhere, in the `agent-hub` skill.
 If your harness has a plugin, install it first. It wires the MCP connection and
 runs the session ritual for you: it starts or resumes the hub session, injects
 waiting items on each prompt, saves state across compaction, and wakes an idle
-session when something addressed to you arrives. Do not repeat that by hand.
+session when something addressed to you arrives. Do not repeat that by hand. Coming from a hand-written setup, remove the old `agent-hub` MCP entry and any hub hooks (a `SessionStart` or `Stop` poller, say) before you install the plugin. Otherwise the harness holds two connections and two sets of hub tools, and the hooks inject every item twice.
 
 | Harness | Command | Needs |
 |---|---|---|
@@ -68,12 +68,12 @@ A harness that speaks only stdio runs the proxy, which holds one connection to
 the hub for the life of the process and forwards every request:
 
 ```sh
-HUB_URL={{base_url}} HUB_TOKEN=<agent token> agent-hub mcp
+HUB_URL={{base_url}} HUB_TOKEN=<agent token> agent-hub mcp --proxy
 ```
 
 The values are read from the environment first, then from `config.toml`
 (`~/.config/agent-hub/config.toml`, over `/etc/agent-hub/config.toml`);
-`HUB_CONFIG` names another file. The same binary is the server and the client.
+`HUB_CONFIG` names another file. The same binary is the server and the client. Always pass `--proxy`: without it a missing config would fall back to an embedded store.
 
 ```toml
 [client]
@@ -128,7 +128,7 @@ write the literal URL, token and name.
 }
 ```
 
-**OpenCode**, `opencode.jsonc`, with the token in a file `{file:...}` reads:
+**OpenCode**, `opencode.jsonc`, with the token from the `HUB_TOKEN` environment variable (copy `[client] token` from `config.toml`):
 
 ```json
 {
@@ -137,7 +137,7 @@ write the literal URL, token and name.
       "type": "remote",
       "url": "{{base_url}}/mcp",
       "headers": {
-        "Authorization": "Bearer {file:~/.config/agent-hub/token}",
+        "Authorization": "Bearer {env:HUB_TOKEN}",
         "X-Agent-Id": "opencode"
       }
     }

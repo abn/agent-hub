@@ -1,6 +1,6 @@
 {
   "name": "@agync/opencode-agent-hub",
-  "version": "0.1.0",
+  "version": "1.11.0",
   "private": false,
   "description": "Agent Hub for OpenCode: registers the hub MCP server, binds a session, injects pending items and survives compaction.",
   "type": "module",

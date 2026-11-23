@@ -49,7 +49,7 @@ With no block, run these when a session starts; each answers the next question:
    from four tools: since your own last look, the answers and decisions on
    your own items and what else happened, plus your previous session's
    handoff and stale knowledge base pages. It is capped and moves no feed
-   cursor; the answers it lists count as delivered. Call it before
+   cursor; it marks nothing delivered, and its own trailer leaves out the answers it lists. Call it before
    `session_start`, so a resumed session is still the previous one.
 2. `whoami` names the identity and proves the token resolves.
 3. `session_start(project_id, session_name)` makes a brain active and returns
