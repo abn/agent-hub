@@ -62,3 +62,4 @@ consequences, and is not edited after the fact except to mark it superseded.
   and session-scoped delivery
 * [0038](0038-native-per-user-service.md) - A native per-user service with a
   binary-owned lifecycle
+* [0039](0039-members-agents-and-sessions.md) - Members, agents and sessions
