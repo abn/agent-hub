@@ -9,6 +9,47 @@ permissions:
   contents: read
 
 jobs:
+  # Decides whether the Rust jobs have anything to prove. Path filters at the
+  # workflow level would leave skipped required checks pending, so the
+  # decision is made here and the Rust jobs are skipped with `if:`, which
+  # reports them as skipped, which a required check accepts. Pushes to main
+  # and manual runs run everything.
+  changes:
+    name: Changes
+    runs-on: ubuntu-24.04
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      windows: ${{ steps.filter.outputs.windows }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            echo "windows=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Inputs of the Rust build and tests, including what the binary
+          # embeds (web/, skills/) and what tests read from the tree.
+          git diff --name-only "$BASE_SHA" HEAD | tee "$RUNNER_TEMP/changed"
+          if grep -qE '^(src/|tests/|web/|skills/|plugins/contract/fixtures/|Cargo\.toml$|Cargo\.lock$|build\.rs$|Makefile$|AGENTS\.md$|DESIGN\.md$|docs/log\.md$|docs/reference/knowledge-base-pages\.md$|\.github/workflows/check\.yml$)' "$RUNNER_TEMP/changed"; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+          fi
+          # The Windows subset runs the lib tests and five test binaries, none
+          # of which read the tree. The lib embeds web/, skills/ and
+          # plugins/antigravity/ at compile time, so those stay on the list.
+          if grep -qE '^(src/|tests/|web/|skills/|plugins/antigravity/|Cargo\.toml$|Cargo\.lock$|build\.rs$|\.github/workflows/check\.yml$)' "$RUNNER_TEMP/changed"; then
+            echo "windows=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "windows=false" >> "$GITHUB_OUTPUT"
+          fi
   lint:
     name: Lint and docs
     runs-on: ubuntu-24.04
@@ -46,6 +87,8 @@ jobs:
       - run: make web/crypto web/units web/styles plugins/check
 
   checks:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     name: Rust checks
     runs-on: ubuntu-24.04
     steps:
@@ -58,6 +101,8 @@ jobs:
       - run: make clippy net/check serve/check
 
   test:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     name: Test ${{ matrix.shard }}/2
     runs-on: ubuntu-24.04
     strategy:
@@ -86,9 +131,15 @@ jobs:
   # subset has proven stable on the runner. It runs the config tests, the
   # process and service operations and one HTTP smoke test.
   windows:
-    name: Windows subset
+    needs: changes
+    if: needs.changes.outputs.windows == 'true'
+    name: Windows subset ${{ matrix.shard }}/2
     runs-on: windows-2025
     continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2
@@ -98,4 +149,4 @@ jobs:
       - uses: taiki-e/install-action@f7e5d7c961414b23f5b25b2da9294395d08513ad # v2
         with:
           tool: nextest
-      - run: cargo nextest run --locked --lib --test hub_config --test cli_help --test daemon_ops --test ops_lifecycle --test http_storage
+      - run: cargo nextest run --locked --lib --test hub_config --test cli_help --test daemon_ops --test ops_lifecycle --test http_storage --partition count:${{ matrix.shard }}/2
