@@ -520,6 +520,12 @@ unset FAKE_S FAKE_M
 check "unsupported platform turns hooks off" contains "$out" "Hooks are off: unsupported platform Plan9-mips. Use the hub tools directly."
 check "nothing is fetched" eq "$(archive_gets)" 0
 check "the reason is recorded" eq "$(cat "$cache/unsupported/launcher-error")" "unsupported platform Plan9-mips"
+FAKE_S=Plan9
+FAKE_M=mips
+export FAKE_S FAKE_M
+out=$(hook_as s1 hook prompt --harness claude)
+unset FAKE_S FAKE_M
+check "a second call in the session stays quiet" eq "$out" "{}"
 
 new_case offline
 go_offline
