@@ -30,14 +30,13 @@ test.describe("search states", () => {
     await expect(page.locator(".search-results")).not.toContainText(/FTS|parse error|Range query/);
   });
 
-  test("a query that fails shows the no-results state with a plain line", async ({ hub, page }) => {
+  test("a query that fails says so in a plain line", async ({ hub, page }) => {
     await page.route("**/api/v1/search?**", (route) =>
       route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ error: "Internal error: FTS parse error" }) }),
     );
     await page.goto(`${hub.baseUrl}/${hash("anything")}`);
-    await expect(page.locator(".search-results")).toContainText("Nothing matches");
-    await expect(page.locator(".search-count")).toHaveText("No results");
-    await expect(page.locator(".search-results .error")).toHaveCount(0);
+    await expect(page.locator(".search-results .error")).toHaveText("Search failed. Try again.");
+    await expect(page.locator(".search-results")).not.toContainText("Nothing matches");
     await expect(page.locator("body")).not.toContainText(/FTS|parse error/);
   });
 

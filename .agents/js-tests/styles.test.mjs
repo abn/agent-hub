@@ -1087,12 +1087,12 @@ const VIEWER_ROLES = [
     "--action",
     "dark warning callout",
   ],
-  [".hub-callout.caution", "border-color", "light", "--danger", "light caution callout"],
+  [".hub-callout.caution", "border-color", "light", "--line-strong", "light caution callout"],
   [
     'html[data-theme="dark"] .hub-callout.caution',
     "border-color",
     "dark",
-    "--danger",
+    "--line-strong",
     "dark caution callout",
   ],
 ];

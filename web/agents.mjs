@@ -779,7 +779,7 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
 
   const commit = document.createElement("button");
   commit.type = "button";
-  commit.className = "dialog-commit danger";
+  commit.className = "dialog-commit action";
 
   // State 2 only. Created when the token is revealed and removed on close, so
   // the string is never in the DOM outside the open dialog.
@@ -836,7 +836,7 @@ export function revealIssuedToken(token, agentName = "", agentId = "") {
       note.textContent = "Reissuing cannot be undone.";
       safe.textContent = "Cancel";
       commit.textContent = "Reissue";
-      commit.className = "dialog-commit danger";
+      commit.className = "dialog-commit action";
       fieldWrap.hidden = true;
       value.textContent = "";
       setup = null;

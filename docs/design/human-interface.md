@@ -599,9 +599,11 @@ safe action focused, treats Esc as keeping, and hands focus back to the control
 that opened it. End session is not prune: ending stops something live and
 cannot be undone, so it is a plain outline whose dialog fills the action tone,
 while prune deletes bytes and takes the danger tone. Danger is reserved for
-deletion, and it fills only inside the dialog that confirms it; Done on a new
-token deletes nothing and takes the action fill. A menu is a raised panel
-with its items at one weight and its groups parted by a single hairline.
+deletion: an error, a failure note or an invalid field is drawn in ink with
+words, never in the danger tone. It fills only inside the dialog that confirms
+a deletion; Done on a new token deletes nothing and takes the action fill. A
+menu is a raised panel with its items at one weight and its groups parted by a
+single hairline.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/new-project-desktop-dark.png">

@@ -189,8 +189,8 @@ function frameStyle() {
     `html[data-theme="dark"] .hub-callout.tip{border-color:#7DC490}` +
     `.hub-callout.warning{border-color:#84461D}` +
     `html[data-theme="dark"] .hub-callout.warning{border-color:#E3A06F}` +
-    `.hub-callout.caution{border-color:#A3154A}` +
-    `html[data-theme="dark"] .hub-callout.caution{border-color:#FF7099}` +
+    `.hub-callout.caution{border-color:#66726A}` +
+    `html[data-theme="dark"] .hub-callout.caution{border-color:#7A867E}` +
     `body.has-comments{line-height:1.7}` +
     `</style>`
   );

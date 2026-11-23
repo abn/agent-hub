@@ -29,7 +29,7 @@ iframe#hub-frame[hidden]{display:none}
 #hub-unlock-form .hub-show,#hub-unlock-form .hub-remember{display:flex;align-items:center;gap:var(--s-2);min-height:44px;margin:var(--s-2) 0 0;font-size:var(--t-13);color:var(--ink-2)}
 .hub-show input,.hub-remember input{width:20px;height:20px;accent-color:var(--accent)}
 #hub-unlock-form button[type="submit"]{min-height:var(--ctl-form);padding:0 var(--s-4);margin-top:var(--s-3);font:600 var(--t-15)/1 var(--font-sans);border:0;border-radius:var(--r-1);background:var(--accent);color:var(--ink-inverse);cursor:pointer}
-#hub-unlock-error{font-size:var(--t-12);color:var(--danger)}
+#hub-unlock-error{font-size:var(--t-12);color:var(--ink)}
 #hub-fingerprint{font-family:var(--font-mono);font-size:var(--t-12);color:var(--ink-3)}
 section#hub-comments{margin:var(--s-4) auto;max-width:40rem;padding:0 var(--s-4)}
 section#hub-comments h2{font-size:var(--t-17);font-weight:600}

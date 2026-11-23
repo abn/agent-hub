@@ -96,7 +96,7 @@ paints it:
 | `--accent`, `--action` | copper: needs you, focus, primary | `#84461D` | `#E3A06F` |
 | `--action-bg` | the copper wash | `#F1E4D8` | `#2E241C` |
 | `--ok` | active, published | `#2C6A3D` | `#7DC490` |
-| `--danger` | deletion only | `#A3154A` | `#FF7099` |
+| `--danger` | deletion only: never an error, a failure or an invalid field | `#A3154A` | `#FF7099` |
 
 - `--accent` and `--action` are one colour. The old split between a blue for
   unread, links and selection and an amber for waiting is gone: copper marks
@@ -139,6 +139,12 @@ The status pill ("Waiting on you") is 12/600 with a 6px dot, height 22, padding
 0 8, radius 2 and a 6px gap. A state that does not wait on the reader is a dot
 and a word with no fill: a session's "active" or "ended", a token's "live". Any
 11px text is a defect: it is raised to 12 and the container grows.
+
+**Errors are ink with words.** A failed load, a failed search, a wrong
+password, a validation message, a failed sync line and a failed save are drawn
+in `--ink` or `--ink-2`, and the sentence says what went wrong. An invalid field
+keeps `--line-strong` and gains its message. `--danger` belongs to the controls
+that delete and to nothing else.
 
 **Copper never stands in for a link or a plain value.** A byte count that can
 be reclaimed is ink, the same as any other count; a prune verb written as text
