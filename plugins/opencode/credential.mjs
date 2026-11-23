@@ -100,7 +100,13 @@ export function resolve(input) {
   } else if (present(client.member) && (!clientUrl || same(clientUrl, url))) {
     [member, memberSource] = [present(client.member), "client"];
   } else if (namedMembers.length === 1) [member, memberSource] = [namedMembers[0], "only"];
-  else if (namedMembers.length > 1) several = true;
+  else if (namedMembers.length > 1) {
+    // Several members on this hub: the one marked `default = true`, when
+    // exactly one is.
+    const defaults = [...new Set(named.filter((c) => c.default === true).map((c) => present(c.member)))];
+    if (defaults.length === 1) [member, memberSource] = [defaults[0], "only"];
+    else several = true;
+  }
 
   let token = null;
   let tokenSource = "none";
@@ -379,6 +385,8 @@ export function parseConfig(text) {
       config.client.timeout = Number(value);
     } else if (current && ["url", "member", "token"].includes(key)) {
       current[key] = stringOf(value) ?? "";
+    } else if (current && key === "default") {
+      current.default = value === "true" && text[item.valueStart] !== '"' && text[item.valueStart] !== "'";
     }
   }
   // A legacy [client] token reads as one credential with the member unknown.
