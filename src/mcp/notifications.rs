@@ -83,7 +83,9 @@ async fn select(
     consume: bool,
 ) -> Pending {
     let mut pending = Pending::default();
-    match attention::read(state, principal, session, consume).await {
+    // A peek pages from its floor; a delivery reads from the cursor.
+    let after = if consume { None } else { floor };
+    match attention::read(state, principal, session, after, consume).await {
         Ok(read) => {
             for (settle, entries) in read.pages {
                 pending.entries.extend(entries.iter().cloned());
@@ -161,6 +163,10 @@ impl Pending {
                 lost = true;
             }
         }
+        // An event the attention queue and a subscription both report is one
+        // item: the first report of it, the attention queue's, is kept.
+        let mut seen = std::collections::HashSet::new();
+        delivered.retain(|entry| seen.insert(entry.key.clone()));
         Delivery { delivered, lost }
     }
 
