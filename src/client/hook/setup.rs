@@ -125,8 +125,8 @@ pub fn run_setup(args: &[String]) -> u8 {
             }
         }
     }
-    let Some(home) = std::env::var_os("HOME").filter(|home| !home.is_empty()) else {
-        eprintln!("agent-hub setup: HOME is not set");
+    let Some(home) = home_os(&|key| std::env::var_os(key)) else {
+        eprintln!("agent-hub setup: {}", home_missing());
         return 1;
     };
     match install_antigravity(Path::new(&home), workspace.as_deref()) {
@@ -141,6 +141,22 @@ pub fn run_setup(args: &[String]) -> u8 {
             eprintln!("agent-hub setup: {message}");
             1
         }
+    }
+}
+
+/// The home directory as an OS string, so a home that is not UTF-8 still
+/// works. The variables read are `HOME_VARS`.
+fn home_os(get: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Option<std::ffi::OsString> {
+    super::state::HOME_VARS
+        .iter()
+        .find_map(|key| get(key).filter(|home| !home.is_empty()))
+}
+
+fn home_missing() -> &'static str {
+    if cfg!(windows) {
+        "neither HOME nor USERPROFILE is set"
+    } else {
+        "HOME is not set"
     }
 }
 
@@ -398,4 +414,31 @@ fn replace_file(target: &Path, bytes: &[u8]) -> Result<(), String> {
         let _ = fs::remove_file(&temporary);
         format!("write {}: {err}", target.display())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::home_os;
+    use std::ffi::OsString;
+
+    #[test]
+    fn home_is_read_as_an_os_string_and_empty_is_unset() {
+        let get = |key: &str| (key == "HOME").then(|| OsString::from("/users/a"));
+        assert_eq!(home_os(&get), Some(OsString::from("/users/a")));
+        let empty = |key: &str| (key == "HOME").then(OsString::new);
+        assert_eq!(home_os(&empty), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_home_that_is_not_utf8_is_accepted_and_userprofile_is_not_read() {
+        use super::home_missing;
+        use std::os::unix::ffi::OsStringExt;
+        let raw = OsString::from_vec(b"/users/\xff".to_vec());
+        let get = |key: &str| (key == "HOME").then(|| raw.clone());
+        assert_eq!(home_os(&get), Some(raw.clone()));
+        let profile_only = |key: &str| (key == "USERPROFILE").then(|| OsString::from("/p"));
+        assert_eq!(home_os(&profile_only), None);
+        assert_eq!(home_missing(), "HOME is not set");
+    }
 }

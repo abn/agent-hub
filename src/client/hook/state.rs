@@ -47,16 +47,30 @@ pub struct State {
     pub start_failed_ms: Option<u64>,
 }
 
+/// The variables that name the home directory, in order. `USERPROFILE` is the
+/// Windows fallback only: on Unix it is not a home directory, so it is not read.
+pub(crate) const HOME_VARS: &[&str] = if cfg!(windows) {
+    &["HOME", "USERPROFILE"]
+} else {
+    &["HOME"]
+};
+
+/// The home directory from the first of `HOME_VARS` that is set and not empty.
+pub fn home_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    home_from(env, HOME_VARS)
+}
+
+fn home_from(env: &dyn Fn(&str) -> Option<String>, vars: &[&str]) -> Option<String> {
+    vars.iter()
+        .find_map(|key| env(key).filter(|home| !home.is_empty()))
+}
+
 /// The directory of one harness's state files.
 pub fn state_dir(harness: Harness, env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
     let base = env("XDG_STATE_HOME")
         .filter(|path| !path.trim().is_empty())
         .map(PathBuf::from)
-        .or_else(|| {
-            env("HOME")
-                .filter(|home| !home.is_empty())
-                .map(|home| Path::new(&home).join(".local").join("state"))
-        })
+        .or_else(|| home_dir(env).map(|home| Path::new(&home).join(".local").join("state")))
         .unwrap_or_else(|| PathBuf::from(".local/state"));
     base.join("agent-hub").join("hooks").join(harness.name())
 }
@@ -323,4 +337,74 @@ pub fn now_millis() -> u64 {
         .map_or(0, |elapsed| {
             u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HOME_VARS, Harness, home_dir, home_from, state_dir};
+    use std::path::PathBuf;
+
+    const WINDOWS_VARS: &[&str] = &["HOME", "USERPROFILE"];
+
+    fn env_of<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        move |key| {
+            pairs
+                .iter()
+                .find(|(name, _)| *name == key)
+                .map(|(_, value)| (*value).to_string())
+        }
+    }
+
+    #[test]
+    fn home_prefers_home_over_userprofile() {
+        let env = env_of(&[("HOME", "/users/a"), ("USERPROFILE", "C:\\Users\\a")]);
+        assert_eq!(home_dir(&env).as_deref(), Some("/users/a"));
+        assert_eq!(home_from(&env, WINDOWS_VARS).as_deref(), Some("/users/a"));
+    }
+
+    #[test]
+    fn windows_falls_back_to_userprofile_when_home_is_unset_or_empty() {
+        let unset = env_of(&[("USERPROFILE", "C:\\Users\\a")]);
+        assert_eq!(
+            home_from(&unset, WINDOWS_VARS).as_deref(),
+            Some("C:\\Users\\a")
+        );
+        let empty = env_of(&[("HOME", ""), ("USERPROFILE", "C:\\Users\\a")]);
+        assert_eq!(
+            home_from(&empty, WINDOWS_VARS).as_deref(),
+            Some("C:\\Users\\a")
+        );
+    }
+
+    #[test]
+    fn home_is_none_when_nothing_is_set() {
+        assert_eq!(home_dir(&env_of(&[])), None);
+        assert_eq!(
+            home_from(&env_of(&[("HOME", ""), ("USERPROFILE", "")]), WINDOWS_VARS),
+            None
+        );
+    }
+
+    #[test]
+    fn userprofile_is_read_only_where_it_is_a_home() {
+        let env = env_of(&[("USERPROFILE", "/profile")]);
+        assert_eq!(
+            home_dir(&env).is_some(),
+            cfg!(windows),
+            "vars: {HOME_VARS:?}"
+        );
+        assert_eq!(HOME_VARS.contains(&"USERPROFILE"), cfg!(windows));
+    }
+
+    #[test]
+    fn state_dir_follows_the_platform_home() {
+        let env = env_of(&[("USERPROFILE", "/profile")]);
+        let dir = state_dir(Harness::Claude, &env);
+        let base: PathBuf = if cfg!(windows) {
+            ["/profile", ".local", "state"].iter().collect()
+        } else {
+            [".local", "state"].iter().collect()
+        };
+        assert_eq!(dir, base.join("agent-hub").join("hooks").join("claude"));
+    }
 }

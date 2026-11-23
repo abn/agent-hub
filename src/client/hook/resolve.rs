@@ -345,16 +345,48 @@ pub fn gather_git(cwd: &str, until: Instant) -> GitFacts {
 /// its place cannot block the hook. The kind is checked before the open and
 /// again on the handle, and the open does not wait.
 pub fn open_regular(path: &Path) -> Option<std::fs::File> {
-    use std::os::unix::fs::OpenOptionsExt;
     if !std::fs::metadata(path).ok()?.is_file() {
         return None;
     }
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32)
-        .open(path)
-        .ok()?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(rustix::fs::OFlags::NONBLOCK.bits() as i32);
+    }
+    let file = options.open(path).ok()?;
     file.metadata().ok()?.is_file().then_some(file)
+}
+
+/// The path an open handle names, in the extended form `canonicalize` returns.
+/// This is the Windows counterpart of reading `/proc/self/fd/N`.
+#[cfg(windows)]
+pub(crate) fn handle_path(file: &std::fs::File) -> Option<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_NAME_NORMALIZED, GetFinalPathNameByHandleW,
+    };
+
+    let handle = file.as_raw_handle();
+    let mut buffer = vec![0u16; 1024];
+    loop {
+        let capacity = u32::try_from(buffer.len()).ok()?;
+        // SAFETY: `handle` is open for the life of `file`, and `buffer` holds
+        // `capacity` writable units.
+        let written = unsafe {
+            GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), capacity, FILE_NAME_NORMALIZED)
+        } as usize;
+        match written {
+            0 => return None,
+            n if n < buffer.len() => {
+                buffer.truncate(n);
+                return Some(std::ffi::OsString::from_wide(&buffer).into());
+            }
+            n => buffer.resize(n + 1, 0),
+        }
+    }
 }
 
 /// The most of the `.agent-hub` file that is read. Only its first line counts.

@@ -328,11 +328,8 @@ pub async fn checkpoint_hub(db: &turso::Database) -> Result<()> {
 /// reported as unknown rather than zero: a directory that cannot be measured
 /// is not a directory that is full.
 pub fn free_space_bytes(data_dir: &Path) -> Option<i64> {
-    match rustix::fs::statvfs(data_dir) {
-        Ok(stat) => {
-            let block = i64::try_from(stat.f_frsize).ok()?;
-            Some(i64::try_from(stat.f_bavail).ok()? * block)
-        }
+    match volume_space(data_dir) {
+        Ok(space) => space.free,
         Err(err) => {
             tracing::warn!(
                 path = %data_dir.display(),
@@ -341,6 +338,63 @@ pub fn free_space_bytes(data_dir: &Path) -> Option<i64> {
             );
             None
         }
+    }
+}
+
+/// What a volume reports. Each figure is `None` when it does not fit, and one
+/// missing figure never hides the other.
+pub(crate) struct VolumeSpace {
+    pub total: Option<i64>,
+    /// The space free to a writer that is not root.
+    pub free: Option<i64>,
+}
+
+#[cfg(unix)]
+pub(crate) fn volume_space(data_dir: &Path) -> std::io::Result<VolumeSpace> {
+    let stat = rustix::fs::statvfs(data_dir)?;
+    let block = i64::try_from(stat.f_frsize).ok();
+    let bytes = |blocks: u64| {
+        i64::try_from(blocks)
+            .ok()
+            .zip(block)
+            .and_then(|(blocks, block)| blocks.checked_mul(block))
+    };
+    Ok(VolumeSpace {
+        total: bytes(stat.f_blocks),
+        free: bytes(stat.f_bavail),
+    })
+}
+
+#[cfg(windows)]
+pub(crate) fn volume_space(data_dir: &Path) -> std::io::Result<VolumeSpace> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+
+    let mut wide: Vec<u16> = data_dir.as_os_str().encode_wide().collect();
+    terminate_unc_root(&mut wide);
+    wide.push(0);
+    let (mut free, mut total, mut total_free) = (0u64, 0u64, 0u64);
+    // SAFETY: `wide` is NUL-terminated and outlives the call, and the three
+    // out pointers name live locals.
+    let ok = unsafe { GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, &mut total, &mut total_free) };
+    if ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(VolumeSpace {
+        total: i64::try_from(total).ok(),
+        free: i64::try_from(free).ok(),
+    })
+}
+
+/// `GetDiskFreeSpaceExW` wants a trailing backslash on a UNC name, so one such
+/// as `\\server\share` is closed with one. Any other path is left alone.
+#[cfg(any(windows, test))]
+fn terminate_unc_root(wide: &mut Vec<u16>) {
+    const BACKSLASH: u16 = b'\\' as u16;
+    const SLASH: u16 = b'/' as u16;
+    let is_unc = wide.starts_with(&[BACKSLASH, BACKSLASH]);
+    if is_unc && !matches!(wide.last(), Some(&BACKSLASH | &SLASH)) {
+        wide.push(BACKSLASH);
     }
 }
 
@@ -496,7 +550,9 @@ pub(crate) fn next_id() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{WriteQueue, begin_write, millis_now, next_id, set_id_high_water};
+    use super::{
+        WriteQueue, begin_write, millis_now, next_id, set_id_high_water, terminate_unc_root,
+    };
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
 
@@ -665,5 +721,33 @@ mod tests {
 
         let second: ulid::Ulid = next_id().parse().expect("a ULID");
         assert!(first < second, "the clamp stays monotonic after it lifts");
+    }
+
+    fn terminated(path: &str) -> String {
+        let mut wide: Vec<u16> = path.encode_utf16().collect();
+        terminate_unc_root(&mut wide);
+        String::from_utf16(&wide).expect("utf16")
+    }
+
+    #[test]
+    fn a_unc_share_root_gets_a_trailing_backslash() {
+        assert_eq!(terminated("\\\\server\\share"), "\\\\server\\share\\");
+        assert_eq!(
+            terminated("\\\\server\\share\\dir"),
+            "\\\\server\\share\\dir\\"
+        );
+    }
+
+    #[test]
+    fn other_paths_are_left_alone() {
+        for path in [
+            "\\\\server\\share\\",
+            "C:\\data",
+            "C:\\data\\",
+            "/var/lib/hub",
+            "",
+        ] {
+            assert_eq!(terminated(path), path);
+        }
     }
 }
