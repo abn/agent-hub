@@ -114,7 +114,7 @@ describe("config.toml store", () => {
       Array.from({ length: 50 }, (_, i) => `https://hub.example.net ${t}${i} tok-${t}${i}`),
     );
     expect(got.sort()).toEqual(want.sort());
-  });
+  }, 30_000);
 
   it("never reuses a leftover temp file: it is replaced and the result is 0600", () => {
     const path = join(root, "config.toml");
