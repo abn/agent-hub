@@ -4,6 +4,51 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.11.0...agent-hub-v1.12.0) (2026-11-23)
+
+
+### Features
+
+* **client:** add the hook, watch and setup subcommands ([e499d39](https://github.com/agync/agent-hub/commit/e499d39170147ddff1c77de379e381a9734af3e2))
+* **feed:** emit comment and page events and add an about_self subscription filter ([686113b](https://github.com/agync/agent-hub/commit/686113bffd957ee419a94ffc04bee0d3f219802c))
+* **mcp:** scope notification delivery to a session and add the pending peek ([94d1b7f](https://github.com/agync/agent-hub/commit/94d1b7f94b2093ac191abf75be098c9de1503368))
+* **mcp:** server instructions, mcp --proxy, and proxy session replay ([9fedf15](https://github.com/agync/agent-hub/commit/9fedf1553cca71274107286e0fd7b26471302b29))
+* **plugins:** add the Antigravity plugin and setup antigravity ([6182250](https://github.com/agync/agent-hub/commit/618225003f9a441d069a4a0635dac5b9c8b37bac))
+* **plugins:** add the Claude Code plugin and marketplace ([8639f58](https://github.com/agync/agent-hub/commit/8639f589cc31ea434391eeb687750ee17c2723a8))
+* **plugins:** add the OpenCode v2 plugin ([edc55a9](https://github.com/agync/agent-hub/commit/edc55a9c5b1ae04fb9b15da74bf457ba481c81f8))
+* **site:** add the plugins band and one install row per harness ([19001b0](https://github.com/agync/agent-hub/commit/19001b09faba81fa7cf173111cc9beb234afaa2f))
+* **site:** publish llms.txt, the bootstrap guide and the skill for agent self-provisioning ([844b60d](https://github.com/agync/agent-hub/commit/844b60dd9813026e513d05f7080b972fe1dc14f4))
+
+
+### Bug Fixes
+
+* **plugins:** apply the release review across the hook client, the plugins and the docs ([8f909e6](https://github.com/agync/agent-hub/commit/8f909e699f029181ba3fce91b8432f66f67da1af))
+* **search:** match long words and preview wiki pages as text ([ae228b6](https://github.com/agync/agent-hub/commit/ae228b63bd54f4653a003ca3be124feefd486f5d))
+* **site:** install the latest image on the landing page ([63921a2](https://github.com/agync/agent-hub/commit/63921a22339c5df32f3cb498ae60cf6d3bb7dcea))
+* **web:** confirm a copy on its glyph instead of a toast ([68f0e86](https://github.com/agync/agent-hub/commit/68f0e868ff8187404c15c027e624c242047dcc44))
+* **web:** draw list rows, selection and empty notes one way ([bb9de3a](https://github.com/agync/agent-hub/commit/bb9de3a25ef1943f20cc60da078cefe6342538c1))
+* **web:** draw the composer send on the ink fill ([12f9839](https://github.com/agync/agent-hub/commit/12f9839e0fbed5ab179c8bcc0673fa5b7f67a3a2))
+* **web:** fold extra projects into a menu on the Artifacts list ([c7a376f](https://github.com/agync/agent-hub/commit/c7a376fe53b0f9ea3d7a0e43519901e4b6903726))
+* **web:** give the narrow version menu a z-index and guard toast frames ([5c3acf5](https://github.com/agync/agent-hub/commit/5c3acf5c9a9dbe6c2112178a28a3932fd7d03d3a))
+* **web:** keep long agent text inside the screen ([fe624fb](https://github.com/agync/agent-hub/commit/fe624fbc93799a22111bfbdc1996f10eb520ba21))
+* **web:** keep long names inside their cells and the rail footer in view ([395b0dc](https://github.com/agync/agent-hub/commit/395b0dcae94cad2f909eb2f9e826489cfe3d8605))
+* **web:** keep the frame and offer Retry when a screen fails to load ([81f64b5](https://github.com/agync/agent-hub/commit/81f64b538458cdf5db48e4331c94bb7ce20f4091))
+* **web:** keep toasts off the controls and name what they confirm ([a187084](https://github.com/agync/agent-hub/commit/a187084b71be7ac3d324833ddf9ab656a4bce223))
+* **web:** list agent spaces on desktop and filter projects on phone ([308035b](https://github.com/agync/agent-hub/commit/308035b1c02e1209a7f39963b8ea75c9f928c33f))
+* **web:** make the feed stage's actions match the event's state ([c898c5c](https://github.com/agync/agent-hub/commit/c898c5cdfcb247aa5933ed28fcf0709c40b2d62d))
+* **web:** make the storage screen's words match its numbers ([5fe91d7](https://github.com/agync/agent-hub/commit/5fe91d7dd2645c3175f6374ea482fef868e19609))
+* **web:** make the wiki's empty state, header and editor honest ([a9af007](https://github.com/agync/agent-hub/commit/a9af007a72c91bf2ab3a4e18bc57506a5c26556f))
+* **web:** meet the focus, label and target gates ([ed67116](https://github.com/agync/agent-hub/commit/ed67116d6bbc68d5565b878d1b173a35fb64dcc5))
+* **web:** open an ask from its sentence on Now ([7f502e8](https://github.com/agync/agent-hub/commit/7f502e8beb8e1d4040f7fed125b017ffa2830d51))
+* **web:** open versions as a menu on desktop and name artifacts by file ([49d12f6](https://github.com/agync/agent-hub/commit/49d12f66229a957c940d66afddabcc2a30e00e84))
+* **web:** queue an answer sent from an opened item while offline ([9fed852](https://github.com/agync/agent-hub/commit/9fed8521eecf7548ca86848b9f9b2090d1ff633f))
+* **web:** say whether this browser is connected ([f328605](https://github.com/agync/agent-hub/commit/f328605320ea95540b357679459110c953e362e1))
+* **web:** style rendered markdown in the wiki, items and comments ([7ca5d5a](https://github.com/agync/agent-hub/commit/7ca5d5a0587f5cc229927e530b659a6eb0d6ee12))
+* **web:** tell the truth about an artifact's comments, versions and lock ([73c964b](https://github.com/agync/agent-hub/commit/73c964bfdaee31d8f0d8f70a126a50a50392ee60))
+* **web:** title sessions by name and show the session id once ([bebd186](https://github.com/agync/agent-hub/commit/bebd18659ac54e063b365479b2e1904d7f51c2c4))
+* **web:** trim Settings and the phone More screen to the contract ([3918185](https://github.com/agync/agent-hub/commit/391818506151fd1a776b9f484fe91b8c7e59f0b7))
+* **web:** wrap, scroll and pin tables inside the artifact frame ([7d99b3e](https://github.com/agync/agent-hub/commit/7d99b3e078079f70f772ccd465242caf0fdd7bb8))
+
 ## [1.11.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.10.0...agent-hub-v1.11.0) (2026-11-22)
 
 
