@@ -1,0 +1,591 @@
+#!/bin/sh
+# Finds or fetches the agent-hub binary a harness plugin needs, then runs it.
+# Source of truth for plugins/claude/bin and plugins/antigravity/bin; refresh
+# the copies with `make plugins/sync`.
+#
+#   agent-hub-launcher hook <event> --harness <name>
+#   agent-hub-launcher token --headers --agent <name>
+#   agent-hub-launcher <any agent-hub arguments>
+#
+# With a binary at hand it execs it. Without one it never blocks a harness
+# hook: it starts the install detached, says so in the hook's output shape and
+# exits 0.
+
+VERSION=1.12.0 # x-release-please-version
+
+# The release for this launcher's own version, over HTTPS only. Nothing in the
+# environment redirects the download.
+base=https://github.com/agync/agent-hub/releases/download
+tls_only=1
+probe_timeout=5
+lock_age_limit=600
+guard_age_limit=60
+error_retry=3600
+
+self=$0
+case $self in
+  /*) ;;
+  */*) self=$PWD/$self ;;
+  *) self=$(command -v "$self" 2>/dev/null || printf '%s' "$self") ;;
+esac
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# A no-op in the shipped launcher; the tests swap in a version that can wait.
+test_pause() { :; }
+
+# --- target ---------------------------------------------------------------
+
+os=$(uname -s 2>/dev/null)
+arch=$(uname -m 2>/dev/null)
+ext=tar.gz
+exe=agent-hub
+target=
+error=
+posix_perms=1
+case "$os-$arch" in
+  Linux-x86_64 | Linux-amd64) target=x86_64-unknown-linux-musl ;;
+  Linux-aarch64 | Linux-arm64) target=aarch64-unknown-linux-musl ;;
+  Darwin-arm64 | Darwin-aarch64) target=aarch64-apple-darwin ;;
+  Darwin-x86_64)
+    # An x86_64 shell under Rosetta wants the native build.
+    if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = 1 ]; then
+      target=aarch64-apple-darwin
+    else
+      target=x86_64-apple-darwin
+    fi
+    ;;
+  MINGW*-x86_64 | MSYS*-x86_64 | MINGW*-amd64 | MSYS*-amd64)
+    posix_perms=0
+    if have unzip; then
+      target=x86_64-pc-windows-msvc
+      ext=zip
+      exe=agent-hub.exe
+    else
+      error="unsupported platform $os-$arch (unzip is missing)"
+    fi
+    ;;
+  *) error="unsupported platform $os-$arch" ;;
+esac
+
+# --- the cache ---------------------------------------------------------------
+#
+# The cache is an absolute path owned by this user, mode 0700, with no symlink
+# among the directories the launcher makes. Without a usable HOME it lives in
+# a per-user directory that is checked the same way, never in a shared one.
+
+uid=$(id -u 2>/dev/null)
+cache_base=
+case ${XDG_CACHE_HOME:-} in
+  /*) cache_base=$XDG_CACHE_HOME ;;
+  *)
+    case ${HOME:-} in
+      /*) cache_base=$HOME/.cache ;;
+    esac
+    ;;
+esac
+case $uid in
+  '' | *[!0-9]*) cache_top= ;;
+  *)
+    if [ -n "$cache_base" ]; then
+      cache_top=$cache_base/agent-hub
+    else
+      cache_top=/tmp/agent-hub-$uid
+    fi
+    ;;
+esac
+dir=$cache_top/launcher/$VERSION/${target:-unsupported}
+bin=$dir/$exe
+chain=
+
+mode_of() { ls -ldL "$1" 2>/dev/null | cut -c1-10; }
+
+# private_dir DIR [create]: a real directory this user owns, mode 0700.
+private_dir() {
+  [ ! -L "$1" ] || return 1
+  if [ ! -e "$1" ]; then
+    [ "$2" = create ] || return 1
+    (umask 077 && mkdir "$1") 2>/dev/null || [ -d "$1" ] || return 1
+  fi
+  [ -d "$1" ] && [ ! -L "$1" ] || return 1
+  [ "$posix_perms" = 0 ] && return 0
+  [ -O "$1" ] || return 1
+  case $(mode_of "$1") in
+    d???------*) return 0 ;;
+  esac
+  return 1
+}
+
+# chain_ready [create]: the cache directories exist and are private. The
+# result is kept for the rest of the run.
+chain_ready() {
+  [ "$chain" = ok ] && return 0
+  [ -n "$cache_top" ] || return 1
+  if [ -n "$cache_base" ]; then
+    if [ ! -e "$cache_base" ] && [ "$1" = create ]; then
+      (umask 077 && mkdir -p "$cache_base") 2>/dev/null
+    fi
+    [ -d "$cache_base" ] || return 1
+    if [ "$posix_perms" != 0 ]; then
+      [ -O "$cache_base" ] || return 1
+      case $(mode_of "$cache_base") in
+        ?????-??-*) ;;
+        *) return 1 ;;
+      esac
+    fi
+  fi
+  for c_dir in "$cache_top" "$cache_top/launcher" "$cache_top/launcher/$VERSION" "$dir"; do
+    private_dir "$c_dir" "$1" || return 1
+  done
+  chain=ok
+}
+
+# bin_ok FILE: a regular, executable file that is not a link and is ours.
+bin_ok() {
+  [ -f "$1" ] && [ ! -L "$1" ] && [ -x "$1" ] || return 1
+  [ "$posix_perms" = 0 ] || [ -O "$1" ]
+}
+
+# sync_path PATH: flush a file or directory to disk, as far as the host can.
+sync_path() {
+  sync "$@" 2>/dev/null || sync 2>/dev/null
+  return 0
+}
+
+# --- lock (a lock directory, as the credential store uses) ---------------
+
+lock=$dir/install.lock
+me=
+brk_me=
+now_ms() { printf '%s000' "$(date +%s)"; }
+host() { uname -n 2>/dev/null || echo unknown; }
+
+# read_owner FILE: o_line, o_pid, o_host and o_ms, each empty when absent or
+# unparsable.
+read_owner() {
+  o_line=$(cat "$1" 2>/dev/null)
+  set -f
+  # shellcheck disable=SC2086
+  set -- $o_line
+  set +f
+  o_pid=$1 o_host=$2 o_ms=$3
+  case $o_pid in *[!0-9]*) o_pid= ;; esac
+  case $o_ms in *[!0-9]*) o_ms= ;; esac
+}
+
+# write_owner DIR LINE: DIR/owner, created exclusively with mode 0600 through a
+# temp file; a leftover temp is removed, never reused.
+write_owner() {
+  rm -f "$1/owner.$$"
+  if (umask 077 && set -C && printf '%s\n' "$2" >"$1/owner.$$") 2>/dev/null &&
+    mv "$1/owner.$$" "$1/owner"; then
+    return 0
+  fi
+  rm -f "$1/owner.$$"
+  return 1
+}
+
+acquire() {
+  mkdir "$lock" 2>/dev/null || return 1
+  me="$$ $(host) $(now_ms)"
+  write_owner "$lock" "$me" && return 0
+  rmdir "$lock" 2>/dev/null
+  me=
+  return 1
+}
+
+release() {
+  [ -n "$me" ] || return 0
+  if [ "$(cat "$lock/owner" 2>/dev/null)" = "$me" ]; then
+    rm -f "$lock/owner"
+    rmdir "$lock" 2>/dev/null
+  fi
+  me=
+}
+
+# lock_is_stale: old enough and abandoned (no owner, another host or a dead pid).
+lock_is_stale() {
+  read_owner "$lock/owner"
+  if [ -n "$o_ms" ]; then
+    [ $(($(date +%s) - o_ms / 1000)) -gt "$lock_age_limit" ] || return 1
+  else
+    [ -n "$(find "$lock" -maxdepth 0 -mmin +$((lock_age_limit / 60)) 2>/dev/null)" ] || return 1
+  fi
+  [ -n "$o_line" ] || return 0
+  [ "$o_host" = "$(host)" ] || return 0
+  [ -n "$o_pid" ] || return 0
+  kill -0 "$o_pid" 2>/dev/null && return 1
+  return 0
+}
+
+# guard_gone: the break guard's owner is provably gone. Its pid is dead on this
+# host, or it is another host's and older than the limit, or it has no owner
+# file and the directory is older than the limit (a crash before the write).
+guard_gone() {
+  read_owner "$brk/owner"
+  if [ -n "$o_pid" ] && [ -n "$o_ms" ] && [ -n "$o_host" ]; then
+    if [ "$o_host" = "$(host)" ]; then
+      kill -0 "$o_pid" 2>/dev/null && return 1
+      return 0
+    fi
+    [ $(($(date +%s) - o_ms / 1000)) -gt "$guard_age_limit" ]
+    return
+  fi
+  [ -n "$(find "$brk" -maxdepth 0 -mmin +$((guard_age_limit / 60)) 2>/dev/null)" ]
+}
+
+# take_guard: hold <lock>.break, the only place a lock is ever broken from. A
+# guard whose owner is gone is moved aside and replaced by ours.
+take_guard() {
+  brk=$lock.break
+  if ! mkdir "$brk" 2>/dev/null; then
+    guard_gone || return 1
+    gone=$brk.stale.$$.$(now_ms)
+    mv "$brk" "$gone" 2>/dev/null || return 1
+    rm -rf "$gone"
+    mkdir "$brk" 2>/dev/null || return 1
+  fi
+  brk_me="$$ $(host) $(now_ms)"
+  write_owner "$brk" "$brk_me" && return 0
+  rmdir "$brk" 2>/dev/null
+  brk_me=
+  return 1
+}
+
+# drop_guard: only the guard whose owner line is ours.
+drop_guard() {
+  [ -n "$brk_me" ] || return 0
+  if [ "$(cat "$brk/owner" 2>/dev/null)" = "$brk_me" ]; then
+    rm -f "$brk/owner"
+    rmdir "$brk" 2>/dev/null
+  fi
+  brk_me=
+}
+
+# take_lock: acquire, breaking a stale lock only while holding the guard, after
+# checking staleness again and after confirming the guard is still ours, so a
+# replacement lock is never removed.
+take_lock() {
+  acquire && return 0
+  lock_is_stale || return 1
+  test_pause stale-checked
+  take_guard || return 1
+  test_pause guard-held
+  if [ -d "$lock" ]; then
+    if lock_is_stale && [ "$(cat "$brk/owner" 2>/dev/null)" = "$brk_me" ]; then
+      broken=$lock.stale.$$.$(now_ms)
+      if mv "$lock" "$broken" 2>/dev/null; then
+        rm -rf "$broken"
+      else
+        drop_guard
+        return 1
+      fi
+    else
+      drop_guard
+      return 1
+    fi
+  fi
+  drop_guard
+  acquire
+}
+
+# --- failure record -----------------------------------------------------------
+
+record_error() {
+  chain_ready create || return 1
+  printf '%s\n' "$1" >"$dir/launcher-error"
+  rm -f "$dir/launcher-error.seen"
+}
+
+# error_is_fresh: a recorded failure younger than the retry window.
+error_is_fresh() {
+  [ -f "$dir/launcher-error" ] || return 1
+  [ -z "$(find "$dir/launcher-error" -mmin +$((error_retry / 60)) 2>/dev/null)" ]
+}
+
+# --- install --------------------------------------------------------------------
+
+fetch() {
+  if have curl; then
+    if [ "$tls_only" = 1 ]; then
+      curl -fsL --proto '=https' --proto-redir '=https' --connect-timeout 10 -o "$2" "$1"
+    else
+      curl -fsL --connect-timeout 10 -o "$2" "$1"
+    fi
+  elif have wget; then
+    if [ "$tls_only" = 1 ]; then
+      wget -q --https-only -T 30 -O "$2" "$1"
+    else
+      wget -q -T 30 -O "$2" "$1"
+    fi
+  else
+    return 1
+  fi
+}
+
+lower() { printf '%s' "$1" | tr 'A-F' 'a-f'; }
+
+# sha_check SUMFILE ARCHIVE ASSET: SUMFILE is one "<sha256>  <ASSET>" record
+# and the archive hashes to it. Sets sha_reason on failure.
+sha_check() {
+  sha_reason="checksum file is malformed"
+  [ "$(grep -c '' "$1" 2>/dev/null)" = 1 ] || return 1
+  sc_line=$(tr -d '\r' <"$1")
+  sc_want=${sc_line%% *}
+  sc_rest=${sc_line#"$sc_want"}
+  case $sc_want in '' | *[!0-9a-fA-F]*) return 1 ;; esac
+  [ ${#sc_want} -eq 64 ] || return 1
+  case $sc_rest in
+    "  $3" | " *$3") ;;
+    "  "?* | " *"?*)
+      sha_reason="checksum file names another asset"
+      return 1
+      ;;
+    *) return 1 ;;
+  esac
+  sha_reason="cannot compute a checksum"
+  if have sha256sum; then
+    sc_got=$(sha256sum "$2") || return 1
+  elif have shasum; then
+    sc_got=$(shasum -a 256 "$2") || return 1
+  else
+    return 1
+  fi
+  sc_got=${sc_got%% *}
+  if [ "$(lower "$sc_want")" != "$(lower "$sc_got")" ]; then
+    sha_reason="checksum mismatch"
+    return 1
+  fi
+  return 0
+}
+
+# names_safe NAMES: no empty, absolute, drive, backslash or ".." entry names.
+names_safe() {
+  printf '%s\n' "$1" | while IFS= read -r nm; do
+    case $nm in
+      '' | /* | ../* | */../* | */.. | .. | *\\* | ?:*) exit 1 ;;
+    esac
+  done
+}
+
+# extract_member ARCHIVE DEST: unpack only <stem>/<exe>, after checking that the
+# archive holds nothing but regular files and directories, no unsafe name, and
+# the member exactly once.
+extract_member() {
+  member=$stem/$exe
+  if [ "$ext" = zip ]; then
+    em_names=$(unzip -Z1 "$1" 2>/dev/null) || return 1
+    em_links=$(unzip -Z "$1" 2>/dev/null | grep -c '^l')
+    [ "$em_links" = 0 ] || return 1
+  else
+    em_names=$(tar -tzf "$1" 2>/dev/null) || return 1
+    em_long=$(tar -tvzf "$1" 2>/dev/null) || return 1
+    em_types=$(printf '%s\n' "$em_long" | cut -c1)
+    [ "$(printf '%s\n' "$em_types" | grep -cv '^[-d]$')" = 0 ] || return 1
+    [ "$(printf '%s\n' "$em_types" | wc -l)" -eq "$(printf '%s\n' "$em_names" | wc -l)" ] || return 1
+  fi
+  names_safe "$em_names" || return 1
+  [ "$(printf '%s\n' "$em_names" | grep -cxF -- "$member")" = 1 ] || return 1
+  if [ "$ext" = zip ]; then
+    unzip -q -n "$1" "$member" -d "$2" </dev/null || return 1
+  else
+    tar -xzf "$1" -C "$2" "$member" || return 1
+  fi
+  [ ! -L "$2/$stem" ] && [ -f "$2/$member" ] && [ ! -L "$2/$member" ]
+}
+
+fail() {
+  record_error "$1"
+  exit 1
+}
+
+# The exit path of an install: staging directory, lock and guard.
+cleanup() {
+  [ -z "$tmp" ] || rm -rf "$tmp"
+  release
+  drop_guard
+}
+
+install_binary() {
+  [ -z "$error" ] || {
+    record_error "$error"
+    exit 1
+  }
+  chain_ready create || exit 1
+  tmp=
+  trap cleanup EXIT
+  trap 'exit 1' HUP INT TERM
+  take_lock || exit 0
+  if bin_ok "$bin"; then
+    exit 0
+  fi
+  stem=agent-hub-v$VERSION-$target
+  asset=$stem.$ext
+  url=$base/agent-hub-v$VERSION
+  # We hold the lock: staging left by a killed install is ours to clear.
+  rm -rf "$dir"/.tmp.*
+  n=0
+  until (umask 077 && mkdir "$dir/.tmp.$$.$n") 2>/dev/null; do
+    n=$((n + 1))
+    [ $n -lt 50 ] || fail "cannot create a staging directory"
+  done
+  tmp=$dir/.tmp.$$.$n
+  fetch "$url/$asset" "$tmp/$asset" || fail "download failed: $url/$asset"
+  fetch "$url/$stem.sha256" "$tmp/$stem.sha256" || fail "download failed: $url/$stem.sha256"
+  sha_check "$tmp/$stem.sha256" "$tmp/$asset" "$asset" || fail "$sha_reason"
+  extract_member "$tmp/$asset" "$tmp" || fail "the archive is unsafe or has no $exe"
+  chmod 755 "$tmp/$stem/$exe" || fail "cannot make $exe executable"
+  [ -x "$tmp/$stem/$exe" ] || fail "cannot make $exe executable"
+  sync_path "$tmp/$stem/$exe"
+  rm -rf "$bin"
+  mv -f "$tmp/$stem/$exe" "$bin" || fail "cannot place $bin"
+  sync_path "$dir"
+  bin_ok "$bin" || fail "the installed $exe is not a regular executable of this user"
+  rm -f "$dir/launcher-error" "$dir/launcher-error.seen"
+  exit 0
+}
+
+# --- finding a binary --------------------------------------------------------------
+
+# path_matches FILE: FILE answers `version` with the documented line for this
+# release, within the timeout, with stdin closed.
+path_matches() {
+  pm_probe=$dir/.probe.$$
+  rm -f "$pm_probe"
+  (set -C && : >"$pm_probe") 2>/dev/null || return 1
+  "$1" version </dev/null >"$pm_probe" 2>/dev/null &
+  pm_pid=$!
+  (
+    sleep "$probe_timeout"
+    kill "$pm_pid" 2>/dev/null
+  ) >/dev/null 2>&1 </dev/null &
+  pm_dog=$!
+  wait "$pm_pid" 2>/dev/null
+  pm_rc=$?
+  kill "$pm_dog" 2>/dev/null
+  pm_line=$(head -n 1 "$pm_probe" 2>/dev/null)
+  rm -f "$pm_probe"
+  [ "$pm_rc" -eq 0 ] || return 1
+  # `agent-hub <version>`, then an optional ` (<commit>)`.
+  case $pm_line in
+    "agent-hub $VERSION" | "agent-hub $VERSION ("*")") return 0 ;;
+  esac
+  return 1
+}
+
+find_binary() {
+  if chain_ready && bin_ok "$bin"; then
+    found=$bin
+    return 0
+  fi
+  p=$(command -v agent-hub 2>/dev/null) || return 1
+  case $p in
+    /*) ;;
+    *) return 1 ;;
+  esac
+  [ "$p" != "$self" ] && [ -f "$p" ] && [ -x "$p" ] || return 1
+  chain_ready create || return 1
+  if path_matches "$p" 2>/dev/null; then
+    found=$p
+    return 0
+  fi
+  return 1
+}
+
+[ "$1" != --install ] || install_binary
+
+if find_binary; then
+  # The owner and type of a cached binary are checked again just before it runs.
+  if [ "$found" != "$bin" ] || bin_ok "$bin"; then
+    exec "$found" "$@"
+  fi
+fi
+
+# --- no binary ------------------------------------------------------------------------
+
+start_install() {
+  error_is_fresh && return 0
+  rm -f "$dir/launcher-error" "$dir/launcher-error.seen"
+  nohup "$self" --install </dev/null >/dev/null 2>&1 &
+}
+
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+arg_after() {
+  want=$1
+  shift
+  while [ $# -gt 1 ]; do
+    [ "$1" = "$want" ] && {
+      printf '%s' "$2"
+      return
+    }
+    shift
+  done
+}
+
+# hook_output HARNESS EVENT TEXT: the harness's hook output for one message.
+hook_output() {
+  text=$(json_escape "$3")
+  case "$1:$2" in
+    claude:session-start) printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"%s"}}\n' "$text" ;;
+    claude:prompt) printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"%s"}}\n' "$text" ;;
+    claude:subagent-start) printf '{"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":"%s"}}\n' "$text" ;;
+    antigravity:prompt) printf '{"injectSteps":[{"ephemeralMessage":"%s"}]}\n' "$text" ;;
+    *) printf '{}\n' ;;
+  esac
+}
+
+case "$1" in
+  hook | watch)
+    harness=$(arg_after --harness "$@")
+    event=$2
+    [ "$1" != watch ] || event=watch
+    session=
+    if [ ! -t 0 ]; then
+      session=$(cat 2>/dev/null | tr -d '\n' | sed -n 's/.*"session_id" *: *"\([^"]*\)".*/\1/p')
+    fi
+    if ! chain_ready create; then
+      # Nowhere safe to record it, so it is said every time.
+      hook_output "$harness" "$event" "Hooks are off: the cache directory is not private. Use the hub tools directly."
+      exit 0
+    fi
+    if [ -n "$error" ]; then
+      record_error "$error"
+    fi
+    if error_is_fresh; then
+      reason=$(cat "$dir/launcher-error")
+      key=${session:-none}
+      if ! grep -qxF "$key" "$dir/launcher-error.seen" 2>/dev/null; then
+        printf '%s\n' "$key" >>"$dir/launcher-error.seen"
+        hook_output "$harness" "$event" "Hooks are off: $reason. Use the hub tools directly."
+      else
+        printf '{}\n'
+      fi
+      exit 0
+    fi
+    start_install
+    hook_output "$harness" "$event" "The Agent Hub binary is installing; hub context arrives on the next prompt."
+    exit 0
+    ;;
+  token)
+    # Trust cannot be checked without the resolver, so no Authorization.
+    if chain_ready create; then
+      start_install
+    fi
+    agent=$(arg_after --agent "$@")
+    printf '{"X-Agent-Id":"%s"}\n' "$(json_escape "${agent:-unknown}")"
+    exit 0
+    ;;
+esac
+
+if ! chain_ready create; then
+  printf 'agent-hub is not available: the cache directory is not private\n' >&2
+  exit 75
+fi
+start_install
+if error_is_fresh; then
+  printf 'agent-hub is not available: %s\n' "$(cat "$dir/launcher-error")" >&2
+else
+  printf 'The Agent Hub binary is installing; try again in a minute.\n' >&2
+fi
+exit 75
