@@ -334,7 +334,22 @@ pub fn resolve(input: &ResolveInput) -> Resolved {
     } else if named_members.len() == 1 {
         (member, member_source) = (Some(named_members[0]), MemberSource::Only);
     } else if named_members.len() > 1 {
-        several = true;
+        // Several members on this hub: the one marked `default = true`,
+        // when exactly one is.
+        let mut defaults: Vec<&str> = Vec::new();
+        for credential in &for_url {
+            if credential.default
+                && let Some(member) = present(credential.member.as_deref())
+                && !defaults.contains(&member)
+            {
+                defaults.push(member);
+            }
+        }
+        if let [only] = defaults[..] {
+            (member, member_source) = (Some(only), MemberSource::Only);
+        } else {
+            several = true;
+        }
     }
 
     let mut token: Option<&str> = None;
