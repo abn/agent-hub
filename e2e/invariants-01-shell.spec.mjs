@@ -64,7 +64,7 @@ test.describe("request counts", () => {
   });
 
   // Nothing waiting and nothing new says so plainly and folds what was seen.
-  test("a quiet Now is one request and its own shape", async ({ hub, page }) => {
+  test("a quiet Now is one payload, one margin list and its own shape", async ({ hub, page }) => {
     await page.goto(`${hub.baseUrl}/`);
     const seen = [homeEvent(1, 12), homeEvent(2, 40)];
     const payload = quietHomePayload({ recent: seen, last_event_at: seen[0].created_at });
@@ -86,7 +86,12 @@ test.describe("request counts", () => {
       await expect(page.getByRole("button", { name: "Show" })).toHaveAttribute("aria-expanded", "false");
       await expect(page.getByRole("heading", { name: /Needs you|Since you looked/ })).toHaveCount(0);
       await expect(page.getByText("That is everything.", { exact: true })).toBeVisible();
-      expect(calls, "painting a quiet Now made more than the one request").toEqual(["GET /api/v1/home"]);
+      // The margin's live sessions are a list of their own, read beside the
+      // payload. Nothing else is asked for.
+      expect(calls.sort(), "painting a quiet Now made more than its payload and its margin list").toEqual([
+        "GET /api/v1/home",
+        "GET /api/v1/sessions",
+      ]);
     } finally {
       await page.unroute(home).catch(() => {});
     }

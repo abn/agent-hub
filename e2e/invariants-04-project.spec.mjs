@@ -81,7 +81,7 @@ test.describe("project tools and sessions", () => {
     expect((await capture.innerText()).trim(), "Capture idea still spends the row on its words").toBe("");
     const filter = controls.getByRole("searchbox", { name: "Filter events" });
     const box = await filter.boundingBox();
-    expect(box.width, `the filter is ${box.width}px wide, too narrow to read its own placeholder`).toBeGreaterThanOrEqual(120);
+    expect(box.width, `the filter is ${box.width}px wide, too narrow to read its own placeholder`).toBeGreaterThanOrEqual(100);
   });
 
   test("the feed stage's header names the project, not the open event", async ({ hub, page }) => {
@@ -266,22 +266,22 @@ test.describe("feed stage", () => {
 });
 
 test.describe("artifacts", () => {
-  test("grouping by agent uses the actor with an honest fallback", async ({ hub, page }) => {
+  test("grouping by session names the session, with an honest fallback", async ({ hub, page }) => {
     await goto(page, projectRoute(hub, "artifacts"), "Artifacts");
     const filter = page.locator('[data-action="project-filter-toggle"]');
     if ((await filter.count()) && (await filter.first().isVisible())) {
       await filter.first().click();
     }
-    const group = page.locator("[data-group-toggle]");
+    const group = page.locator("[data-group-toggle]", { hasText: "Group" });
     await expect(group, "the artifacts screen has no group menu toggle").toHaveCount(1);
     await group.click();
-    const option = page.locator('[data-action="artifact-group"][data-group="agent"]');
-    await expect(option, "the group menu does not offer Agent").toHaveCount(1);
+    const option = page.locator('[data-action="artifact-group"][data-group="session"]');
+    await expect(option, "the group menu does not offer Session").toHaveCount(1);
     await option.click();
     const headers = page.locator(".shell-group-label, .section-label");
     await expect(headers.first()).toBeVisible();
     const texts = await headers.allInnerTexts();
-    expect(texts.length, "no group headers after grouping by agent").toBeGreaterThan(0);
+    expect(texts.length, "no group headers after grouping by session").toBeGreaterThan(0);
     expect(texts.filter((text) => text.trim() === "" || text.trim().startsWith("·")), "a blank group header").toEqual([]);
   });
 

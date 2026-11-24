@@ -1,5 +1,5 @@
 // The Projects register shows what its header counts. A desktop lists the
-// agent spaces under their own label beside the projects; a phone keeps them
+// member spaces under their own label beside the projects; a phone keeps them
 // behind the segmented switcher and, once the register is long, carries a
 // filter in its tools row.
 
@@ -16,7 +16,7 @@ async function seedProjects(hub, tag, total) {
   return made.personal_project_id;
 }
 
-// A register of exactly `total` regular projects and `spaces` agent spaces,
+// A register of exactly `total` regular projects and `spaces` member spaces,
 // whatever else the shared hub holds.
 async function routeRegister(page, total, spaces = 0) {
   const projects = Array.from({ length: total }, (_, i) => ({
@@ -31,11 +31,11 @@ async function routeRegister(page, total, spaces = 0) {
 }
 
 test.describe("the projects register", () => {
-  test("a desktop lists agent spaces under a label and counts what it shows", async ({ hub, page }, testInfo) => {
+  test("a desktop lists member spaces under a label and counts what it shows", async ({ hub, page }, testInfo) => {
     test.skip(isPhone(testInfo), "the phone splits the lists behind a switcher");
     const spaceId = await seedProjects(hub, "desk", 1);
     await goto(page, "#/projects", "Projects");
-    await expect(page.locator(".projects-section-label")).toHaveText("Agent spaces");
+    await expect(page.locator(".projects-section-label")).toHaveText("Member spaces");
     await expect(page.locator(`.project-row:visible[data-id="${spaceId}"]`)).toHaveCount(1);
     const rows = await page.locator(".project-row:visible").count();
     const meta = await page.locator(".shell-head .shell-meta").innerText();
@@ -70,7 +70,7 @@ test.describe("the projects register", () => {
     await expect(field).toBeFocused();
     await expect(page.locator(".projects-tabs-track")).toHaveCount(0);
     await field.fill("Reg ph space");
-    await expect(page.locator(`.project-row:visible[data-id="${spaceId}"]`), "the filter skipped agent spaces").toHaveCount(1);
+    await expect(page.locator(`.project-row:visible[data-id="${spaceId}"]`), "the filter skipped member spaces").toHaveCount(1);
     await expect(page.locator(".project-row:visible")).toHaveCount(1);
     await field.press("Escape");
     await expect(page.locator(".projects-tabs-track")).toBeVisible();
@@ -88,7 +88,7 @@ test.describe("the projects register", () => {
     const field = page.getByRole("searchbox", { name: "Filter projects" });
     await expect(field).toBeFocused();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    // Fixtures 8 and 9 are agent spaces, so one query spans both lists.
+    // Fixtures 8 and 9 are member spaces, so one query spans both lists.
     await field.fill("Fixture");
     await expect(page.locator(".project-row:visible")).toHaveCount(10);
     await field.fill("Fixture 9");
@@ -106,31 +106,31 @@ test.describe("the projects register", () => {
     test.skip(!isPhone(testInfo), "the phone-only filter control");
     await routeRegister(page, 9, 0);
     await goto(page, "#/projects", "Projects");
-    await page.getByRole("tab", { name: /Agent spaces/ }).click();
-    await expect(page.getByText("No agent spaces yet")).toBeVisible();
+    await page.getByRole("tab", { name: /Member spaces/ }).click();
+    await expect(page.getByText("No member spaces yet")).toBeVisible();
     const toggle = page.getByRole("button", { name: "Filter projects" });
     await toggle.click();
     const field = page.getByRole("searchbox", { name: "Filter projects" });
     await field.fill("Fixture 2");
     await expect(page.locator(".project-row:visible")).toHaveCount(1);
     await field.press("Escape");
-    await expect(page.getByText("No agent spaces yet")).toBeVisible();
+    await expect(page.getByText("No member spaces yet")).toBeVisible();
     await expect(page.locator(".project-row:visible")).toHaveCount(0);
-    await expect(page.getByRole("tab", { name: /Agent spaces/ })).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("tab", { name: /Member spaces/ })).toHaveAttribute("aria-selected", "true");
   });
 
   test("crossing the breakpoint draws the register for the new width", async ({ page, hub }) => {
     await routeRegister(page, 3, 1);
     await page.setViewportSize({ width: 1440, height: 900 });
     await goto(page, "#/projects", "Projects");
-    await expect(page.locator(".projects-section-label")).toHaveText("Agent spaces");
+    await expect(page.locator(".projects-section-label")).toHaveText("Member spaces");
     await expect(page.locator(".projects-tabs-track")).toHaveCount(0);
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.locator(".projects-tabs-track")).toBeVisible();
     await expect(page.locator(".projects-section-label")).toHaveCount(0);
     await expect(page.locator(".project-row:visible")).toHaveCount(2);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await expect(page.locator(".projects-section-label")).toHaveText("Agent spaces");
+    await expect(page.locator(".projects-section-label")).toHaveText("Member spaces");
     await expect(page.locator(".project-row:visible")).toHaveCount(3);
     await expect(page.locator(".projects-tabs-track")).toHaveCount(0);
   });
@@ -139,12 +139,12 @@ test.describe("the projects register", () => {
     await routeRegister(page, 3, 1);
     await page.setViewportSize({ width: 1440, height: 900 });
     await goto(page, "#/projects?from=link", "Projects");
-    await expect(page.locator(".projects-section-label")).toHaveText("Agent spaces");
+    await expect(page.locator(".projects-section-label")).toHaveText("Member spaces");
     await page.setViewportSize({ width: 390, height: 844 });
     await expect(page.locator(".projects-tabs-track")).toBeVisible();
     await expect(page.locator(".projects-section-label")).toHaveCount(0);
     await page.setViewportSize({ width: 1440, height: 900 });
-    await expect(page.locator(".projects-section-label")).toHaveText("Agent spaces");
+    await expect(page.locator(".projects-section-label")).toHaveText("Member spaces");
     await expect(page.locator(".projects-tabs-track")).toHaveCount(0);
   });
 });

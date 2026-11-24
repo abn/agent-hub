@@ -1,6 +1,7 @@
 // The hash router. It owns which screen is current, the nav marking, and the
 // one place a screen's failure becomes an error state inside the shell.
 
+import { primeMembers } from "./author.mjs";
 import { beginRender, main, paint, stale } from "./dom.mjs";
 import { ERROR_COPY, errorDetail, errorShellHTML } from "./empty.mjs";
 import { refreshBadge } from "./events.mjs";
@@ -51,14 +52,13 @@ function setCurrent(screen, path = "") {
   // The project-owned screens sit under the Projects tab: the segmented
   // project view has that tab on every segment, and the artifact viewer is
   // the artifact inside a project, so it keeps the tab where it was opened.
-  // The artifacts list has its own rail row. It, Settings, Storage and Agents
+  // The artifacts list has its own rail row. It, Settings, Storage and Members
   // and tokens are pushed from More: on a phone More stays current while they
   // are open.
   const isPushedFromMore =
     screen === "settings" ||
     screen === "storage" ||
     screen === "access" ||
-    screen === "agents" ||
     screen === "artifacts";
   // The Inbox's address is Now showing what needs the reader, so it marks Now.
   const own = screen === "inbox" ? "home" : screen;
@@ -162,6 +162,9 @@ export async function render() {
     // The path is handed over so a route with an id of its own, such as the
     // project view and the artifact viewer, can read its segment without
     // reaching into the location itself.
+    // Receipts name the member unless the hub has only one, so the count is
+    // known before a row is drawn. It is cached, so most renders ask nothing.
+    await primeMembers();
     refreshBadge(await screens[screen](params, gen, path));
   } catch (error) {
     // A failure that lands after the reader has moved on is not theirs to see,

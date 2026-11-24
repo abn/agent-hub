@@ -7,12 +7,13 @@
 import {
   accessScreen,
   copyToken,
+  createMember,
   issueToken,
+  memberNameProblem,
   reissueToken,
-  revealIssuedToken,
   revokeToken,
   ungrant,
-} from "./agents.mjs";
+} from "./members.mjs";
 import { api } from "./api.mjs";
 import { connectShow, connectSubmit, connectScreen } from "./connect.mjs";
 import { artifactListScreen } from "./artifact-list.mjs";
@@ -123,14 +124,14 @@ main.addEventListener("click", (event) => {
   if (action === "answer") acted(button, answer(id, button));
   if (action === "approve") acted(button, approve(id, button.dataset.summary));
   if (action === "kind") toggleKind(button.dataset.kind, projectFromHash());
-  if (action === "end") acted(button, endSession(id));
-  if (action === "prune") acted(button, pruneSession(id, button.dataset.agent));
+  if (action === "end") acted(button, endSession(id, button.dataset.name));
+  if (action === "prune") acted(button, pruneSession(id, button.dataset.label));
   if (action === "copy-token") copyToken(button.dataset.token);
   if (action === "more-refresh") acted(button, render());
-  if (action === "agent-token") acted(button, reissueToken(id, button.dataset.name));
-  if (action === "agent-issue") acted(button, issueToken(id, button.dataset.name));
-  if (action === "agent-revoke") acted(button, revokeToken(id, button.dataset.name));
-  if (action === "agent-ungrant") acted(button, ungrant(id, button.dataset.project));
+  if (action === "member-token") acted(button, reissueToken(id, button.dataset.name));
+  if (action === "member-issue") acted(button, issueToken(id, button.dataset.name));
+  if (action === "member-revoke") acted(button, revokeToken(id, button.dataset.name));
+  if (action === "member-ungrant") acted(button, ungrant(id, button.dataset.project));
   if (action === "project-back") projectBack();
   if (action === "wiki-new") wikiNew(button);
   if (action === "wiki-save") acted(button, wikiSave(button));
@@ -204,28 +205,24 @@ main.addEventListener("submit", (event) => {
     })
       .then(() => (location.hash = "#/feed"))
       .catch(failed);
-  } else if (action === "agent-create") {
+  } else if (action === "member-create") {
     const payload = {
       id: String(data.get("id") || "").trim(),
       display_name: String(data.get("display_name") || "").trim(),
     };
-    api("/api/v1/members", { method: "POST", body: JSON.stringify(payload) })
-      .then(async () => {
-        // The token is issued once, now, and the reveal opens on it directly:
-        // the copy promises it, and a mobile create that skipped it left the
-        // agent with no way in. The agent's own screen is where it lands.
-        location.hash = `#/access?agent=${encodeURIComponent(payload.id)}`;
-        let issued = null;
-        try {
-          issued = await api(`/api/v1/members/${encodeURIComponent(payload.id)}/token`, { method: "POST" });
-        } catch {}
-        await revealIssuedToken(issued?.token || null, payload.display_name || payload.id, payload.id);
-      })
-      .catch(failed);
-  } else if (action === "agent-grant") {
-    const agent = String(data.get("agent") || "").trim();
+    const problem = memberNameProblem(payload.id);
+    if (problem) {
+      failed(new Error(problem));
+      return;
+    }
+    // The token is issued once, now, and the reveal opens on it directly: the
+    // copy promises it, and a mobile create that skipped it left the member
+    // with no way in. The member's own screen is where it lands.
+    createMember(payload.id, payload.display_name).catch(failed);
+  } else if (action === "member-grant") {
+    const member = String(data.get("member") || "").trim();
     const project = String(data.get("project") || "").trim();
-    api(`/api/v1/members/${encodeURIComponent(agent)}/grants`, {
+    api(`/api/v1/members/${encodeURIComponent(member)}/grants`, {
       method: "POST",
       body: JSON.stringify({ project_id: project }),
     })

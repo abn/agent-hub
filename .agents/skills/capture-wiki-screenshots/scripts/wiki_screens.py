@@ -216,6 +216,9 @@ def captures(seeded: dict, older_version: int) -> list[tuple[str, str, str]]:
         ("access", "main .access-screen, main .form-row-title", "access"),
         ("connect", "main .connect .connect-field", "connect"),
         ("more", "main .more-screen .more-row", "more"),
+        # The member's own stage: its token, its live sessions and the agents it
+        # has run, over the two members the identity seed adds.
+        ("access?member=laptop", "main .member-detail-controls, main .access-screen .member-session-list", "member-stage"),
     ]
 
 
@@ -236,10 +239,10 @@ def dialogs(seeded: dict, older: int) -> list[tuple[str, str, str, str, tuple[st
     both = ("desktop", "phone")
     return [
         ("new-project", "projects", "main .projects-screen .project-row", '[data-action="new-project"]', both),
-        ("delete-project", f"{at}/feed", "main .feed-row", ".proj-overflow-btn", both),
+        ("delete-project", f"{at}/feed", "main .feed-row", ".proj-overflow-btn ; [data-action=\"delete-project\"]", both),
         ("end-session", f"session?project={project}&id={seeded['session_id']}", "main .end-session", '[data-action="end"]', both),
         ("prune", "storage", "main .storage", "[data-action='storage-prune-all'], .storage-prune-all-btn", both),
-        ("issue-token", "access", "main .agent-index-row", '[data-action="agent-issue"]', ("desktop",)),
+        ("issue-token", f"access?member={harness.AGENT_ID}", "main .member-detail-controls", '[data-action="member-token"], [data-action="member-issue"]', ("desktop",)),
         ("revert", diff, "main .wiki-diff", '[data-action="wiki-revert"]', both),
     ]
 
@@ -288,20 +291,64 @@ def capture(page, route: str, selector: str, stem: str, width: str, theme: str) 
     return shot(page, stem, width, theme)
 
 
-def open_dialog(page, opener: str) -> None:
-    """Press the control a screen carries and wait for the dialog it opens."""
+def capture_who(page, project: str, width: str, theme: str) -> Path:
+    """Open the Who menu on the project's feed and photograph it open.
+
+    A phone keeps the feed's filters behind the Filter and group glyph, so the
+    glyph is pressed first; a desktop has the trigger in its control row.
+    """
+    page.evaluate("location.hash = '#/settings'")
+    page.wait_for_selector("main .form-row-title, main .row .title", timeout=10000)
+    page.evaluate(f"location.hash = '#/projects/{project}/feed'")
+    page.wait_for_selector("main .shell-index .feed-day .feed-row", timeout=15000)
+    if width == "phone":
+        page.evaluate(
+            """() => [...document.querySelectorAll('[data-action="project-filter-toggle"]')]
+                 .filter((control) => control.offsetParent !== null)
+                 .pop()
+                 ?.click()"""
+        )
+        page.wait_for_timeout(150)
     page.evaluate(
-        """(selector) => [...document.querySelectorAll(selector)]
+        """() => [...document.querySelectorAll('.who-menu [data-group-toggle]')]
              .filter((control) => control.offsetParent !== null)
              .pop()
-             ?.click()""",
-        opener,
+             ?.click()"""
     )
+    page.wait_for_selector(".who-menu [role='menu']:not([hidden])", timeout=10000)
+    page.evaluate(
+        "() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+    )
+    return shot(page, "who-menu", width, theme)
+
+
+def open_dialog(page, opener: str) -> None:
+    """Press the control a screen carries and wait for the dialog it opens.
+
+    An opener behind a menu names each control to press, in order, split by " ; ".
+    """
+    for step in opener.split(" ; "):
+        page.evaluate(
+            """(selector) => [...document.querySelectorAll(selector)]
+                 .filter((control) => control.offsetParent !== null)
+                 .pop()
+                 ?.click()""",
+            step,
+        )
+        page.wait_for_timeout(150)
     page.wait_for_selector("dialog[open]", timeout=10000)
 
 
 def capture_dialog(page, route: str, ready: str, opener: str, stem: str, width: str, theme: str) -> Path:
     """Press the control that opens a dialog and photograph the decision."""
+    if page.query_selector("dialog[open]"):
+        page.evaluate(
+            """() => [...document.querySelectorAll("dialog[open] button")]
+                 .find((b) => /^(cancel|done)$/i.test(b.textContent.trim()))?.click()"""
+        )
+        if page.query_selector("dialog[open]"):
+            page.keyboard.press("Escape")
+        page.wait_for_function("() => !document.querySelector('dialog[open]')", timeout=5000)
     page.evaluate("location.hash = '#/settings'")
     page.wait_for_selector("main .form-row-title, main .row .title", timeout=10000)
     page.evaluate(f"location.hash = '#/{route}'")
@@ -328,8 +375,22 @@ def run() -> int:
     data_dir = ROOT / "target" / "tmp" / "data"
     shutil.rmtree(data_dir, ignore_errors=True)
     data_dir.mkdir(parents=True, exist_ok=True)
-    with harness.running_hub(NAME, override="data", cwd=str(data_dir.parent)) as (port, seeded):
+    tokens: dict[str, str] = {}
+
+    def seeder(port: int) -> dict[str, str]:
+        # The members come first and the checks project's session writes as the
+        # laptop's agent, so its asks read as an agent's and not as the human's.
+        tokens.update(harness.seed_members(port))
+        return harness.seed(port, as_member=(tokens["laptop"], "claude-code"))
+
+    with harness.running_hub(NAME, override="data", cwd=str(data_dir.parent), seeder=seeder) as (port, seeded):
         seed_wiki(port)
+        # Agents and shared sessions, so the bylines, the Who menu and the
+        # member stage have something to show.
+        harness.seed_identity(port, tokens)
+        # The seeded member holds a live token, so Members shows Reissue and
+        # the token dialog is the same state at every width and theme.
+        harness.request(port, "POST", f"/api/v1/members/{harness.AGENT_ID}/token")
         # The page is written twice, so its history holds an older version. The
         # version numbers are the hub's, read back rather than assumed, so the
         # diff and the revert dialog are photographed against a version that
@@ -409,6 +470,10 @@ def run() -> int:
                             failures.append(
                                 f"{width} {theme} #{route}: {type(problem).__name__}: {problem}"
                             )
+                    try:
+                        written.append(capture_who(page, seeded["project_id"], width, theme))
+                    except Exception as problem:  # playwright timeout, etc.
+                        failures.append(f"{width} {theme} #who-menu: {type(problem).__name__}: {problem}")
                     for stem, route, ready, opener, widths in dialogs(seeded, older_version):
                         if width not in widths:
                             continue

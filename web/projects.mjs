@@ -67,7 +67,7 @@ if (typeof document !== "undefined") {
 // replaces the count with one mono line, the same shape the index filter uses.
 // The register has no index pane, so it filters its own lists. On a phone the
 // field takes the tab switcher's place while it is open, and a live query
-// searches projects and agent spaces together.
+// searches projects and member spaces together.
 function wireProjectFilter() {
   const field = /** @type {any} */ (document.querySelector("[data-action='projects-filter']"));
   if (!field || field.dataset.wired === "on") return;
@@ -235,13 +235,13 @@ export async function projectsIndexScreen(gen, passedProjects) {
   // not a contract to read it from.
   const isPersonal = (p) => p.is_personal === true;
   const regularProjects = projects.filter((p) => !isPersonal(p));
-  const agentSpaces = projects.filter(isPersonal);
+  const memberSpaces = projects.filter(isPersonal);
 
   const totalUsedBytes = storage?.used_bytes ?? 0;
   const totalFootprint = size(totalUsedBytes);
   const anyActive = projects.some((p) => (statsMap.get(p.id)?.sessions_live || 0) > 0);
   const headerMeta = !anyActive
-    ? `${projects.length} · ${totalFootprint} · no agents active`
+    ? `${projects.length} · ${totalFootprint} · no live sessions`
     : `${projects.length} · ${totalFootprint}`;
 
   const renderRow = (p) => {
@@ -297,16 +297,16 @@ export async function projectsIndexScreen(gen, passedProjects) {
     ? regularProjects.map(renderRow).join("")
     : `<div class="projects-empty-tab">No projects yet</div>`;
 
-  const spaceRows = agentSpaces.length
-    ? agentSpaces.map(renderRow).join("")
-    : `<div class="projects-empty-tab">No agent spaces yet</div>`;
+  const spaceRows = memberSpaces.length
+    ? memberSpaces.map(renderRow).join("")
+    : `<div class="projects-empty-tab">No member spaces yet</div>`;
 
   // A desktop has the room for both lists under their own labels; a phone
   // splits them with a segmented switcher in its tools row.
   const isDesktop = window.matchMedia("(min-width: 720px)").matches;
   const spacesLabel =
-    isDesktop && agentSpaces.length
-      ? `<div class="access-section-label projects-section-label">Agent spaces</div>`
+    isDesktop && memberSpaces.length
+      ? `<div class="access-section-label projects-section-label">Member spaces</div>`
       : "";
   const bodyHTML = `
     <div class="projects-screen">
@@ -315,7 +315,7 @@ export async function projectsIndexScreen(gen, passedProjects) {
       </div>
       ${spacesLabel}
       <div class="projects-list projects-list-spaces"${isDesktop ? "" : " hidden"}>
-        ${isDesktop && !agentSpaces.length ? "" : spaceRows}
+        ${isDesktop && !memberSpaces.length ? "" : spaceRows}
       </div>
     </div>`;
 
@@ -331,7 +331,7 @@ export async function projectsIndexScreen(gen, passedProjects) {
         Projects <span class="tab-count mono">${regularProjects.length}</span>
       </button>
       <button type="button" role="tab" class="projects-tab-btn" data-tab="spaces" aria-selected="false">
-        Agent spaces <span class="tab-count mono">${agentSpaces.length}</span>
+        Member spaces <span class="tab-count mono">${memberSpaces.length}</span>
       </button>
     </div>`;
   const many = projects.length > 8;

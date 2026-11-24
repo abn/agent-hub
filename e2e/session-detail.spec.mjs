@@ -20,8 +20,9 @@ test.describe("session detail", () => {
     await expect(copy).toHaveCount(1);
     await expect(copy.locator("xpath=ancestor::*[contains(@class,'meta')][1]")).toContainText(hub.sessionId);
     const header = page.locator(".session-detail-header");
-    const owner = await header.locator(".meta[data-owner]").getAttribute("data-owner");
-    expect(await header.textContent(), "the body repeats the owner").not.toContain(owner);
+    // A session is shared: who took part is named once, and nothing says it is owned.
+    expect(await header.textContent(), "a session claims an owner").not.toMatch(/\bowner\b/i);
+    expect(await header.getByRole("button", { name: "Reassign" }).count(), "a session offers a reassign").toBe(0);
     for (const line of await header.locator(".meta").allTextContents()) {
       expect(line.trim(), "a meta line starts or ends with a separator").not.toMatch(/^·|·$/);
     }
@@ -59,7 +60,7 @@ test.describe("session detail", () => {
     const stage = page.locator("main");
     await expect(stage.locator(".tree-count", { hasText: /^\s*1 key\s*$/ })).toBeVisible();
     await expect(stage.locator(".brain-label")).toContainText("1 item");
-    await expect(stage.locator(".session-detail-header .meta").last()).toContainText(/\b1 event\b/);
+    await expect(stage.locator(".session-detail-header .meta").filter({ hasText: /event/ })).toContainText(/\b1 event\b/);
     const filed = await holding(hub, "one-file", "/fs/only.md");
     await page.goto(route({ ...hub, sessionId: filed }, ""));
     await expect(stage.locator(".tree-count", { hasText: /^\s*1 file\s*$/ })).toBeVisible();

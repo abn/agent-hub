@@ -5,6 +5,7 @@
 // so no comment body or quote ever executes as markup.
 
 import { api } from "./api.mjs";
+import { bylineOf, bylineText } from "./author.mjs";
 import { commentThreads, openThreadCount } from "./artifact-model.mjs";
 import { composer } from "./composer.mjs";
 import { confirmAction } from "./dialog.mjs";
@@ -111,14 +112,27 @@ export function refreshCommentsToggle() {
   }
 }
 
-export function authorNode(authorText) {
-  const isHuman = authorText === "human" || authorText === "you";
+// Who wrote a comment: the subject in 600 and, for a participant, its receipts
+// after it. The human and the hub read as words, not as agents, so they are not
+// set in mono.
+export function authorNode(comment) {
+  const b = bylineOf(comment);
+  const person = b.kind === "human" || b.kind === "hub";
   const span = document.createElement("span");
-  span.className = "comment-author" + (isHuman ? " human" : " agent mono");
-  if (!isHuman) span.dataset.agent = "true";
-  span.textContent = isHuman ? "you" : authorText;
+  span.className = "comment-author" + (person ? " human" : " participant mono");
+  if (b.title) span.title = b.title;
+  span.textContent = b.subject;
+  if (b.receipts) {
+    const by = document.createElement("span");
+    by.className = "by-r mono";
+    by.textContent = b.receipts;
+    span.append(" ", by);
+  }
   return span;
 }
+
+// The words a comment's author is called in a label or a confirmation.
+const writer = (comment) => bylineText(comment);
 
 function quoteBlockNode(comment, shownVersion) {
   const anchor = comment && comment.anchor;
@@ -297,7 +311,7 @@ export async function resolveThread(entries) {
 export async function deleteComment(comment) {
   const confirmed = await confirmAction({
     title: "Delete this comment?",
-    body: `It is removed for everyone who can read the artifact. Written by ${comment.actor}.`,
+    body: `It is removed for everyone who can read the artifact. Written by ${writer(comment)}.`,
     note: "Deleting a comment cannot be undone.",
     safe: "Keep",
     danger: "Delete comment",
@@ -349,7 +363,7 @@ function commentRow(comment) {
 
   const head = document.createElement("div");
   head.className = "comment-head";
-  head.append(authorNode(comment.actor), timeNode(comment.created_at));
+  head.append(authorNode(comment), timeNode(comment.created_at));
 
   const marker = anchorMarker(comment);
   if (marker) {
@@ -384,7 +398,7 @@ function commentRow(comment) {
   resolve.textContent = comment.done ? "Reopen" : "Resolve";
   resolve.setAttribute(
     "aria-label",
-    `${comment.done ? "Reopen" : "Resolve"} comment by ${comment.actor}`,
+    `${comment.done ? "Reopen" : "Resolve"} comment by ${writer(comment)}`,
   );
   resolve.addEventListener("click", () => toggleCommentDone(comment));
 
@@ -392,7 +406,7 @@ function commentRow(comment) {
   remove.type = "button";
   remove.className = "danger";
   remove.textContent = "Delete";
-  remove.setAttribute("aria-label", `Delete comment by ${comment.actor}`);
+  remove.setAttribute("aria-label", `Delete comment by ${writer(comment)}`);
   remove.addEventListener("click", () => deleteComment(comment));
 
   actions.append(resolve, remove);
@@ -522,7 +536,7 @@ function renderListRow(comment, replyCount = 0) {
   const meta = document.createElement("div");
   meta.className = "hub-list-meta mono";
 
-  const author = authorNode(comment.actor);
+  const author = authorNode(comment);
   const time = timeNode(comment.created_at);
   meta.append(author, document.createTextNode(" · "), time);
 
@@ -652,7 +666,7 @@ function renderPhoneSheet() {
   rootItem.className = "hub-thread-root";
   const rootMeta = document.createElement("div");
   rootMeta.className = "hub-thread-meta";
-  rootMeta.append(authorNode(comment.actor), timeNode(comment.created_at));
+  rootMeta.append(authorNode(comment), timeNode(comment.created_at));
   const rootBody = document.createElement("p");
   rootBody.className = "hub-thread-body";
   rootBody.textContent = comment.body;
@@ -673,7 +687,7 @@ function renderPhoneSheet() {
     repItem.className = "hub-thread-reply";
     const repMeta = document.createElement("div");
     repMeta.className = "hub-thread-meta";
-    repMeta.append(authorNode(reply.actor), timeNode(reply.created_at));
+    repMeta.append(authorNode(reply), timeNode(reply.created_at));
     const repBody = document.createElement("p");
     repBody.className = "hub-thread-body";
     repBody.textContent = reply.body;
@@ -892,7 +906,7 @@ export function renderDesktopCard(comment, replies = []) {
   const said = (entry, cls) => {
     const head = document.createElement("div");
     head.className = "hub-card-head";
-    head.append(authorNode(entry.actor), timeNode(entry.created_at));
+    head.append(authorNode(entry), timeNode(entry.created_at));
     const text = document.createElement("p");
     text.className = cls;
     text.textContent = entry.body;

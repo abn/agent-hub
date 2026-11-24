@@ -3,6 +3,7 @@
 // and what landed since the reader last looked carries the unread mark.
 
 import { api } from "./api.mjs";
+import { askerKey, receiptsHTML, subjectHTML } from "./author.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { outcomeOf } from "./inbox.mjs";
 import { esc, glyph, isOpen, kindMark, main, waitingMarks } from "./dom.mjs";
@@ -13,6 +14,7 @@ import { renderMarkdown } from "./sessions.mjs";
 import { clockTime, feedSentenceHTML, replySentenceHTML } from "./now-model.mjs";
 import { byDay, relative, stamp } from "./time.mjs";
 import { toast } from "./toast.mjs";
+import { whoActive, whoQuery } from "./who.mjs";
 
 // Feed chips cover the kinds a reader filters by. Anchors and scores are
 // session-scoped, but they are ordinary feed events and read here too.
@@ -164,7 +166,7 @@ const UNREAD = `<span class="dot-unread" aria-hidden="true"></span><span class="
 // `decision`; the note is whatever was typed, so it goes through `esc`.
 const DECIDED = { approved: "Approved", declined: "Declined" };
 
-// A resolution the hub recorded because the asking agent's deadline passed.
+// A resolution the hub recorded because the asking session's deadline passed.
 // It is said in words, apart from a human's decision, wherever one is shown.
 export function expiredWords(decision) {
   if (decision === "approved") return "Expired: approved itself, no one decided in time";
@@ -178,7 +180,7 @@ function replySentence(reply) {
   const verb = { approved: "approved", declined: "declined" }[reply.payload?.decision];
   if (reply.kind !== "answer" || !verb || reply.payload?.expired) return replySentenceHTML(reply);
   const note = typeof reply.payload.note === "string" ? reply.payload.note.trim() : "";
-  return `<b>${esc(reply.actor)}</b> ${verb}${note ? `: ${esc(note)}` : ""}`;
+  return `${subjectHTML(reply)} ${verb}${note ? `: ${esc(note)}` : ""}`;
 }
 
 function decisionNote(event) {
@@ -364,7 +366,7 @@ function collapseDayEvents(events) {
       while (
         j < events.length &&
         isArtifactPublish(events[j]) &&
-        events[j].actor === event.actor &&
+        askerKey(events[j]) === askerKey(event) &&
         Math.abs(Date.parse(event.created_at) - Date.parse(events[j].created_at)) <= 120000
       ) {
         cluster.push(events[j]);
@@ -376,6 +378,8 @@ function collapseDayEvents(events) {
           count: cluster.length,
           kind: "artifact",
           actor: event.actor,
+          author: event.author,
+          origin: event.origin,
           created_at: event.created_at,
           id: event.id,
           project_id: event.project_id || cluster[0].project_id,
@@ -430,7 +434,8 @@ function collapsedArtifactRow(item, baseline) {
   const row = `<div class="row feed-row${unread ? " unread" : ""}">
     <span class="feed-k">${pickBox(ids, `published ${item.count} artifacts`)}${glyph("artifact")}</span>
     <div class="feed-body">
-      <p class="feed-s"><a class="feed-link" href="${esc(href)}" data-open data-id="${esc(item.id)}"><b>${esc(item.actor)}</b> published ${item.count} artifacts</a></p>
+      <p class="feed-s"><a class="feed-link" href="${esc(href)}" data-open data-id="${esc(item.id)}">${subjectHTML(item)} published ${item.count} artifacts</a></p>
+      ${byLine(item)}
     </div>
     ${rowTime(item.created_at, unread)}
   </div>`;
@@ -448,6 +453,13 @@ function threadRepliesHTML(replies) {
       (reply) => `<p class="feed-thread-reply">${replySentence(reply)} ${stamp(reply.created_at, clockTime)}</p>`,
     )
     .join("");
+}
+
+// The receipts under a row's sentence: who, as `agent · member` in mono. A row
+// with none (the human, the hub, a row from before members) draws no line.
+function byLine(row) {
+  const by = receiptsHTML(row);
+  return by ? `<p class="feed-by">${by}</p>` : "";
 }
 
 // The feed's own row, on the row anatomy Now uses: the kind glyph in a fixed
@@ -471,6 +483,7 @@ function feedRow(event, baseline, selected = false, replies = []) {
     <span class="feed-k">${pickBox(event.id, phrase)}${glyph(event.kind)}</span>
     <div class="feed-body">
       <p class="feed-s"><a class="feed-link" href="${esc(href)}" data-open data-id="${esc(event.id)}"${waiting ? waiting.described : ""}>${feedSentenceHTML(event, phrase)}</a>${answer}</p>
+      ${byLine(event)}
       ${decisionNote(event)}
       ${waiting ? `<p class="feed-x">${waiting.status}</p>` : ""}
       ${threadRepliesHTML(replies)}
@@ -591,10 +604,13 @@ function foldHTML(projectId, visit) {
   </div>`;
 }
 
+// The Who menu's scope for one project's feed.
+export const feedScope = (projectId) => `feed:${projectId}`;
+
 function feedPath(projectId, active, before) {
   const kinds = [...active].map((kind) => `&kinds=${encodeURIComponent(kind)}`).join("");
   const cursor = before ? `&before=${encodeURIComponent(before)}` : "";
-  return `/api/v1/projects/${encodeURIComponent(projectId)}/feed?limit=${PAGE}${cursor}${kinds}`;
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/feed?limit=${PAGE}${cursor}${kinds}${whoQuery(feedScope(projectId))}`;
 }
 
 // The read cursor moves once the feed has been seen: painted, in a visible
@@ -680,14 +696,14 @@ export async function feedSection(current, stats = null, { chips = true } = {}) 
     events: page.events,
     before: page.next_before,
     more: page.events.length === PAGE,
-    filtered: active.size > 0,
+    filtered: active.size > 0 || whoActive(feedScope(current)),
     total: stats && stats.events != null ? stats.events : null,
     counts,
   };
   visits.set(current, visit);
   if (!visit.events.length) {
     // Nothing to set up when the project has events and the filter hides them.
-    const copy = active.size
+    const copy = active.size || whoActive(feedScope(current))
       ? {
           ...EMPTY_COPY.feed,
           title: "No events match this filter.",
@@ -852,7 +868,7 @@ export async function eventStage(event, projectId) {
       </section>`
     : "";
   const at = Date.parse(event.created_at);
-  const byline = [`<b>${esc(event.actor)}</b>`, stamp(event.created_at), Number.isFinite(at) ? esc(relative(at)) : ""]
+  const byline = [`${subjectHTML(event)}${receiptsHTML(event)}`, stamp(event.created_at), Number.isFinite(at) ? esc(relative(at)) : ""]
     .filter(Boolean)
     .join(", ");
   return `
@@ -1212,18 +1228,18 @@ async function showOlder(projectId) {
 }
 
 // What an agent needs to reach this hub, in the forms the hub's own skill
-// document gives them. The token is the agent's, issued under Agents and
+// document gives them. The token is its member's, issued under Members and
 // tokens, and is never the one this browser holds. When the caller holds the
 // token already it is embedded, so a reader never splices it by hand; when it
 // does not, the snippet names where the token comes from.
-export function mcpSetup(projectId, token = "<agent token>") {
+export function mcpSetup(projectId, token = "<member token>") {
   // Resolve against the document, not the origin: a hub served behind a
   // path-stripping proxy lives at a prefix, and the origin alone loses it. H8.
   const base = new URL(".", document.baseURI).href;
-  const hasToken = token !== "<agent token>";
+  const hasToken = token !== "<member token>";
   const where = hasToken
     ? ""
-    : `# Create an agent at ${new URL("#/access", base).href} and copy the token it shows once.`;
+    : `# Add this machine under Members and tokens at ${new URL("#/access", base).href}; the token is shown once.`;
   return [
     projectId
       ? `# Agent Hub MCP setup. The project slug is ${projectId}.`
