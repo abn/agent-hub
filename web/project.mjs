@@ -5,7 +5,7 @@
 // gallery are rendered by the modules that own them.
 
 import { api } from "./api.mjs";
-import { foldSessions, participantsText } from "./author.mjs";
+import { foldSessions, liveWords, participantsText } from "./author.mjs";
 import { artifactGroupMenu, artifactIndex, artifactStage, endArtifactStage, wireArtifactStage } from "./artifacts.mjs";
 import { confirmAction, confirmProjectDelete, openCreateProjectDialog } from "./dialog.mjs";
 import { count, esc, main, paint, stale } from "./dom.mjs";
@@ -418,7 +418,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "", project = n
   const title = project?.display_name || id;
   const meta = [
     "feed",
-    stats && stats.sessions_live != null ? `${count(stats.sessions_live, "live session", "live sessions")}` : "",
+    stats && stats.sessions_live != null ? liveWords(stats.sessions_live, stats.subagents_live) : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -676,7 +676,7 @@ export async function projectScreen(params, gen, path) {
   if (stale(gen)) return;
 
   const liveText =
-    stats && stats.sessions_live != null ? `${count(stats.sessions_live, "live session", "live sessions")}` : "";
+    stats && stats.sessions_live != null ? liveWords(stats.sessions_live, stats.subagents_live) : "";
   const mobileBar = shellMobileBar(
     project.display_name || id,
     [liveText, footprint].filter(Boolean).join(" · "),

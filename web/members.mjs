@@ -1,5 +1,5 @@
 import { api } from "./api.mjs";
-import { foldSessions, liveCounts, participantsText, primeMembers } from "./author.mjs";
+import { foldSessions, liveCounts, liveWords, participantsText, primeMembers } from "./author.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { errorCard, esc, main, paint } from "./dom.mjs";
 import { glyphSvg } from "./glyphs.mjs";
@@ -122,8 +122,6 @@ function formatTokenIssued(ts) {
 const liveCount = (member) =>
   Array.isArray(member.live_sessions) ? member.live_sessions.length : Math.max(0, Math.trunc(Number(member.live_sessions)) || 0);
 
-const sessionWord = (n) => `${n} live ${n === 1 ? "session" : "sessions"}`;
-
 // The list's second line: pending members say so, the rest count their live
 // sessions and when the hub last heard from them.
 function memberMeta(member) {
@@ -135,7 +133,7 @@ function memberMeta(member) {
     : member.created_at
       ? `added ${relative(member.created_at)}`
       : "never seen";
-  return `${sessionWord(liveCount(member))} · ${seen}`;
+  return `${liveWords(liveCount(member), member.live_subagents)} · ${seen}`;
 }
 
 const PENDING_PILL = `<span class="pill member-pending-pill">waiting to join</span>`;
@@ -190,7 +188,7 @@ function liveHead(sessions) {
 // of this member are in it, with the verb that ends it. A parent carries its
 // subagents folded under it.
 function liveSessionRows(sessions, memberId) {
-  return foldSessions(sessions)
+  return foldSessions(sessions, { live: true })
     .map(({ session, folded }) => {
       const mine = (session.participants || []).filter((p) => p.member === memberId);
       const who = participantsText(mine, { solo: true });
@@ -261,7 +259,7 @@ function memberStageBody(member, projects, grants, sessions, seenSessions) {
 
   // `sessions` is null when the hub would not list them: that is said, in ink,
   // and is not the empty state.
-  const live = sessions ? foldSessions(sessions) : [];
+  const live = sessions ? foldSessions(sessions, { live: true }) : [];
   const liveBody = !sessions
     ? `<div class="member-projects-empty member-list-failed">Could not list live sessions.</div>`
     : live.length
@@ -504,7 +502,7 @@ function renderMobileMemberDetail(member, projects, grants, detail = {}) {
     : '<option value="" disabled>No confidential projects to grant</option>';
 
   const liveRows = detail.live;
-  const live = liveRows ? foldSessions(liveRows) : [];
+  const live = liveRows ? foldSessions(liveRows, { live: true }) : [];
   const agents = agentsSeen(member, detail.seen || []);
 
   const content = pending

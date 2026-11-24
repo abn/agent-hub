@@ -855,11 +855,18 @@ mod shared {
             .expect("row");
         assert_eq!(still.status, "active", "leave ends nothing");
         assert_eq!(
-            sessions::live_count(&state.db, "", Some("proj"))
+            sessions::live_subagent_count(&state.db, "", Some("proj"))
                 .await
                 .expect("live"),
             1,
             "the child keeps a participant that has not left"
+        );
+        assert_eq!(
+            sessions::live_count(&state.db, "", Some("proj"))
+                .await
+                .expect("live"),
+            0,
+            "the parent's only participant left"
         );
 
         let family = sessions::family(&state.db, &parent.id)

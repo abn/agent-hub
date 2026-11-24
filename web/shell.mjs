@@ -254,7 +254,7 @@ export async function renderRailProjects() {
 
     for (let i = 0; i < regular.length; i++) {
       const p = regular[i];
-      const isLive = (p.sessions_live || 0) > 0;
+      const isLive = (p.sessions_live || 0) + (p.subagents_live || 0) > 0;
       const waiting = waitingMap.get(p.id) || 0;
       const isCurrent = currentHash.startsWith(`/projects/${encodeURIComponent(p.id)}`);
 

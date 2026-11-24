@@ -71,7 +71,10 @@ pub struct ListedSession {
     pub session: Session,
     /// Who took part, newest first.
     pub participants: Vec<ParticipantRow>,
-    /// Live children of this session.
+    /// Whether the session is live: active, with a participant who has not
+    /// left seen inside the hub's activity window.
+    pub live: bool,
+    /// Children of this session that still exist, live or ended.
     pub children_count: i64,
     /// Who started it.
     pub started_by: AuthorView,
@@ -214,7 +217,7 @@ pub async fn list(
     let mut listed = Vec::with_capacity(sessions.len());
     for session in sessions {
         listed.push(
-            list_entry(&state, session)
+            list_entry(&state, session, &since)
                 .await
                 .map_err(|err| Problem::from_error(&err))?,
         );
@@ -251,7 +254,7 @@ pub async fn detail(
         .ok_or_else(|| {
             Problem::from_error(&Error::NotFound(format!("session {session_id} not found")))
         })?;
-    let listed = list_entry(&state, row)
+    let listed = list_entry(&state, row, &state.config.active_since())
         .await
         .map_err(|err| Problem::from_error(&err))?;
 
@@ -263,7 +266,11 @@ pub async fn detail(
 }
 
 /// One listing row: the session, where it came from, and what it occupies.
-async fn list_entry(state: &AppState, row: StoreListed) -> crate::error::Result<ListedSession> {
+async fn list_entry(
+    state: &AppState,
+    row: StoreListed,
+    since: &str,
+) -> crate::error::Result<ListedSession> {
     let StoreListed {
         session,
         participants,
@@ -272,6 +279,7 @@ async fn list_entry(state: &AppState, row: StoreListed) -> crate::error::Result<
         project_display_name,
     } = row;
     let lineage = lineage(state, &session).await?;
+    let live = session_store::is_live(&session, &participants, since);
     let brain_bytes = match state.brain.brain_path(&session.project_id, &session.id) {
         Ok(path) => crate::brain::file_bytes(&path),
         // The path is derived from ids the store validated on the way in, so
@@ -284,6 +292,7 @@ async fn list_entry(state: &AppState, row: StoreListed) -> crate::error::Result<
     Ok(ListedSession {
         session,
         participants: participants.into_iter().map(ParticipantRow::from).collect(),
+        live,
         children_count,
         started_by,
         project_display_name,

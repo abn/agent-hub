@@ -169,18 +169,61 @@ impl Activity {
     }
 }
 
-/// Live sessions per project, in one grouped query: the per-project form of
-/// [`live_count`].
+/// Live top-level sessions per project, in one grouped query: the per-project
+/// form of [`live_count`].
 pub async fn live_by_project(db: &Database, since: &str) -> Result<Vec<(String, i64)>> {
     grouped_counts(
         db,
         &format!(
             "SELECT s.project_id, COUNT(DISTINCT s.id) FROM sessions s
-              WHERE {LIVE} GROUP BY s.project_id"
+              WHERE {LIVE} AND s.parent_id IS NULL GROUP BY s.project_id"
         ),
         since,
     )
     .await
+}
+
+/// Live subagent (child) sessions per project: the per-project form of
+/// [`live_subagent_count`].
+pub async fn live_subagents_by_project(db: &Database, since: &str) -> Result<Vec<(String, i64)>> {
+    grouped_counts(
+        db,
+        &format!(
+            "SELECT s.project_id, COUNT(DISTINCT s.id) FROM sessions s
+              WHERE {LIVE} AND s.parent_id IS NOT NULL GROUP BY s.project_id"
+        ),
+        since,
+    )
+    .await
+}
+
+/// Live top-level sessions and live subagents each member takes part in, as
+/// `(member, sessions, subagents)`. A member with none is absent.
+pub async fn live_by_member(db: &Database, since: &str) -> Result<Vec<(String, i64, i64)>> {
+    async fn count(db: &Database, since: &str, top: bool) -> Result<Vec<(String, i64)>> {
+        let sql = format!(
+            "SELECT p.member_id, COUNT(DISTINCT s.id) FROM sessions s
+               JOIN session_participants p ON p.session_id = s.id
+              WHERE s.status = 'active' AND s.deleted_at IS NULL
+                AND p.left_at IS NULL AND p.last_seen_at >= ?1
+                AND s.parent_id IS {} NULL GROUP BY p.member_id",
+            if top { "" } else { "NOT" }
+        );
+        grouped_counts(db, &sql, since).await
+    }
+    let sessions = count(db, since, true).await?;
+    let subagents = count(db, since, false).await?;
+    let mut out: Vec<(String, i64, i64)> = sessions
+        .into_iter()
+        .map(|(member, n)| (member, n, 0))
+        .collect();
+    for (member, n) in subagents {
+        match out.iter_mut().find(|row| row.0 == member) {
+            Some(row) => row.2 = n,
+            None => out.push((member, 0, n)),
+        }
+    }
+    Ok(out)
 }
 
 async fn grouped_counts(db: &Database, sql: &str, since: &str) -> Result<Vec<(String, i64)>> {
@@ -208,6 +251,16 @@ async fn grouped_counts(db: &Database, sql: &str, since: &str) -> Result<Vec<(St
 const LIVE: &str = "s.status = 'active' AND s.deleted_at IS NULL AND EXISTS (
     SELECT 1 FROM session_participants p
      WHERE p.session_id = s.id AND p.left_at IS NULL AND p.last_seen_at >= ?1)";
+
+/// Whether a session is live under the same rule as [`LIVE`]: active, with a
+/// participant that has not left and was seen at or after `since`.
+pub fn is_live(session: &Session, participants: &[Participant], since: &str) -> bool {
+    session.status == "active"
+        && session.deleted_at.is_none()
+        && participants
+            .iter()
+            .any(|p| p.left_at.is_none() && p.last_seen_at.as_str() >= since)
+}
 
 /// Fetch one session by id.
 pub async fn get(db: &Database, session_id: &str) -> Result<Option<Session>> {
@@ -1310,10 +1363,29 @@ async fn participants_on(conn: &turso::Connection, session_id: &str) -> Result<V
     Ok(out)
 }
 
-/// How many sessions are live (active, with a participant seen inside the
-/// activity window and not left), in one project or across the hub.
+/// How many top-level sessions are live (active, with a participant seen
+/// inside the activity window and not left), in one project or across the
+/// hub. Subagents are counted by [`live_subagent_count`].
 pub async fn live_count(db: &Database, since: &str, project_id: Option<&str>) -> Result<i64> {
-    let mut sql = format!("SELECT COUNT(*) FROM sessions s WHERE {LIVE}");
+    live_kind_count(db, since, project_id, "IS NULL").await
+}
+
+/// How many subagent (child) sessions are live, counted as [`live_count`].
+pub async fn live_subagent_count(
+    db: &Database,
+    since: &str,
+    project_id: Option<&str>,
+) -> Result<i64> {
+    live_kind_count(db, since, project_id, "IS NOT NULL").await
+}
+
+async fn live_kind_count(
+    db: &Database,
+    since: &str,
+    project_id: Option<&str>,
+    parent: &str,
+) -> Result<i64> {
+    let mut sql = format!("SELECT COUNT(*) FROM sessions s WHERE {LIVE} AND s.parent_id {parent}");
     let mut params = vec![t(since)];
     if let Some(project_id) = project_id {
         params.push(t(project_id));
@@ -1346,6 +1418,7 @@ pub struct ListedSession {
     #[serde(flatten)]
     pub session: Session,
     pub participants: Vec<Participant>,
+    /// Children that still exist, live or ended.
     pub children_count: i64,
     pub started_by: crate::author::AuthorView,
     /// The name the projects list shows for the session's project.
@@ -1396,39 +1469,57 @@ pub async fn list_filtered(
     check_status(filter.status)?;
     let mut sql = String::from("WHERE s.deleted_at IS NULL");
     let mut params: Vec<Value> = Vec::new();
-    let mut push = |sql: &mut String, clause: &str, value: &str| {
+    fn push(sql: &mut String, params: &mut Vec<Value>, clause: &str, value: &str) {
         params.push(t(value));
         sql.push_str(&clause.replace("?N", &format!("?{}", params.len())));
-    };
+    }
+    let since = filter.since.unwrap_or("");
     if filter.live {
-        let since = filter.since.unwrap_or("");
-        push(
-            &mut sql,
-            " AND s.status = 'active' AND EXISTS (SELECT 1 FROM session_participants p
-                WHERE p.session_id = s.id AND p.left_at IS NULL AND p.last_seen_at >= ?N)",
-            since,
-        );
+        sql.push_str(" AND s.status = 'active'");
     }
     if let Some(project) = filter.project_id {
-        push(&mut sql, " AND s.project_id = ?N", project);
+        push(&mut sql, &mut params, " AND s.project_id = ?N", project);
     }
     if let Some(status) = filter.status {
-        push(&mut sql, " AND s.status = ?N", status);
+        push(&mut sql, &mut params, " AND s.status = ?N", status);
     }
     if let Some(parent) = filter.parent {
-        push(&mut sql, " AND s.parent_id = ?N", parent);
+        push(&mut sql, &mut params, " AND s.parent_id = ?N", parent);
     }
-    if let Some(member) = filter.member {
-        push(
+    match (filter.member, filter.live) {
+        // A member's live sessions are the ones their own participation keeps
+        // live, which is what the member row counts.
+        (Some(member), true) => {
+            params.push(t(member));
+            let who = params.len();
+            params.push(t(since));
+            let seen = params.len();
+            sql.push_str(&format!(
+                " AND EXISTS (SELECT 1 FROM session_participants p
+                    WHERE p.session_id = s.id AND p.member_id = ?{who}
+                      AND p.left_at IS NULL AND p.last_seen_at >= ?{seen})"
+            ));
+        }
+        (Some(member), false) => push(
             &mut sql,
+            &mut params,
             " AND EXISTS (SELECT 1 FROM session_participants p
                 WHERE p.session_id = s.id AND p.member_id = ?N)",
             member,
-        );
+        ),
+        (None, true) => push(
+            &mut sql,
+            &mut params,
+            " AND EXISTS (SELECT 1 FROM session_participants p
+                WHERE p.session_id = s.id AND p.left_at IS NULL AND p.last_seen_at >= ?N)",
+            since,
+        ),
+        (None, false) => {}
     }
     if let Some(agent) = filter.agent {
         push(
             &mut sql,
+            &mut params,
             " AND EXISTS (SELECT 1 FROM session_participants p
                 WHERE p.session_id = s.id AND p.agent = ?N)",
             agent,

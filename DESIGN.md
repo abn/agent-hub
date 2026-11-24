@@ -610,19 +610,26 @@ structure, not to line length.
   the trigger, and Tab leaves it closed. After a pick the screen repaints and
   focus returns to the trigger. The menu is placed once it is drawn, so its own
   width keeps it inside the window.
-- **Live and idle.** One definition, used wherever a session's state is drawn. A
-  session is **live** when it is active and a participant who has not left was
-  seen inside the hub's activity window (15 minutes unless the hub is set
-  otherwise; the hub's own `live` on a session row is used when it sends one).
-  An active session with nobody seen lately is **idle**: it is open and nobody
-  is in it. A session that is neither is "ended". The state is a dot and a word,
-  never colour alone: a live session is a filled `--ok` dot and "live", an idle
-  one the same dot with its fill taken out and "idle", an ended one a ring in
+- **Live and idle.** One definition, used wherever a session's state is drawn,
+  and the hub decides it: the PWA computes no window and reads no timestamps. A
+  session is **live** when its row says `live`, which the hub sets when the
+  session is active and a participant who has not left was seen inside the
+  hub's activity window (15 minutes unless the hub is set otherwise). An active
+  session that is not live is **idle**: it is open and nobody is in it. A
+  session that is neither is "ended". The state is a dot and a word, never
+  colour alone: a live session is a filled `--ok` dot and "live", an idle one
+  the same dot with its fill taken out and "idle", an ended one a ring in
   `--ink-3` and "ended". The Sessions list leads each row's meta line with the
-  word, so a narrow pane cuts the id and the time and never the state. The head
-  over the active group counts what its rows show: "ACTIVE · 2 sessions, 1
-  subagent", subagents folded under their parents as Now's margin and the member
-  stage count them.
+  word, so a narrow pane cuts the id and the time and never the state. Counts
+  split the same way the hub splits them: a session with a parent is a
+  subagent, even when its parent is idle or not listed, and live counts name
+  sessions first and subagents after ("2 live sessions, 1 subagent"). Now's
+  summary and margin, the project header, the member row and the member stage
+  all read them from the hub's `sessions_live` and `subagents_live`, or count a
+  live list by `parent_id`, so they agree. A project's dot on the rail and on
+  Storage is live while it holds any live session or subagent. The head over
+  the Sessions list's active group counts its own rows: "ACTIVE · 2 sessions, 1
+  subagent".
 - **Segmented control.** The selected segment carries a 2px ink rule along its
   foot, as a chip does, because a fill a shade off the track is not told apart
   at 3:1. Theme segments and the project section switcher, on desktop and on a
@@ -840,7 +847,8 @@ Projects register, Members and access, Connect, and the knowledge base.
     are the three tiers, because the Inbox's address has to land on one of
     them and the rail already lists the projects. The margin's head counts the
     live sessions and their subagents, as its rows show them ("2 live
-    sessions, 1 subagent"), says "Could not list live sessions." in ink when the
+    sessions, 1 subagent"; the opening line says "Two sessions are working, with
+    one subagent." when nothing waits), says "Could not list live sessions." in ink when the
     hub would not list them, and lists them across projects, each a session in 600 over
     its project and who is in it, with a session's subagents folded into
     "+3 subagents"; it shows six and says how many more. It carries no age,
@@ -1061,14 +1069,16 @@ Projects register, Members and access, Connect, and the knowledge base.
   under their last segment.
 - **Members and access.** `#/access` is a list and an item. The index lists
   the members, a member being one token holder and usually one machine: its
-  display name, and under it "2 live sessions · seen 4m ago". A member that
+  display name, and under it "2 live sessions, 1 subagent · seen 4m ago", the
+  sessions in which that member's own participation is live. A member that
   asked to join reads "waiting to join" in a pill and "asked 13m" under it, and
   sorts with the rest. A
   desktop's stage is the selected member: the token line with **Reissue token**
-  (the way a member moves to a new machine), then Live sessions (each a session
+  (the way a member moves to a new machine; it says "Token issued" and the
+  date the hub sends), then Live sessions (each a session
   in 600 over its project and the agents of this member in it, with **End**, a
-  parent carrying "+3 subagents"; the head counts what the rows show, "2 ·
-  1 subagent"), Agents seen, Projects with **Grant a
+  parent carrying "+3 subagents" for the subagents the list holds; the head
+  counts them as the hub does, "2 · 1 subagent"), Agents seen, Projects with **Grant a
   project**, and **Revoke token** at the foot. A pending member's stage is its
   approval card instead: the name, editable, what the machine said about itself
   (first agent, system, host and source address), the reason it gave, "Approving

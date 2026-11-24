@@ -283,7 +283,7 @@ const LIVE_SHOWN = 6;
 // The sessions working now, across projects, children folded under their
 // parent: the session in 600, then its project and who is in it as receipts.
 function liveSessionsHTML(sessions) {
-  const folded = foldSessions(sessions);
+  const folded = foldSessions(sessions, { live: true });
   if (!folded.length) return "";
   const rows = folded.slice(0, LIVE_SHOWN).map(({ session, folded: more }) => {
     const project = session.project_display_name || session.project_id || "";
@@ -325,8 +325,9 @@ export async function now(gen) {
   const needs = asks.now.length + asks.unlisted;
   const anyAsk = needs + asks.later.length > 0;
   const sessions = Math.max(0, Math.trunc(Number(data.sessions_live)) || 0);
+  const subagents = Math.max(0, Math.trunc(Number(data.subagents_live)) || 0);
 
-  const summary = summaryHTML({ now: asks.now, later: asks.later.length, since: sinceCount, sessions, unlisted: asks.unlisted });
+  const summary = summaryHTML({ now: asks.now, later: asks.later.length, since: sinceCount, sessions, subagents, unlisted: asks.unlisted });
   const intro = ledger("now-intro", `<p class="now-sum">${summary}</p>`, introMargin(data, live));
 
   let tiers = "";

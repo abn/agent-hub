@@ -387,6 +387,7 @@ async fn an_ended_session_is_reopened_by_the_next_member_that_starts_it() {
         .find(|entry| entry["session_id"] == session_id.as_str())
         .expect("the reopened session is listed");
     assert_eq!(entry["status"], "active");
+    assert_eq!(entry["live"], true);
     assert_eq!(entry["session_name"], "migration");
     assert!(
         entry.get("agent").is_none(),
@@ -681,6 +682,7 @@ async fn a_fork_into_a_name_that_exists_is_refused() {
         .find(|entry| entry["session_id"] == source_id.as_str())
         .expect("the source is listed");
     assert_eq!(source["status"], "ended", "nothing moved");
+    assert_eq!(source["live"], false);
     let busy = sessions
         .iter()
         .find(|entry| entry["session_id"] == text(&held, "session_id").as_str())

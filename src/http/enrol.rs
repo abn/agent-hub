@@ -358,7 +358,7 @@ pub async fn approve(
         ))));
     }
 
-    let member = identity::approve_member(
+    let mut member = identity::approve_member(
         &state.db,
         &id,
         req.member
@@ -367,6 +367,13 @@ pub async fn approve(
             .filter(|m| !m.is_empty()),
         req.display_name.as_deref(),
         req.projects.as_deref(),
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
+    identity::fill_live(
+        &state.db,
+        std::slice::from_mut(&mut member),
+        &state.config.active_since(),
     )
     .await
     .map_err(|err| Problem::from_error(&err))?;

@@ -1126,8 +1126,14 @@ pub struct Member {
     /// `active` or `pending`.
     pub state: String,
     pub enrol: EnrolContext,
-    /// Live sessions the member participates in.
+    /// Live top-level sessions the member takes part in. The HTTP routes fill
+    /// it with the hub's activity window; a member read straight from the
+    /// store carries zero.
     pub live_sessions: i64,
+    /// Live subagent sessions the member takes part in, counted apart.
+    pub live_subagents: i64,
+    /// When the current token was minted or reissued.
+    pub token_issued_at: Option<String>,
 }
 
 /// A self-enrolment request, from REST or the MCP `enrol` tool.
@@ -1199,10 +1205,8 @@ const MEMBER_COLUMNS: &str =
     "id, display_name, personal_project_id, created_at, last_seen_at, state,
     enrol_note, enrol_source, enrol_agent, enrol_os, enrol_host,
     EXISTS(SELECT 1 FROM member_tokens t WHERE t.member_id = members.id AND t.revoked_at IS NULL),
-    (SELECT COUNT(DISTINCT p.session_id) FROM session_participants p
-       JOIN sessions s ON s.id = p.session_id
-      WHERE p.member_id = members.id AND p.left_at IS NULL
-        AND s.status = 'active' AND s.deleted_at IS NULL)";
+    (SELECT MAX(t.created_at) FROM member_tokens t
+      WHERE t.member_id = members.id AND t.revoked_at IS NULL)";
 
 fn member_from_row(row: &Row) -> Result<Member> {
     Ok(Member {
@@ -1220,8 +1224,26 @@ fn member_from_row(row: &Row) -> Result<Member> {
             host: text_at(row, 10)?,
         },
         has_live_token: integer_at(row, 11)?.unwrap_or(0) != 0,
-        live_sessions: integer_at(row, 12)?.unwrap_or(0),
+        live_sessions: 0,
+        live_subagents: 0,
+        token_issued_at: text_at(row, 12)?,
     })
+}
+
+/// Say how many live sessions and subagents each member takes part in, inside
+/// the activity window that starts at `since`. A session counts for a member
+/// while that member's own participation is live.
+pub async fn fill_live(db: &Database, members: &mut [Member], since: &str) -> Result<()> {
+    let live = super::sessions::live_by_member(db, since).await?;
+    for member in members {
+        let (sessions, subagents) = live
+            .iter()
+            .find(|row| row.0 == member.id)
+            .map_or((0, 0), |row| (row.1, row.2));
+        member.live_sessions = sessions;
+        member.live_subagents = subagents;
+    }
+    Ok(())
 }
 
 /// Every member, oldest first.
