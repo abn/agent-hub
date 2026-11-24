@@ -1,5 +1,5 @@
 // The More screen. Tab root on a phone for the artifacts list, storage,
-// agents and tokens, settings, and the permanent sync line.
+// members and tokens, settings, and the permanent sync line.
 
 import { api } from "./api.mjs";
 import { esc, paint } from "./dom.mjs";
@@ -11,14 +11,14 @@ import { refreshSyncDisplay } from "./shell.mjs";
 
 export async function moreScreen(gen) {
   let usage = {};
-  let agents = [];
+  let members = [];
   try {
-    const [storageRes, agentsRes] = await Promise.all([
+    const [storageRes, membersRes] = await Promise.all([
       api("/api/v1/storage"),
       api("/api/v1/members"),
     ]);
     usage = storageRes || {};
-    agents = agentsRes?.members || [];
+    members = membersRes?.members || [];
   } catch {}
 
   const nodeLine = [usage.node?.host, usage.node?.mode]
@@ -29,17 +29,17 @@ export async function moreScreen(gen) {
   const prunableBytes = usage.prunable?.bytes ?? 0;
   const pruneSub = prunableBytes > 0 ? `${formatBytes(prunableBytes)} can be pruned` : "";
 
-  const agentCount = agents.length;
-  const agentVal = `${agentCount} ${agentCount === 1 ? "agent" : "agents"}`;
+  const memberCount = members.length;
+  const memberVal = `${memberCount} ${memberCount === 1 ? "member" : "members"}`;
   let newestCall = 0;
-  for (const a of agents) {
+  for (const a of members) {
     const t = a.last_seen_at || a.created_at;
     if (t) {
       const ms = new Date(t).getTime();
       if (ms > newestCall) newestCall = ms;
     }
   }
-  const agentSub = newestCall ? `last call ${relative(newestCall)}` : "no calls yet";
+  const memberSub = newestCall ? `last call ${relative(newestCall)}` : "no calls yet";
 
   const artifactBytes = (usage.projects || []).reduce((sum, p) => sum + (Number(p.artifact_bytes) || 0), 0);
   const stackGlyph = glyphSvg("stack", { size: 19 });
@@ -72,10 +72,10 @@ export async function moreScreen(gen) {
       <a class="row more-row" href="#/access">
         <span class="more-glyph" aria-hidden="true">${keyGlyph}</span>
         <span class="more-main grow">
-          <span class="title">Agents and tokens</span>
-          <span class="more-sub">${esc(agentSub)}</span>
+          <span class="title">Members and tokens</span>
+          <span class="more-sub">${esc(memberSub)}</span>
         </span>
-        <span class="more-val">${esc(agentVal)}</span>
+        <span class="more-val">${esc(memberVal)}</span>
         <span class="more-chevron" aria-hidden="true">${chevronRight}</span>
       </a>
       <a class="row more-row" href="#/settings">

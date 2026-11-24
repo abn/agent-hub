@@ -34,7 +34,7 @@ export const EMPTY_COPY = {
   feed: {
     screen: "project feed",
     title: "No events yet in {project}.",
-    body: "Agents post here over MCP. Get an agent token under Agents and tokens, then copy the setup for the project slug {project}.",
+    body: "Agents post here over MCP. Add this machine under Members and tokens, then copy the project config for {project}.",
     link: "Copy MCP setup",
   },
   artifacts: {
@@ -45,7 +45,7 @@ export const EMPTY_COPY = {
   sessions: {
     screen: "sessions",
     title: "No sessions yet.",
-    body: "A session starts when an agent first writes to its brain.",
+    body: "A session starts with an agent's first write that names it.",
   },
   search: {
     screen: "search",

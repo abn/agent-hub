@@ -13,7 +13,7 @@ import { expectEveryScreen, openScreen, screenRoutes, seedWikiPage } from "./scr
 const headerHeight = (page) =>
   page.evaluate(() => document.querySelector(".shell-head")?.getBoundingClientRect().height ?? null);
 
-const createAgent = async (hub, id, name) => {
+const createMember = async (hub, id, name) => {
   await api(hub, "POST", "/api/v1/members", { id, display_name: name });
   await api(hub, "POST", `/api/v1/members/${encodeURIComponent(id)}/token`);
 };
@@ -34,7 +34,7 @@ test.describe("phone frame", () => {
     const moreRows = await page.evaluate(() =>
       [...document.querySelectorAll(".more-screen .more-row .title")].map((el) => el.textContent.trim()),
     );
-    expect(moreRows, "the More screen rows differ from expected").toEqual(["Artifacts", "Storage", "Agents and tokens", "Settings"]);
+    expect(moreRows, "the More screen rows differ from expected").toEqual(["Artifacts", "Storage", "Members and tokens", "Settings"]);
 
     // Healthy means no sync element anywhere, and no space kept for one.
     const syncVisible = await page.evaluate(() => {
@@ -228,21 +228,21 @@ test.describe("desktop chrome", () => {
     await page.setViewportSize({ width: 390, height: 844 });
   });
 
-  test("Agents and tokens is a list and item, with reissue reachable at 1440", async ({ hub, page }) => {
+  test("Members and tokens is a list and item, with reissue reachable at 1440", async ({ hub, page }) => {
     const agent = "desktop-agents-probe";
-    await createAgent(hub, agent, "Desktop agents probe");
+    await createMember(hub, agent, "Desktop agents probe");
     await page.setViewportSize({ width: 1440, height: 900 });
     await goto(page, "#/home");
-    await goto(page, `#/access?agent=${encodeURIComponent(agent)}`);
+    await goto(page, `#/access?member=${encodeURIComponent(agent)}`);
     await expect(page.locator(".shell-index")).toBeVisible();
     expect(
       await page.evaluate(() => {
         const row = document.querySelector('.shell-index [aria-current="true"], .shell-index [aria-current="page"]');
         return row ? row.textContent.trim() : null;
       }),
-      "no agent row is selected at 1440",
+      "no member row is selected at 1440",
     ).toBeTruthy();
-    await expect(page.locator('[data-action="agent-token"]').first()).toBeVisible();
+    await expect(page.locator('[data-action="member-token"]').first()).toBeVisible();
     await page.setViewportSize({ width: 390, height: 844 });
   });
 });
@@ -277,7 +277,7 @@ test.describe("phone Now", () => {
 
     await page.evaluate(() => window.scrollTo(0, 0));
     await expect(page.locator(".now .now-sum"), "the opening line is not a sentence about what needs you").toHaveText(
-      /^(\w+ agents? needs? you|Nothing waits on you)/,
+      /^(\w+ (sessions?|agents?|asks?) needs? you|Nothing waits on you)/,
     );
     expect(await page.locator(".now .card").count(), "a list on Now is wrapped in a card").toBe(0);
   });
@@ -331,10 +331,10 @@ test.describe("token reveal", () => {
   // and looks for that exact string again after Done.
   test("the issued token leaves the DOM when the reveal closes", async ({ hub, page }) => {
     const agent = "reveal-probe";
-    await createAgent(hub, agent, "Reveal probe");
-    await goto(page, `#/access?agent=${encodeURIComponent(agent)}`);
-    await expect(page.locator('[data-action="agent-token"]').first()).toBeVisible();
-    await page.locator('[data-action="agent-token"]').first().click();
+    await createMember(hub, agent, "Reveal probe");
+    await goto(page, `#/access?member=${encodeURIComponent(agent)}`);
+    await expect(page.locator('[data-action="member-token"]').first()).toBeVisible();
+    await page.locator('[data-action="member-token"]').first().click();
     const dialog = page.locator("dialog.dialog-reveal[open]");
     await expect(dialog).toBeVisible();
     const state1 = await page.evaluate(() => {
@@ -380,13 +380,13 @@ test.describe("round 14", () => {
     test.setTimeout(180_000);
     const agent = "round14-probe";
     const confidential = "round14-confidential";
-    await createAgent(hub, agent, "Round 14 probe");
+    await createMember(hub, agent, "Round 14 probe");
     await api(hub, "POST", "/api/v1/projects", { id: confidential, display_name: "Round 14 confidential", confidential: true });
     await api(hub, "POST", `/api/v1/members/${encodeURIComponent(agent)}/grants`, { project_id: confidential });
 
     await page.setViewportSize({ width: 1440, height: 900 });
     await goto(page, "#/home");
-    await goto(page, `#/access?agent=${encodeURIComponent(agent)}`);
+    await goto(page, `#/access?member=${encodeURIComponent(agent)}`);
     await expect(page.locator(".shell")).toBeVisible();
     const screen = await page.locator(".shell").innerText();
     for (const token of ["write on", "read on"]) {
@@ -395,19 +395,19 @@ test.describe("round 14", () => {
 
     // Revoke leaves the grants, issue restores access with no new grant.
     const rowsExpr = () =>
-      page.evaluate(() => [...document.querySelectorAll(".agent-project-row")].map((row) => row.textContent.trim()));
-    await expect(page.locator(".agent-project-row").first(), "the probe agent's project rows did not render").toBeVisible({
+      page.evaluate(() => [...document.querySelectorAll(".member-project-row")].map((row) => row.textContent.trim()));
+    await expect(page.locator(".member-project-row").first(), "the probe agent's project rows did not render").toBeVisible({
       timeout: 8000,
     });
     const rowsBefore = await rowsExpr();
     expect(rowsBefore, "the probe agent's project rows did not render").toBeTruthy();
-    await page.click('[data-action="agent-revoke"]');
+    await page.click('[data-action="member-revoke"]');
     await expect(page.locator("dialog .dialog-commit")).toBeVisible();
     await page.click("dialog .dialog-commit");
     await expect(page.locator(".shell-stage")).toContainText("No live token", { timeout: 8000 });
     await expect(page.locator(".shell-stage")).toContainText("Issue token");
     expect(await rowsExpr(), "revoking the token changed the project rows").toEqual(rowsBefore);
-    await page.click('[data-action="agent-issue"]');
+    await page.click('[data-action="member-issue"]');
     await expect(page.locator("dialog .reveal-token")).toBeVisible();
     await page.click("dialog .dialog-commit");
     await expect(page.locator(".shell-stage")).not.toContainText("No live token", { timeout: 8000 });
@@ -530,7 +530,7 @@ test.describe("round 14", () => {
 });
 
 test.describe("register and connect", () => {
-  test("the projects register files agent spaces apart from projects", async ({ hub, page }) => {
+  test("the projects register files member spaces apart from projects", async ({ hub, page }) => {
     const agent = "space-test-agent";
     const created = (await api(hub, "POST", "/api/v1/members", { id: agent, display_name: "Test Space" })).json();
     const spaceId = created.personal_project_id;
@@ -538,7 +538,7 @@ test.describe("register and connect", () => {
     await expect(page.locator(".project-row").first()).toBeVisible();
     for (const row of await page.locator(".project-row").all()) {
       const text = (await row.innerText()).toLowerCase();
-      expect(text, "a project row repeats the active agent count").not.toContain("agent active");
+      expect(text, "a project row repeats the live session count").not.toContain("live session");
     }
     const headerMeta = await page.locator(".shell-head .shell-meta").innerText();
     expect(headerMeta, "the header meta is missing the 'count · footprint' shape").toContain("·");
@@ -548,7 +548,7 @@ test.describe("register and connect", () => {
     const tools = page.locator(".shell-controls");
     await expect(tools).toBeVisible();
     const projTab = tools.locator('[role="tab"]:has-text("Projects")');
-    const spacesTab = tools.locator('[role="tab"]:has-text("Agent spaces")');
+    const spacesTab = tools.locator('[role="tab"]:has-text("Member spaces")');
     const registerFilter = tools.locator('[data-action="projects-filter"]');
     const desktop = (await page.viewportSize()).width >= 1100;
     if (desktop) {
@@ -557,11 +557,11 @@ test.describe("register and connect", () => {
       expect(await registerFilter.count(), "the desktop register is missing its filter field").toBe(1);
     } else {
       expect(await projTab.count(), "the tools row is missing the Projects tab").toBe(1);
-      expect(await spacesTab.count(), "the tools row is missing the Agent spaces tab").toBe(1);
+      expect(await spacesTab.count(), "the tools row is missing the Member spaces tab").toBe(1);
       await spacesTab.first().click();
-      await expect(page.locator(`.project-row:visible[data-id="${spaceId}"]`), "Agent spaces did not show the space").toHaveCount(1);
+      await expect(page.locator(`.project-row:visible[data-id="${spaceId}"]`), "Member spaces did not show the space").toHaveCount(1);
       await projTab.first().click();
-      await expect(page.locator(`.project-row:visible[data-id="${spaceId}"]`), "Projects unexpectedly shows agent spaces").toHaveCount(0);
+      await expect(page.locator(`.project-row:visible[data-id="${spaceId}"]`), "Projects unexpectedly shows member spaces").toHaveCount(0);
     }
   });
 
@@ -830,7 +830,7 @@ test.describe("settings and storage", () => {
   });
 
   test("the admin token never reaches the screen", async ({ hub, page }) => {
-    await goto(page, "#/access", "Agents and tokens");
+    await goto(page, "#/access", "Members and tokens");
     await expect(page.locator("main")).toBeVisible();
     const prefix = hub.token.slice(0, 6);
     expect(await page.locator("main").innerText(), "the admin token prefix appears in rendered text").not.toContain(prefix);

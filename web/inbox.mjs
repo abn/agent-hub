@@ -3,12 +3,13 @@
 // Now; the Inbox's address opens Now showing what needs the reader, and an
 // item's own address, `#/inbox?open=<id>`, opens it here.
 //
-// The item is read around its answer: what it is and who asked, the agent's
+// The item is read around its answer: what it is and who asked, the asker's
 // body, then the answer block, then the thread. Its receipts sit in a margin
 // beside it on a wide stage and under its title on a narrow one. Previous and
 // next walk the asks in Now's order, and answering one opens the next.
 
 import { api } from "./api.mjs";
+import { bylineOf, receiptsHTML, subjectHTML } from "./author.mjs";
 import { enqueue } from "./offline-queue.mjs";
 import { composer } from "./composer.mjs";
 import { confirmAction } from "./dialog.mjs";
@@ -87,14 +88,22 @@ function payloadText(item, key) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-// An agent enrolling through the hub's self-service path posts an approval
-// whose payload carries the action and the reason the agent gave. The decision
-// is on the agent that asked, so the card shows the reason before Approve.
+// A machine enrolling through the hub's self-service path posts an approval
+// whose payload carries the action and the reason it gave. The decision is on
+// the member that asked, so the card shows the reason before Approve.
 function enrolOf(item) {
   if (item.kind !== "approval") return null;
   const payload = item.payload || {};
   if (payload.action !== "enrol_request") return null;
   return typeof payload.why === "string" ? payload.why.trim() : "";
+}
+
+// Where an enrolment is decided under a name of the operator's choosing: the
+// pending member's own screen, which carries the approval card.
+function enrolLink(item) {
+  const member = item.author && item.author.kind === "participant" ? item.author.member : "";
+  if (!member || !waits(item)) return "";
+  return ` <a class="inbox-detail-enrol-link" href="#/access?member=${encodeURIComponent(member)}">Rename and decide on Members</a>`;
 }
 
 const expiredOf = (item) =>
@@ -221,7 +230,7 @@ function relatedList(item, queue) {
       ${mark}
       <a class="item-rel-a" href="${esc(itemHref(other.event_id))}">${esc(clip(subjectAndMessage(other.summary).subject, 48))}<span class="sr-only">, ${esc(later ? "can wait" : kindName(other.kind))}</span></a>
       ${itemStamp(other.created_at)}
-      <span class="item-rel-s">${esc(other.actor)} · ${esc(projectName(other))}</span>
+      <span class="item-rel-s">${esc(bylineOf(other).subject)} · ${esc(projectName(other))}</span>
     </li>`;
   });
   const artifact = payloadText(item, "artifact_id");
@@ -247,7 +256,7 @@ function replySentence(reply) {
   const verb = { approved: "approved", declined: "declined" }[reply.payload?.decision];
   if (reply.kind !== "answer" || !verb || reply.payload?.expired) return replySentenceHTML(reply);
   const note = typeof reply.payload.note === "string" ? reply.payload.note.trim() : "";
-  return `<b>${esc(reply.actor)}</b> ${verb}${note ? `: ${esc(note)}` : ""}`;
+  return `${subjectHTML(reply)} ${verb}${note ? `: ${esc(note)}` : ""}`;
 }
 
 // The replies so far, on the shared row anatomy: glyph, the sentence, the time.
@@ -260,7 +269,7 @@ function threadHTML(item, replies) {
     </div>`;
   return `<section class="item-thread" aria-labelledby="item-thread-label">
     <h3 class="section-label" id="item-thread-label">Thread</h3>
-    ${row(item.kind, eventSentenceHTML({ kind: item.kind, actor: item.actor, summary: item.summary }), item.created_at)}
+    ${row(item.kind, eventSentenceHTML({ kind: item.kind, actor: item.actor, author: item.author, origin: item.origin, summary: item.summary }), item.created_at)}
     ${replies.map((reply) => row(reply.kind, replySentence(reply), reply.created_at)).join("")}
   </section>`;
 }
@@ -373,7 +382,7 @@ async function detail(item, { session, replies, snoozedUntil, after, later }) {
   const { subject, message } = subjectAndMessage(item.summary);
   const asked = Date.parse(item.created_at);
   const byline = [
-    `<b>${esc(item.actor)}</b> in ${esc(projectName(item))}`,
+    `${subjectHTML(item)} in ${esc(projectName(item))}${receiptsHTML(item)}`,
     itemStamp(item.created_at),
     Number.isFinite(asked) ? esc(relative(asked)) : "",
   ]
@@ -390,7 +399,7 @@ async function detail(item, { session, replies, snoozedUntil, after, later }) {
     <p class="item-from inbox-detail-meta">${byline}</p>
     ${dl(strip, "item-rstrip", "Receipts")}
     ${message ? `<p class="inbox-detail-message">${esc(message)}</p>` : ""}
-    ${isEnrol ? `<div class="inbox-detail-reason"><strong>Why they are asking:</strong> ${esc(enrol || "No reason was given.")}</div>` : ""}
+    ${isEnrol ? `<div class="inbox-detail-reason"><strong>Why they are asking:</strong> ${esc(enrol || "No reason was given.")}${enrolLink(item)}</div>` : ""}
     ${body ? `<div class="inbox-detail-body markdown-body">${renderedBody}</div>` : ""}
     ${note ? `<div class="inbox-detail-resolved-note"><strong>${outcome === "Approved" || outcome === "Declined" ? "Decision note" : "Answer"}:</strong> ${esc(note)}</div>` : ""}
     ${answerBlock(item, snoozedUntil, after)}

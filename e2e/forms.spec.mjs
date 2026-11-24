@@ -31,8 +31,8 @@ const COLUMNS = [
   { name: "project settings", selector: "form.pset" },
   // Add agent is a column in the stage on a desktop and a stack in the list on
   // a phone, so one pointer reaches one and the other run the other.
-  { name: "New agent", selector: ".agent-create-column", fine: true },
-  { name: "the add-agent form", selector: ".access-add-fields", fine: false },
+  { name: "New member", selector: ".member-create-column", fine: true },
+  { name: "the add-member form", selector: ".access-add-fields", fine: false },
   { name: "the settings form column", selector: ".form-column", fine: true },
   { name: "the wiki editor", selector: ".wiki-editor" },
 ];
@@ -64,7 +64,7 @@ const ACTION_ROWS = [
   { selector: ".dialog-del-actions" },
   { selector: ".project-create-actions" },
   { selector: ".pset-actions" },
-  { selector: ".agent-create-actions", fine: true },
+  { selector: ".member-create-actions", fine: true },
   { selector: ".wiki-editor-actions" },
   { selector: ".session-actions-footer" },
   { selector: ".access-add-fields", fine: false },
@@ -79,7 +79,7 @@ const ALLOWED_COARSE = [
   ".dialog-actions :is(button, .button)",
   ".project-create-actions button",
   ".pset-actions button",
-  ".agent-create-actions button",
+  ".member-create-actions button",
   ".wiki-editor-actions :is(button, .button)",
   ".session-actions-footer button",
   ".access-add-fields button",
@@ -128,8 +128,10 @@ function controls(page, selector, where, allowed) {
           label: label.slice(0, 48),
           // A control that draws only a glyph has no label to be as wide as. It
           // is held to the target's own width instead, which is the widest it
-          // may be before it reaches past the control beside it.
-          glyphOnly: !(el.textContent || "").trim(),
+          // may be before it reaches past the control beside it. A glyph with
+          // its menu chevron (the Who trigger) is a menu trigger, which is as
+          // wide as what it draws, as Group's is.
+          glyphOnly: !(el.textContent || "").trim() && el.querySelectorAll("svg").length < 2,
           drawn: drawn.width,
           asked: asked.width,
           exempt,
@@ -176,7 +178,7 @@ const openedStates = (hub, wiki) => {
   const page2 = `${at}/wiki?page=${encodeURIComponent(wiki.name)}`;
   const session = `${at}/sessions?id=${encodeURIComponent(hub.sessionId)}`;
   return [
-    { name: "Add an agent", hash: "#/access", ready: "main .access-screen, main .agent-index-row", press: ['[data-action="toggle-add-agent"]'] },
+    { name: "Add a member", hash: "#/access", ready: "main .access-screen, main .member-index-row", press: ['[data-action="toggle-add-member"]'] },
     { name: "New project", hash: "#/projects", ready: "main .projects-screen .project-row", press: ['[data-action="new-project"]'] },
     { name: "Delete a project", hash: `${at}/feed`, ready: "main .feed-row", press: [".proj-overflow-btn", '[data-action="delete-project"]'] },
     { name: "End a session", hash: session, ready: "main .end-session", press: ['[data-action="end"]'] },

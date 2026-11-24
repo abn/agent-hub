@@ -1,10 +1,11 @@
-// Now: one stream of what the reader's agents did, in three tiers. What needs
+// Now: one stream of what the reader's sessions did, in three tiers. What needs
 // the reader, each ask a sentence with its answer at the end of the line; what
 // changed since they looked, by project; and the quiet rest, folded. A written
 // line opens it and a calm one closes it. Everything is read off the one Home
 // response, so painting the screen is one request however much it shows.
 
 import { api } from "./api.mjs";
+import { bylineOf, foldSessions, liveCountText, participantsText } from "./author.mjs";
 import { esc, glyph, kindMark, kindName, main, optionsAttr, paint, projectName, questionOptions, stale } from "./dom.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
 import { formatEventSummary } from "./feed.mjs";
@@ -66,6 +67,8 @@ function askReceipts(item, snoozedUntil) {
   const lines = [
     `<span class="now-r now-r-kind">${esc(KIND_WORD[item.kind] || "Ask")} in ${esc(projectName(item))}</span>`,
   ];
+  const by = bylineOf(item).receipts;
+  if (by) lines.push(`<span class="now-r now-r-by">${esc(by)}</span>`);
   const where = [ref(`#/inbox?open=${encodeURIComponent(item.event_id)}`, item.event_id, `Event ${item.event_id}`)];
   if (item.session_id) {
     where.push(
@@ -152,11 +155,15 @@ function askRow(item, snoozes, later) {
 const feedHref = (event) =>
   `#/projects/${encodeURIComponent(event.project_id)}/feed?event=${encodeURIComponent(event.id)}`;
 
-// A row for something that happened: the agent and what it did, in the words
+// A row for something that happened: the session and what it did, in the words
 // the feed uses, opening the event in its project's feed. The receipt is the
 // event and, for a publish, the artifact.
 export function eventRow(event, quiet = false) {
-  const receipts = [`<span class="now-r">${ref(feedHref(event), event.id, `Event ${event.id}`)}${event.inbox_status === "unread" ? " unread" : ""}</span>`];
+  const by = bylineOf(event).receipts;
+  const receipts = [
+    ...(by ? [`<span class="now-r now-r-by">${esc(by)}</span>`] : []),
+    `<span class="now-r">${ref(feedHref(event), event.id, `Event ${event.id}`)}${event.inbox_status === "unread" ? " unread" : ""}</span>`,
+  ];
   const artifact = event.payload && typeof event.payload.artifact_id === "string" ? event.payload.artifact_id : "";
   if (event.kind === "artifact" && artifact) {
     receipts.push(
@@ -271,17 +278,44 @@ function headerMeta(oldest) {
     .join(" · ");
 }
 
-function introMargin(data) {
-  const agents = Math.max(0, Math.trunc(Number(data.sessions_live)) || 0);
+const LIVE_SHOWN = 6;
+
+// The sessions working now, across projects, children folded under their
+// parent: the session in 600, then its project and who is in it as receipts.
+function liveSessionsHTML(sessions) {
+  const folded = foldSessions(sessions);
+  if (!folded.length) return "";
+  const rows = folded.slice(0, LIVE_SHOWN).map(({ session, folded: more }) => {
+    const project = session.project_display_name || session.project_id || "";
+    const who = participantsText(session.participants);
+    const meta = [project, who, more].filter(Boolean).join(" · ");
+    const href = `#/projects/${encodeURIComponent(session.project_id)}/sessions?id=${encodeURIComponent(session.id)}`;
+    return `<li class="now-live-row"><a class="now-live-name" href="${esc(href)}">${esc(session.session_name || session.id)}</a><span class="now-live-meta mono">${esc(meta)}</span></li>`;
+  });
+  const left = folded.length - rows.length;
+  const rest = left > 0 ? `<li class="now-live-more">and ${left} more</li>` : "";
+  return `<ul class="now-live" aria-label="Live sessions">${rows.join("")}${rest}</ul>`;
+}
+
+function introMargin(data, live) {
   const node = [data.node?.host, data.node?.mode].filter((part) => typeof part === "string" && part);
+  // The head counts what the rows below it show. A hub that would not list its
+  // sessions says so, in ink: an empty list and a failed one are not the same.
+  const head = live
+    ? `<p class="now-who">${esc(liveCountText(live))}</p>${liveSessionsHTML(live)}`
+    : `<p class="now-who">Could not list live sessions.</p>`;
   return `<span class="section-label now-mar-label">Working now</span>
-    <p class="now-who">${agents ? `${agents} ${agents === 1 ? "agent" : "agents"} active` : "No agents active"}</p>
+    ${head}
     ${node.length ? `<p class="now-node">${esc(node.join(" · "))}</p>` : ""}`;
 }
 
 export async function now(gen) {
   const show = showFromHash();
-  const data = await api("/api/v1/home");
+  const [data, live] = await Promise.all([
+    api("/api/v1/home"),
+    // The margin is a nicety: a hub that cannot list them leaves it to say so.
+    api("/api/v1/sessions?live=1").then((answer) => answer.sessions || []).catch(() => null),
+  ]);
   if (stale(gen)) return data;
   const at = Date.now();
   const snoozes = readSnoozes(at);
@@ -290,10 +324,10 @@ export async function now(gen) {
   const oldest = sinceOldest(since);
   const needs = asks.now.length + asks.unlisted;
   const anyAsk = needs + asks.later.length > 0;
-  const agents = Math.max(0, Math.trunc(Number(data.sessions_live)) || 0);
+  const sessions = Math.max(0, Math.trunc(Number(data.sessions_live)) || 0);
 
-  const summary = summaryHTML({ now: asks.now, later: asks.later.length, since: sinceCount, agents, unlisted: asks.unlisted });
-  const intro = ledger("now-intro", `<p class="now-sum">${summary}</p>`, introMargin(data));
+  const summary = summaryHTML({ now: asks.now, later: asks.later.length, since: sinceCount, sessions, unlisted: asks.unlisted });
+  const intro = ledger("now-intro", `<p class="now-sum">${summary}</p>`, introMargin(data, live));
 
   let tiers = "";
   if (show !== "since" && anyAsk) tiers += needsTier(asks, snoozes);

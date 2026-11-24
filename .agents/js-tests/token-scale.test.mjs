@@ -107,7 +107,7 @@ const ALLOWED = [
   { property: /^(padding|margin)/, family: ".hub-quote-icon", note: "a quote mark's optical nudge" },
   { property: /^padding/, family: ".markdown-body :not(pre)>code", note: "inline code's hairline padding" },
   { property: /^padding/, family: ".hub-thread-reply", note: "a reply's own indentation" },
-  { property: /^padding/, family: ".agent-pending-pill", note: "a pill's own box" },
+  { property: /^padding/, family: ".member-pending-pill", note: "a pill's own box" },
   { property: /^padding/, family: ".brain-tree-unified .tree-item.tree-leaf", note: "a tree leaf's own indentation" },
   { property: /^margin/, family: ".composer-send", note: "the send control's own centring" },
   { property: /^margin/, family: ".points-card", note: "a card's own offset" },

@@ -184,8 +184,18 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
-        path: "/agents.mjs",
-        body: include_bytes!("../../web/agents.mjs"),
+        path: "/members.mjs",
+        body: include_bytes!("../../web/members.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/author.mjs",
+        body: include_bytes!("../../web/author.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
+        path: "/who.mjs",
+        body: include_bytes!("../../web/who.mjs"),
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {

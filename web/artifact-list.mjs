@@ -7,6 +7,7 @@
 // list, so it needs nothing the hub does not already serve.
 
 import { api } from "./api.mjs";
+import { bylineOf } from "./author.mjs";
 import {
   artifactLine,
   artifactSlug,
@@ -29,6 +30,7 @@ import { render } from "./router.mjs";
 import { installShellLayout, shellHTML, shellStageHead } from "./shell-layout.mjs";
 import { placeTime, stamp } from "./time.mjs";
 import { toast } from "./toast.mjs";
+import { artifactsScope, loadWho, whoMenu, whoParams } from "./who.mjs";
 
 // How many earlier rows show before the rest folds.
 const EARLIER_SHOWN = 10;
@@ -141,9 +143,10 @@ function chips(active, choices) {
 const HINTS = `<span class="now-hints arts-hints" aria-hidden="true"><span class="now-hint-row">${kbd("j")}${kbd("k")} move</span><span class="now-hint-row">${kbd("o")} open</span></span>`;
 
 async function everyArtifact(projects) {
+  const who = whoParams(artifactsScope());
   const lists = await Promise.all(
     projects.map((project) =>
-      api(`/api/v1/projects/${encodeURIComponent(project.id)}/artifacts`)
+      api(`/api/v1/projects/${encodeURIComponent(project.id)}/artifacts${who ? `?${who}` : ""}`)
         .then((answer) =>
           (answer.artifacts || []).map((a) => ({
             ...a,
@@ -162,8 +165,15 @@ function forget() {
   eventCache.clear();
 }
 
+// The Who choice the held lists were read under: a different one is a different
+// read, so the lists are asked for again.
+let loadedFor = "";
+
 async function load() {
+  const asking = whoParams(artifactsScope());
+  if (loaded && loadedFor !== asking) loaded = null;
   if (!loaded) {
+    loadedFor = asking;
     loaded = api("/api/v1/projects")
       .then(async ({ projects }) => ({ projects: projects || [], all: await everyArtifact(projects || []) }))
       .catch((error) => {
@@ -178,6 +188,7 @@ export async function artifactListScreen(gen) {
   if (!onList()) forget();
   const active = projectFromHash();
   const { projects, all } = await load();
+  const who = await loadWho();
   if (stale(gen)) return;
   const state = readSeen() || seeAll(all);
   const shown = active ? all.filter((a) => a.project_id === active) : all;
@@ -203,7 +214,7 @@ export async function artifactListScreen(gen) {
       stageControls: `<div class="shell-controls arts-controls" role="toolbar" aria-label="Filter artifacts">${chips(
         active,
         projectChips(all, projects),
-      )}${HINTS}</div>`,
+      )}${whoMenu(artifactsScope(), who)}${HINTS}</div>`,
       stageBody: `<div class="shell-pad now-pad arts-pad"><div class="arts"><div class="arts-split">
         <div class="arts-list">${list}</div>
         <aside class="arts-mar" aria-label="Focused artifact">${first ? preview(first) : ""}</aside>
@@ -331,7 +342,8 @@ function preview(artifact) {
     : artifact.protected
       ? `<span class="arts-status">${lockMark()}Encrypted</span>`
       : `<span class="arts-status is-ok">${glyphSvg("resolve", { size: 14, strokeWidth: 2.2 })}Published</span>`;
-  const who = [artifact.project_name || artifact.project_id, artifact.actor, formatBytes(artifact.size_bytes)].filter(Boolean).join(" · ");
+  const by = bylineOf(artifact);
+  const who = [artifact.project_name || artifact.project_id, by.subject, by.receipts, formatBytes(artifact.size_bytes)].filter(Boolean).join(" · ");
   return `<div class="arts-prev" data-for="${esc(artifact.id)}">
     <span class="section-label arts-prev-label">Focused</span>
     <h3 class="arts-prev-name">${esc(slug)}</h3>

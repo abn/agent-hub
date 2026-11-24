@@ -3,6 +3,7 @@
 // quiet, and the sentences that open and close the stream. Pure functions over
 // plain data, so the words are held by unit tests rather than by a page.
 
+import { askerKey, hasSession, isOutsider, isYou, subjectHTML, verb } from "./author.mjs";
 import { esc } from "./dom.mjs";
 import { placeTime } from "./time.mjs";
 
@@ -177,21 +178,23 @@ const ENDED = /[.?!…]$/;
 function askClause(item) {
   const said = clip(item.summary);
   const quoted = `“${esc(said)}”`;
-  const who = `<b>${esc(item.actor)}</b>`;
-  if (item.kind === "approval") return { html: `${who} wants a decision on ${quoted}`, said };
-  if (item.kind === "question") return { html: `${who} asks ${quoted}`, said };
+  const who = subjectHTML(item);
+  if (item.kind === "approval") return { html: `${who} ${verb(item, "wants", "want")} a decision on ${quoted}`, said };
+  if (item.kind === "question") return { html: `${who} ${verb(item, "asks", "ask")} ${quoted}`, said };
   if (item.kind === "idea") return { html: `${who} left an idea, ${quoted}`, said };
-  return { html: `${who} is waiting on ${quoted}`, said };
+  return { html: `${who} ${verb(item, "is", "are")} waiting on ${quoted}`, said };
 }
 
-// The asks the opening line names: one per agent, in the hub's order, two at
-// most, so two agents each get their say before one agent's second ask.
+// The asks the opening line names: one per asker, in the hub's order, two at
+// most, so two sessions each get their say before one session's second ask. An
+// asker is the session, or the agent and member when the ask named no session.
 function named(items) {
   const seen = new Set();
   const picked = [];
   for (const item of items) {
-    if (seen.has(item.actor)) continue;
-    seen.add(item.actor);
+    const key = askerKey(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
     picked.push(item);
     if (picked.length === 2) break;
   }
@@ -199,22 +202,32 @@ function named(items) {
 }
 
 // The opening line, as markup. Every value an agent wrote is escaped here, so
-// the caller can put the result straight into the page.
+// the caller can put the result straight into the page. It counts the agents'
+// sessions: an ask names the session that wrote it, or the agent when it named
+// none, and then the line counts agents. The human's own asks and the hub's are
+// not a session and are left out of that count; "you" takes the verb "ask".
 //
 //   nothing waits   "Nothing waits on you. Nothing is new since you looked."
-//   one ask         "One agent needs you. build-bot asks “Ship it?”"
-//   two agents      "Two agents need you. a wants a decision on “x”, and b asks “y?”"
+//   one ask         "One session needs you. feat-x asks “Ship it?”"
+//   no session      "One agent needs you. claude-code asks “Ship it?”"
+//   two sessions    "Two sessions need you. a wants a decision on “x”, and b asks “y?”"
 //   more            "... and three more." after the two it names
-export function summaryHTML({ now = [], later = 0, since = 0, agents = 0, unlisted = 0 } = {}) {
+export function summaryHTML({ now = [], later = 0, since = 0, sessions = 0, unlisted = 0 } = {}) {
   const total = now.length + unlisted;
   const parts = [];
   const rest = [];
   if (!total) {
     parts.push("Nothing waits on you.");
   } else {
-    const actors = new Set(now.map((item) => item.actor)).size || 1;
-    const lead = `${capital(word(actors))} ${actors === 1 ? "agent needs" : "agents need"} you`;
-    parts.push(actors === total ? `${lead}.` : `${lead}, with ${word(total)} asks.`);
+    const agents = now.filter((item) => !isOutsider(item));
+    const actors = new Set(agents.map(askerKey)).size;
+    const noun = agents.every(hasSession) ? "session" : "agent";
+    if (!actors) {
+      parts.push(`${capital(word(total))} ${total === 1 ? "ask needs" : "asks need"} you.`);
+    } else {
+      const lead = `${capital(word(actors))} ${actors === 1 ? `${noun} needs` : `${noun}s need`} you`;
+      parts.push(actors === total ? `${lead}.` : `${lead}, with ${word(total)} asks.`);
+    }
     const clauses = named(now).map(askClause);
     const left = total - clauses.length;
     if (clauses.length) {
@@ -227,8 +240,8 @@ export function summaryHTML({ now = [], later = 0, since = 0, agents = 0, unlist
   if (later) rest.push(`${capital(word(later))} more can wait.`);
   if (since) rest.push(`${capital(word(since))} ${since === 1 ? "thing" : "things"} changed since you looked.`);
   else rest.push(total || later ? "Nothing else is new." : "Nothing is new since you looked.");
-  if (!total && !later && agents) {
-    rest.push(`${capital(word(agents))} ${agents === 1 ? "agent is" : "agents are"} working.`);
+  if (!total && !later && sessions) {
+    rest.push(`${capital(word(sessions))} ${sessions === 1 ? "session is" : "sessions are"} working.`);
   }
   return `${parts.join(" ")} <span class="now-rest">${rest.join(" ")}</span>`;
 }
@@ -258,10 +271,10 @@ const DID = {
   anchor: "marked a phase",
 };
 
-// A row's sentence, as markup: the agent in semibold and what it did.
+// A row's sentence, as markup: the subject in semibold and what it did.
 export function eventSentenceHTML(event) {
   const did = Object.prototype.hasOwnProperty.call(DID, event.kind) ? DID[event.kind] : "";
-  const who = `<b>${esc(event.actor)}</b>`;
+  const who = subjectHTML(event);
   return `${who}${did ? ` ${did}` : ""}: ${esc(event.summary)}`;
 }
 
@@ -277,21 +290,23 @@ const DONE = /^(?:[a-z]+ed|picked up)\b/;
 export function feedSentenceHTML(event, phrase = event.summary) {
   if (isOpen(event)) return askSentenceHTML(event);
   const said = String(phrase ?? "").trim().replace(/^([A-Z])(?=[a-z]+ed\b)/, (c) => c.toLowerCase());
-  if (event.kind !== "signal" && DONE.test(said)) return `<b>${esc(event.actor)}</b> ${esc(said)}`;
+  if (event.kind !== "signal" && DONE.test(said)) return `${subjectHTML(event)} ${esc(said)}`;
   return eventSentenceHTML(event);
 }
 
 // An ask's sentence, as markup: who wants what.
 export function askSentenceHTML(item) {
-  const who = `<b>${esc(item.actor)}</b>`;
+  const who = subjectHTML(item);
   const want =
     item.kind === "approval"
-      ? "wants a decision:"
+      ? `${verb(item, "wants", "want")} a decision:`
       : item.kind === "question"
-        ? "asks:"
+        ? `${verb(item, "asks", "ask")}:`
         : item.kind === "idea"
           ? "left an idea:"
-          : "is waiting on you:";
+          : isYou(item)
+            ? "are waiting on this:"
+            : "is waiting on you:";
   return `${who} ${want} ${esc(item.summary)}`;
 }
 
@@ -348,7 +363,7 @@ export function threadReplies(id, events = []) {
 // A reply on a thread, as markup: who, and what they said. An answer reads its
 // body, which is the decision or the words sent; anything else adds to the ask.
 export function replySentenceHTML(event) {
-  const who = `<b>${esc(event.actor)}</b>`;
+  const who = subjectHTML(event);
   const body = typeof event.payload?.body === "string" && event.payload.body.trim() ? event.payload.body.trim() : "";
   if (event.kind === "answer") return `${who} answered: ${esc(body || event.summary)}`;
   return `${who} added: ${esc(body || event.summary)}`;

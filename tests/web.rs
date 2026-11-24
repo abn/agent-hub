@@ -29,7 +29,7 @@ const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.runtime.js");
 const SERVICE_WORKER: &str = include_str!("../web/sw.js");
 const SETTINGS_JS: &str = include_str!("../web/settings.mjs");
 const STORAGE_JS: &str = include_str!("../web/storage.mjs");
-const AGENTS_JS: &str = include_str!("../web/agents.mjs");
+const MEMBERS_JS: &str = include_str!("../web/members.mjs");
 const SHELL_JS: &str = include_str!("../web/shell.mjs");
 const INDEX_HTML: &str = include_str!("../web/index.html");
 const CONNECT_JS: &str = include_str!("../web/connect.mjs");
@@ -495,7 +495,7 @@ async fn manifest_lists_png_icons_and_serves_them() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 57] = [
+const SHELL_PATHS: [&str; 59] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -528,7 +528,9 @@ const SHELL_PATHS: [&str; 57] = [
     "/settings.mjs",
     "/more.mjs",
     "/project-settings.mjs",
-    "/agents.mjs",
+    "/members.mjs",
+    "/author.mjs",
+    "/who.mjs",
     "/artifacts.mjs",
     "/comments.mjs",
     "/glyphs.mjs",
@@ -1777,25 +1779,25 @@ fn desktop_storage_legend_is_one_wrapping_row() {
     );
 }
 
-// Round 13.1, RULE 13.2: Agents and tokens is a list-and-item screen on desktop.
+// Round 13.1, RULE 13.2: Members and tokens is a list-and-item screen on desktop.
 // Supersedes ROUND-12 §12 ("shaped like Settings, no index") and round 12.1 A3.
 // The shell uses index + stage, with indexHead, indexControls, indexBody,
 // stageHead, stageControls, stageBody, and hasSelection.
 
 #[test]
 fn desktop_agents_is_list_and_item_shell() {
-    let desktop = AGENTS_JS
-        .split("function renderDesktopAgents(")
+    let desktop = MEMBERS_JS
+        .split("function renderDesktopMembers(")
         .nth(1)
         .expect("agents carries a desktop renderer");
     let desktop = desktop.split("\nfunction ").next().unwrap_or(desktop);
     assert!(
         desktop.contains("shellHTML"),
-        "desktop Agents and tokens must render inside the shell frame"
+        "desktop Members and tokens must render inside the shell frame"
     );
     assert!(
         !desktop.contains("noIndex: true"),
-        "RULE 13.2: Agents and tokens is a list-and-item screen on desktop, noIndex retired"
+        "RULE 13.2: Members and tokens is a list-and-item screen on desktop, noIndex retired"
     );
     assert!(
         desktop.contains("indexHead")
@@ -1807,12 +1809,12 @@ fn desktop_agents_is_list_and_item_shell() {
         "RULE 13.2: shellHTML receives both index and stage panes"
     );
     assert!(
-        desktop.contains("Agents and tokens"),
+        desktop.contains("Members and tokens"),
         "the index header names the screen"
     );
     assert!(
-        desktop.contains("Add agent") && desktop.contains("btn-outline"),
-        "index header trails Add agent outline button"
+        desktop.contains("Add member") && desktop.contains("btn-outline"),
+        "index header trails Add member outline button"
     );
     assert!(
         desktop.contains("confidential projects"),
@@ -1824,10 +1826,10 @@ fn desktop_agents_is_list_and_item_shell() {
     );
     assert!(
         desktop.contains("aria-current=\"true\"") || desktop.contains("aria-current=\\\"true\\\""),
-        "selected agent row in index carries aria-current=true"
+        "selected member row in index carries aria-current=true"
     );
     assert!(
-        desktop.contains("agent-token") && desktop.contains("agent-issue"),
+        desktop.contains("member-token") && desktop.contains("member-issue"),
         "stage control row carries the reissue and issue token actions"
     );
     assert!(
@@ -1835,43 +1837,43 @@ fn desktop_agents_is_list_and_item_shell() {
         "stage control row names the no-live-token state"
     );
     assert!(
-        desktop.contains("data-action=\"agent-revoke\""),
+        MEMBERS_JS.contains("data-action=\"member-revoke\""),
         "stage body carries Revoke action"
     );
     assert!(
-        desktop.contains("Select an agent from the list."),
+        desktop.contains("Select a member from the list."),
         "when no agent is selected, stage displays empty state prompt"
     );
 }
 
-// Round 13.1, RULE 13.3: Add agent opens the form in the stage on desktop.
-// Not an inline form in the list. Add agent takes aria-pressed="true" and
-// clears the index selection; stage 52 header "New agent", 40 row "It gets its
-// token once, when you create it.", and a stage form with Agent id, Display
-// name, Create agent and Cancel. The form's column is the shared 640 every
+// Round 13.1, RULE 13.3: Add member opens the form in the stage on desktop.
+// Not an inline form in the list. Add member takes aria-pressed="true" and
+// clears the index selection; stage 52 header "New member", 40 row "It gets its
+// token once, when you create it.", and a stage form with Member name, Display
+// name, Create member and Cancel. The form's column is the shared 640 every
 // other form takes, which the forms gate measures on the page rather than here.
 #[test]
 fn desktop_agents_add_agent_opens_form_in_stage() {
-    let desktop = AGENTS_JS
-        .split("function renderDesktopAgents(")
+    let desktop = MEMBERS_JS
+        .split("function renderDesktopMembers(")
         .nth(1)
         .expect("agents carries a desktop renderer");
     let desktop = desktop.split("\nfunction ").next().unwrap_or(desktop);
     assert!(
-        desktop.contains("New agent"),
-        "RULE 13.3: stage header carries 'New agent' when creating"
+        desktop.contains("New member"),
+        "RULE 13.3: stage header carries 'New member' when creating"
     );
     assert!(
         desktop.contains("It gets its token once, when you create it."),
         "RULE 13.3: stage control row carries token copy when creating"
     );
     assert!(
-        desktop.contains("Agent id") && desktop.contains("Display name"),
-        "RULE 13.3: stage form carries Agent id and Display name fields"
+        desktop.contains("Member name") && desktop.contains("Display name"),
+        "RULE 13.3: stage form carries Member name and Display name fields"
     );
     assert!(
-        desktop.contains("Create agent") && desktop.contains("Cancel"),
-        "RULE 13.3: stage form carries Create agent and Cancel buttons"
+        desktop.contains("Create member") && desktop.contains("Cancel"),
+        "RULE 13.3: stage form carries Create member and Cancel buttons"
     );
     assert!(
         !desktop.contains("desktop-add-agent-form"),
@@ -1880,31 +1882,31 @@ fn desktop_agents_add_agent_opens_form_in_stage() {
     // Board annotations are notes to the builder, never UI copy. Both of these
     // shipped into the screen once and were caught by looking.
     assert!(
-        !AGENTS_JS.contains("Focus lands on Agent id")
-            && !AGENTS_JS.contains("Revoke confirms in the B1 dialog")
-            && !AGENTS_JS.contains("as on the phone"),
+        !MEMBERS_JS.contains("Focus lands on Member name")
+            && !MEMBERS_JS.contains("Revoke confirms in the B1 dialog")
+            && !MEMBERS_JS.contains("as on the phone"),
         "board annotations must not be rendered as UI copy"
     );
     // RULE 13.3: the created agent's token is issued and B2 opens on it directly,
     // titled with the display name; there is nothing to reissue, so no confirm.
     assert!(
-        AGENTS_JS.contains("revealIssuedToken(issued?.token || null, nameVal || idVal, idVal)"),
+        MEMBERS_JS.contains("revealIssuedToken(issued?.token || null, displayName || id, id)"),
         "create opens B2 straight away with the token and the display name"
     );
     assert!(
-        AGENTS_JS.contains("Token for ${name}"),
+        MEMBERS_JS.contains("Token for ${name}"),
         "the reveal is titled with the display name"
     );
     assert!(
-        !AGENTS_JS.contains("New token for ${name}"),
+        !MEMBERS_JS.contains("New token for ${name}"),
         "the old reveal title is retired"
     );
 }
 
 #[test]
 fn desktop_agents_never_shows_a_token() {
-    let desktop = AGENTS_JS
-        .split("function renderDesktopAgents(")
+    let desktop = MEMBERS_JS
+        .split("function renderDesktopMembers(")
         .nth(1)
         .expect("agents carries a desktop renderer");
     let desktop = desktop.split("\nfunction ").next().unwrap_or(desktop);
@@ -1916,29 +1918,29 @@ fn desktop_agents_never_shows_a_token() {
 
 #[test]
 fn desktop_agents_index_header_trails_add_agent_button() {
-    let desktop = AGENTS_JS
-        .split("function renderDesktopAgents(")
+    let desktop = MEMBERS_JS
+        .split("function renderDesktopMembers(")
         .nth(1)
         .expect("agents carries a desktop renderer");
     let desktop = desktop.split("\nfunction ").next().unwrap_or(desktop);
     assert!(
-        desktop.contains("Add agent"),
-        "desktop Agents and tokens header must carry the Add agent button"
+        desktop.contains("Add member"),
+        "desktop Members and tokens header must carry the Add member button"
     );
     assert!(
         desktop.contains("indexHead")
-            && (desktop.contains("addAgentBtn") || desktop.contains("Add agent")),
-        "indexHead must receive Add agent"
+            && (desktop.contains("addMemberBtn") || desktop.contains("Add member")),
+        "indexHead must receive Add member"
     );
     assert!(
         desktop.contains("height: 32px")
             || desktop.contains("height:32px")
-            || desktop.contains("agents-add-btn"),
-        "Add agent button must be 32px outline button"
+            || desktop.contains("members-add-btn"),
+        "Add member button must be 32px outline button"
     );
     assert!(
         desktop.contains("5v14") && desktop.contains("5 12h14"),
-        "Add agent button must carry the plus glyph"
+        "Add member button must carry the plus glyph"
     );
     // Section 13 answer 4: the confidential card retires, and its count leads
     // the control row as text.
@@ -2156,7 +2158,7 @@ fn artifact_stage_version_control_is_wired_and_opens_a_sheet() {
 
 #[test]
 fn reissue_reveal_is_two_states_with_done_the_only_exit() {
-    let src = AGENTS_JS;
+    let src = MEMBERS_JS;
     assert!(
         src.contains("function revealIssuedToken("),
         "the reveal is its own dialog"
@@ -2187,7 +2189,7 @@ fn reissue_token_leaves_the_dom_when_the_dialog_closes() {
     // The string must not survive the close. The close handler is the only
     // place that can drop it, so the assertion is on that handler as a whole:
     // it clears the value and removes the element.
-    let reveal = AGENTS_JS
+    let reveal = MEMBERS_JS
         .split("export function revealIssuedToken(")
         .nth(1)
         .expect("the reveal dialog exists");
@@ -2205,11 +2207,11 @@ fn reissue_token_leaves_the_dom_when_the_dialog_closes() {
         "the element carrying the token is emptied on close, not merely hidden"
     );
     assert!(
-        !AGENTS_JS.contains("issued-token-card"),
+        !MEMBERS_JS.contains("issued-token-card"),
         "the old always-on card, which left the token in the page, is gone"
     );
     assert!(
-        !AGENTS_JS.contains("showToken("),
+        !MEMBERS_JS.contains("showToken("),
         "nothing still renders a token outside the dialog"
     );
 }
@@ -2220,10 +2222,10 @@ async fn reissue_token_is_in_the_dom_only_while_the_dialog_is_open() {
     // exact issued string is captured while the dialog is open and looked for
     // again after Done. Anything left in the page fails this.
     assert!(
-        AGENTS_JS.contains("visible = null;"),
+        MEMBERS_JS.contains("visible = null;"),
         "the token is dropped from memory on close"
     );
-    let reveal = AGENTS_JS
+    let reveal = MEMBERS_JS
         .split("export function revealIssuedToken(")
         .nth(1)
         .expect("the reveal dialog exists");
@@ -2241,7 +2243,7 @@ async fn reissue_token_is_in_the_dom_only_while_the_dialog_is_open() {
         "and the element itself is removed, so the string cannot be read back"
     );
     assert!(
-        !AGENTS_JS.contains("issued-token-card"),
+        !MEMBERS_JS.contains("issued-token-card"),
         "the old always-on card, which left the token in the page, is gone"
     );
 }
@@ -2329,16 +2331,16 @@ fn desktop_settings_and_storage_styles_pass_c1_to_c10() {
         "C9: storage footnote is 13px"
     );
 
-    // C10: Add agent 32 in 52 header
-    let add_agent = APP_CSS
-        .split(".agents-add-btn {")
+    // C10: Add member 32 in 52 header
+    let add_member = APP_CSS
+        .split(".members-add-btn {")
         .nth(1)
         .and_then(|rule| rule.split('}').next())
-        .expect("the Add agent rule exists");
+        .expect("the Add member rule exists");
     assert!(
-        add_agent.lines().any(|l| l.trim() == "height: 32px;")
-            && add_agent.lines().any(|l| l.trim() == "min-height: 32px;"),
-        "C10: Add agent button is 32px tall with min-height 32px"
+        add_member.lines().any(|l| l.trim() == "height: 32px;")
+            && add_member.lines().any(|l| l.trim() == "min-height: 32px;"),
+        "C10: Add member button is 32px tall with min-height 32px"
     );
 }
 

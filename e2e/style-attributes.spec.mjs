@@ -102,12 +102,12 @@ function states(hub, wiki, agent) {
   const project = encodeURIComponent(hub.projectId);
   const at = `#/projects/${project}`;
   const page = `${at}/wiki?page=${encodeURIComponent(wiki.name)}`;
-  const agentAt = `#/access?agent=${encodeURIComponent(agent)}`;
-  const agentReady = "main .access-screen, main .agent-index-row";
+  const agentAt = `#/access?member=${encodeURIComponent(agent)}`;
+  const agentReady = "main .access-screen, main .member-index-row";
   const session = `${at}/sessions?id=${encodeURIComponent(hub.sessionId)}`;
   const file = `${session}&file=${encodeURIComponent(hub.fixture.brainFsTop)}`;
   return [
-    { name: "Agent selected", hash: agentAt, ready: agentReady },
+    { name: "Member selected", hash: agentAt, ready: agentReady },
     {
       // The seeded agents hold no live token, so Issue reveals one at once. The
       // test answers the issue itself, so no token is written, and the reveal
@@ -116,11 +116,11 @@ function states(hub, wiki, agent) {
       hash: agentAt,
       ready: agentReady,
       answer: { url: "**/api/v1/members/*/token", method: "POST", status: 200, body: { token: "not-a-real-token" } },
-      press: ['[data-action="agent-issue"]'],
+      press: ['[data-action="member-issue"]'],
       close: "dialog[open] .dialog-commit",
     },
-    { name: "Grant a project", hash: agentAt, ready: agentReady, press: ['[data-action="agent-grant-open"]'], layout: "desktop" },
-    { name: "Add an agent", hash: "#/access", ready: agentReady, press: ['[data-action="toggle-add-agent"]'] },
+    { name: "Grant a project", hash: agentAt, ready: agentReady, press: ['[data-action="member-grant-open"]'], layout: "desktop" },
+    { name: "Add a member", hash: "#/access", ready: agentReady, press: ['[data-action="toggle-add-member"]'] },
     { name: "New project", hash: "#/projects", ready: "main .projects-screen .project-row", press: ['[data-action="new-project"]'] },
     {
       name: "Delete a project",
@@ -194,9 +194,9 @@ test.describe("styles live in the stylesheet", () => {
     }
 
     const response = await fetch(`${hub.baseUrl}/api/v1/members`, { headers });
-    const { members: agents } = await response.json();
-    const tokenless = agents.find((agent) => agent.state !== "pending" && agent.has_live_token === false);
-    expect(tokenless, "the seeded hub has no enrolled agent without a token").toBeDefined();
+    const { members } = await response.json();
+    const tokenless = members.find((member) => member.state !== "pending" && member.has_live_token === false);
+    expect(tokenless, "the seeded hub has no member without a token").toBeDefined();
     for (const state of states(hub, wiki, tokenless.id)) {
       if (!reaches(state)) continue;
       const { answer } = state;

@@ -193,7 +193,7 @@ if (tabBadge && "MutationObserver" in window) {
   });
 }
 
-// A personal space is a project an agent owns, and `owner_member` is what says
+// A personal space is a project a member owns, and `owner_member` is what says
 // so: the hub sets it, and deleting a project refuses on it. By owner ruling
 // these never appear in the rail.
 //

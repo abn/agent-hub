@@ -1,7 +1,9 @@
-// Sessions: the list per project, one session's detail, and the two actions
-// that close or reclaim a session.
+// Sessions: the list per project, one session's detail, and the actions that
+// end or prune a session. A session is shared: it has no owner, only the
+// participants who have written in it.
 
 import { api } from "./api.mjs";
+import { bylineOf, foldSessions, isLive, leafName, participantsText, sessionCountText, stateWord } from "./author.mjs";
 import { count, focusTreePath, unifiedBrainTree, wireTreeKeyboard } from "./brain-tree.mjs";
 import { confirmAction } from "./dialog.mjs";
 import { EMPTY_COPY, emptyStateHTML } from "./empty.mjs";
@@ -27,22 +29,31 @@ export async function sessionsScreen(selected, gen) {
 
 // The list the standalone screen and the segmented project view both paint.
 // Each row carries the state dot (active = ok fill, ended = ring, pruned =
-// line-strong fill), the owner, the mono size and a chevron,
-// matching the design's session row.
-export function sessionRow(s, current, isSelected = false) {
+// line-strong fill), who took part, the mono size and a chevron, matching the
+// design's session row. A child shows its last segment under its parent.
+export function sessionRow(s, current, isSelected = false, { child = false, folded = "" } = {}) {
   const isPruned = s.status === "pruned" || s.pruned;
+  // Active splits in two: live (somebody was seen lately) and idle. The dot's
+  // fill and the word say which, so the state is never the colour alone.
   const dot =
     s.status === "active"
-      ? `<span class="state-dot live"></span>`
+      ? `<span class="state-dot ${isLive(s) ? "live" : "idle"}"></span>`
       : isPruned
         ? `<span class="state-dot pruned"></span>`
         : `<span class="state-dot ring"></span>`;
 
   const size = s.brain_bytes != null ? fmtBytes(s.brain_bytes) : "";
-  const owner = esc(s.started_label ?? "");
-  const statusWord = esc(s.status || "");
+  const name = child ? leafName(s.session_name) : s.session_name;
+  // A session from before members has no participants to name; its first
+  // writer's label is all there is.
+  const who = participantsText(s.participants, { includeLeft: true }) || bylineOf({ author: s.started_by, actor: s.started_label }).subject;
+  const statusWord = esc(stateWord(s));
   const truncatedId = truncateMiddle(s.id);
-  const metaText = `${owner} · ${statusWord} · ${relative(s.last_activity ?? s.created_at)} · <span class="session-id mono">${truncatedId}</span>`;
+  // The state leads, so a narrow list cuts the id and the time and never the
+  // word that says whether anyone is there.
+  const metaText = [statusWord, esc(who), folded ? esc(folded) : "", relative(s.last_activity ?? s.created_at), `<span class="session-id mono">${truncatedId}</span>`]
+    .filter(Boolean)
+    .join(" · ");
 
   const href = current
     ? `#/projects/${encodeURIComponent(current)}/sessions?id=${encodeURIComponent(s.id)}`
@@ -50,17 +61,38 @@ export function sessionRow(s, current, isSelected = false) {
     // the reader the same screen inside it.
     : `#/session?id=${encodeURIComponent(s.id)}`;
 
-  return `<div class="row session-row${isSelected ? " selected" : ""}" data-id="${esc(s.id)}">
+  return `<div class="row session-row${child ? " session-child" : ""}${isSelected ? " selected" : ""}" data-id="${esc(s.id)}">
     ${dot}
     <a class="session-link stretched-link" href="${href}" aria-label="Open session ${esc(s.session_name)}, ${statusWord}">
       <span class="grow">
-        <span class="title ${isPruned ? "pruned" : ""}">${esc(s.session_name || s.id)}</span>
+        <span class="title ${isPruned ? "pruned" : ""}">${esc(name || s.id)}</span>
         <span class="meta">${metaText}</span>
       </span>
       <span class="session-size mono">${size}</span>
       <svg class="session-chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"></path></svg>
     </a>
   </div>`;
+}
+
+// Parents whose subagents the reader has opened. A repaint keeps them open.
+const unfolded = new Set();
+
+// A group's rows: each parent, with its subagents set in under it behind a
+// disclosure that reads "+2 subagents". They stay folded until the reader opens
+// them, unless the selected session is one of them.
+function groupRows(group, current, selectedId) {
+  return foldSessions(group)
+    .map(({ session, children, folded }) => {
+      if (!children.length) return sessionRow(session, current, session.id === selectedId, { folded });
+      const open = unfolded.has(session.id) || children.some((kid) => kid.id === selectedId);
+      const kidsId = `session-kids-${session.id}`;
+      return [
+        sessionRow(session, current, session.id === selectedId),
+        `<button type="button" class="session-fold" data-action="session-fold" data-id="${esc(session.id)}" aria-expanded="${open}" aria-controls="${esc(kidsId)}">${esc(folded)}</button>`,
+        `<div class="session-kids" id="${esc(kidsId)}"${open ? "" : " hidden"}>${children.map((kid) => sessionRow(kid, current, kid.id === selectedId, { child: true })).join("")}</div>`,
+      ].join("");
+    })
+    .join("");
 }
 
 // The selected project's session rows, as active and ended groups.
@@ -74,10 +106,10 @@ export async function sessionRows(current, selectedId = null) {
 
   let activeSection = "";
   if (active.length > 0) {
-    const activeRows = active.map((s) => sessionRow(s, current, s.id === selectedId)).join("");
+    const activeRows = groupRows(active, current, selectedId);
     activeSection = `
       <div class="session-group-header active-header">
-        <span>ACTIVE · ${active.length}</span>
+        <span>ACTIVE · ${esc(sessionCountText(active))}</span>
         <span class="group-header-divider" aria-hidden="true"></span>
       </div>
       <div class="session-group active-group">
@@ -88,7 +120,7 @@ export async function sessionRows(current, selectedId = null) {
 
   let endedSection = "";
   if (ended.length > 0) {
-    const endedRows = ended.map((s) => sessionRow(s, current, s.id === selectedId)).join("");
+    const endedRows = groupRows(ended, current, selectedId);
     const sizePart = fmtBytes(prunableBytes);
     const pruneAllLabel = `Prune all · <span class="mono">${sizePart}</span>`;
     endedSection = `
@@ -131,11 +163,13 @@ export async function sessionsSection(current) {
 }
 
 function lineageLine(lineage) {
-  // lineage: {kind: "adopted" | "forked", session_id, agent, pruned}
+  // lineage: {kind: "forked" | "adopted", session_id, session_name?, pruned}. A
+  // session is shared and is not picked up any more; "adopted" is history on a
+  // session from before members, and it still reads as it did.
   const verb = lineage.kind === "forked" ? "forked from" : "picked up from";
-  const who = lineage.agent ? ` ${esc(lineage.agent)}` : "";
+  const from = lineage.session_name || lineage.session_id;
   const prunedNote = lineage.pruned ? " (pruned)" : "";
-  return `<span class="meta">${verb}${who} · ${esc(lineage.session_id)}${prunedNote}</span>`;
+  return `<span class="meta">${verb} ${esc(from)}${prunedNote}</span>`;
 }
 
 function feedEventHref(project, id) {
@@ -173,7 +207,7 @@ function anchorSourceHTML(source, project) {
   </li>`;
 }
 
-// The anchor card: the last phase boundary the session's owner wrote, the plan
+// The anchor card: the last phase boundary a participant wrote, the plan
 // it left, the events it rests on, and the human's latest score. It sits above
 // the tree or the resume list, so the checkpoint is read before the work.
 function anchorCardHTML(project, resume, session) {
@@ -183,7 +217,7 @@ function anchorCardHTML(project, resume, session) {
     return `<div class="session-anchor">
       <h2 class="section-label session-anchor-label" id="session-anchor-label">Anchor</h2>
       <section class="session-anchor-card" aria-labelledby="session-anchor-label">
-        <p class="meta session-anchor-empty">No anchor yet. An agent writes one at a phase boundary.</p>
+        <p class="meta session-anchor-empty">No anchor yet. A participant writes one at a phase boundary.</p>
       </section>
     </div>`;
   }
@@ -203,7 +237,7 @@ function anchorCardHTML(project, resume, session) {
     ? `<div class="session-anchor-score">
         <span class="session-anchor-score-line">
           <span class="session-anchor-score-value">Score ${esc(score.score)}/5</span>
-          <span class="session-anchor-score-meta">${esc(score.reviewer)} · ${relative(score.created_at)}</span>
+          <span class="session-anchor-score-meta">${esc(bylineOf({ actor: score.reviewer }).subject)} · ${relative(score.created_at)}</span>
         </span>
         <p class="session-anchor-score-rationale">${esc(score.rationale)}</p>
       </div>`
@@ -214,7 +248,7 @@ function anchorCardHTML(project, resume, session) {
     <section class="session-anchor-card" aria-labelledby="session-anchor-label">
       <div class="session-anchor-head">
         <span class="pill session-anchor-phase">${esc(anchor.phase)}</span>
-        <span class="meta session-anchor-meta">${esc(anchor.owner)} · ${relative(anchor.created_at)}</span>
+        <span class="meta session-anchor-meta">${esc(bylineOf({ author: anchor.author, actor: anchor.owner, origin: anchor.origin }).subject)} · ${relative(anchor.created_at)}</span>
       </div>
       <p class="session-anchor-summary">${esc(anchor.summary)}</p>
       ${stepsHTML}
@@ -225,6 +259,13 @@ function anchorCardHTML(project, resume, session) {
       </div>
     </section>
   </div>`;
+}
+
+// Who wrote an event in the resume list: the subject and, when there are any,
+// the receipts after it.
+function resumeBy(event) {
+  const b = bylineOf(event);
+  return b.receipts ? `${b.subject} · ${b.receipts}` : b.subject;
 }
 
 // The events after the anchor, oldest first, as the list a resumed reader
@@ -239,7 +280,7 @@ function resumeListHTML(project, resume) {
           ${glyph(event.kind)}
           <div class="grow">
             <div class="session-resume-title">${esc(event.summary)}</div>
-            <div class="meta">${esc(event.actor)} · ${relative(event.created_at)}</div>
+            <div class="meta">${esc(resumeBy(event))} · ${relative(event.created_at)}</div>
           </div>
         </a>
       </li>`,
@@ -252,6 +293,23 @@ function resumeListHTML(project, resume) {
     : "";
   return `${rows ? `<ol class="session-resume-list" aria-label="Events since the anchor">${rows}</ol>` : empty}${foot}`;
 }
+
+// Who has been in the session, and who started it. A session from before
+// members names only its first writer's old label.
+function participantsLine(session) {
+  const who = participantsText(session.participants, { includeLeft: true });
+  const by = bylineOf({ author: session.started_by, actor: session.started_label });
+  const started = by.receipts ? `${by.subject} · ${by.receipts}` : by.subject;
+  const parts = [];
+  if (who) parts.push(`<span class="session-participants mono">${esc(who)}</span>`);
+  if (started) parts.push(`started by ${esc(started)}`);
+  return parts.length ? `<div class="meta session-by">${parts.join(" · ")}</div>` : "";
+}
+
+// A brain a merge has touched keeps the other session's entries under a
+// `merged` folder, so the tree says where they came from.
+const MERGED = /(^|\/)merged(-|$)/;
+const mergedOnUpgrade = (entries) => (entries || []).some((entry) => MERGED.test(String(entry.name ?? entry.path ?? "")));
 
 export function sessionDetailHTML(
   session,
@@ -285,8 +343,8 @@ export function sessionDetailHTML(
     : "";
 
   const primaryButton = isEnded
-    ? `<button type="button" class="btn-primary danger" data-action="prune" data-id="${esc(session.id)}" data-agent="${esc(session.started_label)}">Prune session</button>`
-    : `<button type="button" class="btn-outline end-session" data-action="end" data-id="${esc(session.id)}">End session…</button>`;
+    ? `<button type="button" class="btn-primary danger" data-action="prune" data-id="${esc(session.id)}" data-label="${esc(session.session_name)}">Prune session</button>`
+    : `<button type="button" class="btn-outline end-session" data-action="end" data-id="${esc(session.id)}" data-name="${esc(session.session_name || "")}">End session…</button>`;
 
   const helperNote = isEnded
     ? `Session ended ${relative(session.last_activity ?? session.created_at)}. Brain and logs can be pruned.`
@@ -304,7 +362,7 @@ export function sessionDetailHTML(
           </div>
           ${resumeListHTML(current, resume)}`
     : `<div class="brain-header-line">
-            <span class="brain-label">Brain <span class="mono">· ${count(totalItems, "item")}</span></span>
+            <span class="brain-label">Brain <span class="mono">· ${count(totalItems, "item")}</span>${mergedOnUpgrade([...(kvEntries || []), ...(fsEntries || [])]) ? ` <span class="meta session-merged">merged on upgrade</span>` : ""}</span>
             <span class="brain-size-col mono">size</span>
           </div>
           ${unifiedBrainTree(session.id, current, kvEntries, fsEntries, fetcher(session.id))}`;
@@ -321,8 +379,9 @@ export function sessionDetailHTML(
       <header class="session-detail-header">
         <div class="session-header-main">
           <div class="session-detail-title-block">
-            <div class="meta" data-owner="${esc(session.started_label ?? "")}"><span class="mono">${esc(session.id)}</span> <button type="button" class="row-copy-glyph" data-action="copy-id" data-id="${esc(session.id)}" title="${esc(session.id)}" aria-label="Copy full session id: ${esc(session.id)}">${glyphSvg("copy", { size: 14 })}</button></div>
-            <div class="meta"><span class="session-status ${session.status === "active" ? "active" : "ended"}"><span class="state-dot${session.status === "active" ? " live" : ""}"></span>${esc(session.status)}</span> · started ${relative(session.created_at)} · ${count(eventsCount, "event")}</div>
+            <div class="meta"><span class="mono">${esc(session.id)}</span> <button type="button" class="row-copy-glyph" data-action="copy-id" data-id="${esc(session.id)}" title="${esc(session.id)}" aria-label="Copy full session id: ${esc(session.id)}">${glyphSvg("copy", { size: 14 })}</button></div>
+            <div class="meta"><span class="session-status ${session.status === "active" ? "active" : "ended"}"><span class="state-dot${session.status === "active" ? (isLive(session) ? " live" : " idle") : ""}"></span>${esc(stateWord(session))}</span> · started ${relative(session.created_at)} · ${count(eventsCount, "event")}</div>
+            ${participantsLine(session)}
             ${handoff}
             ${lineage}
           </div>
@@ -441,12 +500,13 @@ function fmtBytes(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export async function endSession(id) {
+export async function endSession(id, name = "") {
   // Ending stops something live and cannot be undone, so it asks first, in the
-  // same dialog pattern prune and revoke use.
+  // same dialog pattern prune and revoke use. The title names the session: it
+  // may be one of several rows that carry the same verb.
   const confirmed = await confirmAction({
-    title: "End this session?",
-    body: "The agent's session stops now. Ending cannot be undone.",
+    title: name ? `End ${name}?` : "End this session?",
+    body: "The session ends for every participant. Ending cannot be undone.",
     note: "Once ended, its brain can be pruned to reclaim the space.",
     safe: "Keep",
     danger: "End session",
@@ -530,11 +590,11 @@ export async function pruneAllEnded(project) {
 
 // Prune deletes a session's brain and audit log, so it is asked first and
 // stays reversible for the length of the toast.
-export async function pruneSession(id, agent) {
+export async function pruneSession(id, label) {
   const confirmed = await confirmAction({
     title: "Prune 1 ended session?",
     body: "The brain file and audit log for this session are deleted. Events in the feed stay.",
-    list: [agent ? `${id} · ${agent}` : id],
+    list: [label ? `${id} · ${label}` : id],
     note: "You can undo for 30 s after pruning.",
     safe: "Keep",
     danger: "Prune 1 session",
@@ -837,6 +897,17 @@ if (typeof document !== "undefined") {
   });
 
   document.addEventListener("click", async (event) => {
+    const fold = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="session-fold"]'));
+    if (fold) {
+      const kids = document.getElementById(fold.getAttribute("aria-controls") || "");
+      if (!kids) return;
+      const open = kids.hidden;
+      kids.hidden = !open;
+      fold.setAttribute("aria-expanded", String(open));
+      if (open) unfolded.add(fold.dataset.id);
+      else unfolded.delete(fold.dataset.id);
+      return;
+    }
     const copyBtn = /** @type {HTMLElement} */ (/** @type {HTMLElement} */ (event.target).closest?.('[data-action="copy-id"], .session-copy-id'));
     if (copyBtn) {
       const id = copyBtn.dataset.id || copyBtn.getAttribute("title");

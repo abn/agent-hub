@@ -74,7 +74,7 @@ export function screenRoutes(hub, wiki) {
     storage: [["Storage", "#/storage", "main .storage .storage-row"]],
     settings: [["Settings", "#/settings", "main .row .title, main .form-row-title"]],
     more: [["More", "#/more", "main .more-screen .more-row"]],
-    access: [["Agents and tokens", "#/access", "main .agent-index-row, main .agent-row, main .access-row"]],
+    access: [["Members and tokens", "#/access", "main .member-index-row, main .member-row, main .access-row"]],
     connect: [["Connect", "#/connect?next=%2Fstorage", "main .connect .connect-field"]],
   };
 }

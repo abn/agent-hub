@@ -179,8 +179,8 @@ export async function projectSettingsScreen(gen, path) {
   }
   if (stale(gen)) return;
 
-  // An agent's personal space is settable but not deletable: it goes with the
-  // agent, so the control the hub would refuse is not offered.
+  // A member's personal space is settable but not deletable: it goes with the
+  // member, so the control the hub would refuse is not offered.
   paint(gen, skeleton(saved.id, !saved.owner_member, saved));
   installShellLayout(main);
   document.title = "Project settings · Agent Hub";

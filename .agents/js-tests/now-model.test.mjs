@@ -29,9 +29,13 @@ import {
 
 const NOW = Date.parse("2026-11-21T22:40:00Z");
 
-const ask = (actor, summary, fields = {}) => ({
-  event_id: `e-${actor}-${summary.length}`,
-  actor,
+// An ask from a session: the hub names the session on the typed author, and
+// the sentence is about it. A bare name stands for the session's own.
+const ask = (name, summary, fields = {}) => ({
+  event_id: `e-${name}-${summary.length}`,
+  actor: "laptop",
+  author: { kind: "participant", member: "laptop", agent: "claude-code", session: { id: `s-${name}`, name } },
+  origin: null,
   summary,
   kind: "question",
   status: "action",
@@ -59,9 +63,12 @@ describe("the opening line", () => {
     expect(text(summaryHTML({}))).toBe("Nothing waits on you. Nothing is new since you looked.");
   });
 
-  it("names the working agents when nothing waits", () => {
-    expect(text(summaryHTML({ agents: 2 }))).toBe(
-      "Nothing waits on you. Nothing is new since you looked. Two agents are working.",
+  it("counts the working sessions when nothing waits", () => {
+    expect(text(summaryHTML({ sessions: 2 }))).toBe(
+      "Nothing waits on you. Nothing is new since you looked. Two sessions are working.",
+    );
+    expect(text(summaryHTML({ sessions: 1 }))).toBe(
+      "Nothing waits on you. Nothing is new since you looked. One session is working.",
     );
   });
 
@@ -70,18 +77,18 @@ describe("the opening line", () => {
     expect(text(summaryHTML({ since: 14 }))).toBe("Nothing waits on you. 14 things changed since you looked.");
   });
 
-  it("names the one agent and its ask, and keeps the ask's own question mark", () => {
+  it("names the one session and its ask, and keeps the ask's own question mark", () => {
     expect(text(summaryHTML({ now: [ask("docs-writer", "Keep the CSV export?")] }))).toBe(
-      "One agent needs you. docs-writer asks “Keep the CSV export?” Nothing else is new.",
+      "One session needs you. docs-writer asks “Keep the CSV export?” Nothing else is new.",
     );
   });
 
   it("closes an ask without its own stop with a full stop", () => {
     const line = text(summaryHTML({ now: [ask("build-bot", "Ship 1.10 tonight", { kind: "approval" })] }));
-    expect(line).toBe("One agent needs you. build-bot wants a decision on “Ship 1.10 tonight”. Nothing else is new.");
+    expect(line).toBe("One session needs you. build-bot wants a decision on “Ship 1.10 tonight”. Nothing else is new.");
   });
 
-  it("names two agents with an and between them", () => {
+  it("names two sessions with an and between them", () => {
     const line = text(
       summaryHTML({
         now: [ask("build-bot", "Ship 1.10 tonight", { kind: "approval" }), ask("docs-writer", "Keep the CSV export?")],
@@ -89,16 +96,16 @@ describe("the opening line", () => {
       }),
     );
     expect(line).toBe(
-      "Two agents need you. build-bot wants a decision on “Ship 1.10 tonight”, and docs-writer asks “Keep the CSV export?” Five things changed since you looked.",
+      "Two sessions need you. build-bot wants a decision on “Ship 1.10 tonight”, and docs-writer asks “Keep the CSV export?” Five things changed since you looked.",
     );
   });
 
-  it("counts asks apart from agents when one agent asks twice", () => {
+  it("counts asks apart from sessions when one session asks twice", () => {
     const line = text(summaryHTML({ now: [ask("build-bot", "Ship it?"), ask("build-bot", "Roll back?")] }));
-    expect(line).toBe("One agent needs you, with two asks. build-bot asks “Ship it?”, and one more. Nothing else is new.");
+    expect(line).toBe("One session needs you, with two asks. build-bot asks “Ship it?”, and one more. Nothing else is new.");
   });
 
-  it("names two of many and counts the rest, one per agent first", () => {
+  it("names two of many and counts the rest, one per session first", () => {
     const now = [
       ask("a", "First?"),
       ask("a", "Second?"),
@@ -108,7 +115,7 @@ describe("the opening line", () => {
     ];
     const line = text(summaryHTML({ now, later: 1 }));
     expect(line).toBe(
-      "Four agents need you, with five asks. a asks “First?”, b left an idea, “Third?”, and three more. One more can wait. Nothing else is new.",
+      "Four sessions need you, with five asks. a asks “First?”, b left an idea, “Third?”, and three more. One more can wait. Nothing else is new.",
     );
   });
 
@@ -143,8 +150,72 @@ describe("the opening line", () => {
   });
 });
 
+describe("who an ask is from", () => {
+  const sessionless = (agent, member) => ({
+    event_id: `e-${agent}-${member}`,
+    actor: member,
+    author: { kind: "participant", member, agent, session: null },
+    origin: null,
+    kind: "question",
+    status: "action",
+    summary: "Ship it?",
+  });
+
+  it("names the agent when the ask named no session", () => {
+    expect(text(summaryHTML({ now: [sessionless("claude-code", "laptop")] }))).toBe(
+      "One agent needs you. claude-code asks “Ship it?” Nothing else is new.",
+    );
+  });
+
+  it("counts two agents on one member as two askers, and calls them agents", () => {
+    const line = text(summaryHTML({ now: [sessionless("claude-code", "laptop"), sessionless("opencode", "laptop")] }));
+    expect(line.startsWith("Two agents need you.")).toBe(true);
+  });
+
+  it("calls the askers sessions only when every one named its session", () => {
+    const line = text(summaryHTML({ now: [ask("feat-x", "Ship it?"), sessionless("opencode", "laptop")] }));
+    expect(line.startsWith("Two agents need you.")).toBe(true);
+    expect(text(summaryHTML({ now: [ask("feat-x", "Ship it?"), ask("feat-y", "Roll it?")] })).startsWith("Two sessions need you.")).toBe(true);
+  });
+
+  it("leaves your own asks and the hub's out of the count of sessions", () => {
+    const mine = { event_id: "e-me", author: { kind: "human" }, origin: null, summary: "Check the disks", kind: "question", status: "action" };
+    const hubs = { event_id: "e-hub", author: { kind: "human" }, origin: "hub", summary: "Disk is full", kind: "approval", status: "action" };
+    expect(text(summaryHTML({ now: [mine] }))).toBe("One ask needs you. you ask “Check the disks”. Nothing else is new.");
+    expect(text(summaryHTML({ now: [hubs] }))).toBe("One ask needs you. the hub wants a decision on “Disk is full”. Nothing else is new.");
+    const line = text(summaryHTML({ now: [ask("feat-x", "Ship it?"), mine] }));
+    expect(line).toBe(
+      "One session needs you, with two asks. feat-x asks “Ship it?”, and you ask “Check the disks”. Nothing else is new.",
+    );
+  });
+
+  it("gives you the verbs that agree with you", () => {
+    const mine = (kind) => ({ event_id: `e-${kind}`, author: { kind: "human" }, origin: null, summary: "x", kind, status: "action" });
+    expect(text(summaryHTML({ now: [mine("approval")] }))).toContain("you want a decision on");
+    expect(text(summaryHTML({ now: [mine("signal")] }))).toContain("you are waiting on");
+    expect(text(askSentenceHTML(mine("question")))).toBe("you ask: x");
+    expect(text(askSentenceHTML(mine("approval")))).toBe("you want a decision: x");
+    expect(text(askSentenceHTML(mine("signal")))).toBe("you are waiting on this: x");
+    expect(text(askSentenceHTML(mine("idea")))).toBe("you left an idea: x");
+  });
+
+  it("still reads a row from before members by the label it was written under", () => {
+    const old = { event_id: "e-old", actor: "laptop/claude", summary: "Roll the logs?", kind: "question", status: "action" };
+    expect(text(summaryHTML({ now: [old] }))).toBe(
+      "One agent needs you. laptop/claude asks “Roll the logs?” Nothing else is new.",
+    );
+  });
+
+  it("says the hub when the hub asked and you when you did", () => {
+    const hub = { kind: "answer", summary: "re: x", author: { kind: "human" }, origin: "hub", payload: { body: "Closed" } };
+    expect(text(replySentenceHTML(hub))).toBe("the hub answered: Closed");
+    const me = { ...hub, origin: null };
+    expect(text(replySentenceHTML(me))).toBe("you answered: Closed");
+  });
+});
+
 describe("the row sentences", () => {
-  it("puts the agent first in semibold and escapes the rest", () => {
+  it("puts the subject first in semibold and escapes the rest", () => {
     const box = document.createElement("div");
     box.innerHTML = askSentenceHTML(ask("build-bot", "Drop <i>staging</i>", { kind: "approval" }));
     expect(box.querySelector("b").textContent).toBe("build-bot");
@@ -192,8 +263,8 @@ describe("the tiers", () => {
     const far = ask("b", "Monday?", { expires_at: new Date(NOW + 2 * 86400e3).toISOString() });
     const data = { waiting: 4, waiting_items: [ask("a", "Now?"), far, ask("c", "Done?", { status: "resolved" })] };
     const split = needsYou(data, { now: NOW });
-    expect(split.now.map((item) => item.actor)).toEqual(["a"]);
-    expect(split.later.map((item) => item.actor)).toEqual(["b"]);
+    expect(split.now.map((item) => item.author.session.name)).toEqual(["a"]);
+    expect(split.later.map((item) => item.author.session.name)).toEqual(["b"]);
     expect(split.unlisted).toBe(2);
     expect(needsYouCount(data, { now: NOW })).toBe(3);
   });
@@ -325,7 +396,7 @@ describe("the opened item's thread", () => {
 
   it("reads an answer's body and escapes what the agent wrote", () => {
     expect(text(replySentenceHTML({ kind: "answer", actor: "human", summary: "re: x", payload: { body: "Approved" } }))).toBe(
-      "human answered: Approved",
+      "you answered: Approved",
     );
     const html = replySentenceHTML({ kind: "signal", actor: "bot", summary: "<i>later</i>" });
     expect(html).not.toContain("<i>");

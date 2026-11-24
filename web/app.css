@@ -366,7 +366,7 @@ button:not([disabled]):active, .chip:active { transform: translateY(1px); }
 @media (pointer: coarse) {
   .dialog-actions > :is(button, .button),
   .pset-actions > :is(button, .button),
-  .agent-create-actions > :is(button, .button),
+  .member-create-actions > :is(button, .button),
   .wiki-editor-actions > :is(button, .button) { flex: 1 1 0; min-width: 0; }
   .project-create-actions > :is(button, .button),
   .access-add-fields > :is(button, .button),
@@ -1788,10 +1788,10 @@ button.empty-link {
 
 /* Round 12, desktop Agents and tokens: the Settings frame (RULE 11.16), its
    rows in the shared form column. */
-.agents-form { margin: 0; }
-.agents-form .form-group-label { margin-top: var(--s-4); }
-.agents-form .form-group-label:first-child { margin-top: 0; }
-.agents-add-btn {
+.members-form { margin: 0; }
+.members-form .form-group-label { margin-top: var(--s-4); }
+.members-form .form-group-label:first-child { margin-top: 0; }
+.members-add-btn {
   flex: none;
   white-space: nowrap;
   height: 32px;
@@ -1799,16 +1799,16 @@ button.empty-link {
   display: inline-flex;
   align-items: center;
   gap: var(--s-2);
-  padding: 0 var(--s-3) 0 var(--s-2);
+  padding: 0 var(--s-2);
   border-radius: var(--r-1);
   border: 1px solid var(--line-strong);
   background: none;
   color: var(--ink);
-  font: 600 var(--t-15)/1 var(--font-sans);
+  font: 600 var(--t-13)/1 var(--font-sans);
   cursor: pointer;
 }
-.agents-add-btn[aria-pressed="true"] { background: var(--surface-2); }
-.agents-add-btn:focus-visible {
+.members-add-btn[aria-pressed="true"] { background: var(--surface-2); }
+.members-add-btn:focus-visible {
   outline: none;
   box-shadow: var(--focus);
 }
@@ -3365,37 +3365,6 @@ a.item-step:hover { background: var(--surface-2); color: var(--ink); }
     width: max(100%, var(--tap));
     height: max(100%, var(--tap));
     transform: translate(-50%, -50%);
-  }
-}
-/* Reassign sits beside the copy-id control as a secondary action. It is a menu
-   trigger: the agent it moves the session to is chosen from the menu, and the
-   confirmation dialog then names that agent. It never takes the Prune/End slot,
-   which belongs to the session's own life. */
-.session-reassign {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-}
-.session-reassign-btn {
-  min-height: 32px;
-  padding: 0 var(--s-3);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-1);
-  background: none;
-  color: var(--ink);
-  font: 600 var(--t-13)/1 var(--font-sans);
-  white-space: nowrap;
-  cursor: pointer;
-}
-@media (pointer: coarse) {
-  .session-reassign-btn {
-    min-height: 44px;
-    padding: 0 var(--s-4);
-    /* A --tap control takes the label style a form action takes. */
-    font-size: var(--t-15);
-  }
-  .shell-group-menu.session-reassign-menu button {
-    min-height: 44px;
   }
 }
 .session-back-bar {
@@ -5443,8 +5412,8 @@ a.session-back {
   color: var(--ink-3);
 }
 
-/* Author styling: distinguishable human vs agent */
-.comment-author.agent {
+/* Author styling: the human reads as words, a participant as mono. */
+.comment-author.participant {
   font-family: var(--font-mono);
   font-weight: 600;
   color: var(--ink);
@@ -5527,7 +5496,7 @@ a.session-back {
   gap: var(--s-1);
 }
 
-.access-section-head.agents-head {
+.access-section-head.members-head {
   flex-direction: row;
   align-items: baseline;
   justify-content: space-between;
@@ -5660,14 +5629,14 @@ a.session-back {
 
 /* A pending enrolment reads as a state, not a count: a pill on the row and the
    reason the agent gave, so the operator is not deciding blind. */
-.agent-pending-pill {
+.member-pending-pill {
   flex: none;
   padding: 1px var(--s-2);
   font-size: var(--t-12);
   font-weight: 600;
 }
 
-.agent-enrol-reason {
+.member-enrol-reason {
   margin: var(--s-4) 0 0;
   padding: var(--s-3) var(--s-4);
   border-left: 3px solid var(--action);
@@ -5675,7 +5644,7 @@ a.session-back {
   border-radius: 0 var(--r-1) var(--r-1) 0;
 }
 
-.agent-enrol-label {
+.member-enrol-label {
   display: block;
   font: 600 var(--t-12)/1 var(--font-mono);
   letter-spacing: 0.06em;
@@ -5683,7 +5652,7 @@ a.session-back {
   color: var(--ink-3);
 }
 
-.agent-enrol-note {
+.member-enrol-note {
   margin: var(--s-2) 0 0;
   font-size: var(--t-15);
   line-height: 1.45;
@@ -5710,7 +5679,7 @@ a.session-back {
   gap: var(--s-2);
 }
 
-.agent-record-row {
+.member-record-row {
   min-height: 56px;
   display: flex;
   flex-direction: column;
@@ -5720,7 +5689,7 @@ a.session-back {
   border-top: 1px solid var(--line);
 }
 
-.agent-record-main {
+.member-record-main {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -5728,7 +5697,7 @@ a.session-back {
   flex-wrap: wrap;
 }
 
-.agent-title-line {
+.member-title-line {
   display: flex;
   align-items: center;
   gap: var(--s-2);
@@ -5742,13 +5711,13 @@ a.session-back {
   color: var(--ink-2);
 }
 
-.agent-record-actions {
+.member-record-actions {
   display: flex;
   align-items: center;
   gap: var(--s-2);
 }
 
-.agent-grants {
+.member-grants {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
@@ -5756,7 +5725,7 @@ a.session-back {
   border-top: 1px dashed var(--line);
 }
 
-.agent-grant-row {
+.member-grant-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -8389,7 +8358,7 @@ dialog.dialog-project-delete {
   color: var(--ink-3);
 }
 /* Agents and tokens. */
-.row.agent-index-row {
+.row.member-index-row {
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -8402,11 +8371,11 @@ dialog.dialog-project-delete {
   text-decoration: none;
   box-sizing: border-box;
 }
-.row.agent-index-row[aria-current="true"] { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
-.agent-index-meta { font-size: var(--t-12); color: var(--ink-3); }
-.row.agent-index-row[aria-current="true"] .agent-index-meta { color: var(--ink-2); }
-.agents-list > .row:first-child { border-top: 1px solid var(--line); }
-.row.agent-project-row {
+.row.member-index-row[aria-current="true"] { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
+.member-index-meta { font-size: var(--t-12); color: var(--ink-3); }
+.row.member-index-row[aria-current="true"] .member-index-meta { color: var(--ink-2); }
+.members-list > .row:first-child { border-top: 1px solid var(--line); }
+.row.member-project-row {
   display: flex;
   align-items: center;
   gap: var(--s-2);
@@ -8416,8 +8385,8 @@ dialog.dialog-project-delete {
   background: var(--surface);
   box-sizing: border-box;
 }
-.agent-detail-label + .agent-project-row { border-top: 1px solid var(--line); }
-.row.agent-row {
+.member-detail-label + .member-project-row { border-top: 1px solid var(--line); }
+.row.member-row {
   display: flex;
   align-items: center;
   gap: var(--s-3);
@@ -8429,11 +8398,11 @@ dialog.dialog-project-delete {
   text-decoration: none;
   box-sizing: border-box;
 }
-.agent-create-error { color: var(--ink); font-size: var(--t-12); font-weight: 500; }
+.member-create-error { color: var(--ink); font-size: var(--t-12); font-weight: 500; }
 .access-add-form { padding: var(--s-4); background: var(--surface); border-bottom: 1px solid var(--line); }
 .grant-picker-field { height: 36px; }
 .access-card-lead { margin-top: var(--s-3); margin-bottom: var(--s-1); }
-.shell-head.agents-index-head {
+.shell-head.members-index-head {
   flex: none;
   height: 52px;
   box-sizing: border-box;
@@ -8444,7 +8413,7 @@ dialog.dialog-project-delete {
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
-.agents-index-title {
+.members-index-title {
   flex: 1;
   min-width: 0;
   white-space: nowrap;
@@ -8453,7 +8422,7 @@ dialog.dialog-project-delete {
   font-size: var(--t-15);
   font-weight: 600;
 }
-.shell-controls.agents-index-controls {
+.shell-controls.members-index-controls {
   flex: none;
   height: 40px;
   box-sizing: border-box;
@@ -8465,8 +8434,8 @@ dialog.dialog-project-delete {
   font-size: var(--t-13);
   color: var(--ink-2);
 }
-.agents-count { flex: 1; min-width: 0; }
-.row.agents-admin-row {
+.members-count { flex: 1; min-width: 0; }
+.row.members-admin-row {
   display: flex;
   align-items: center;
   gap: var(--s-3);
@@ -8477,17 +8446,17 @@ dialog.dialog-project-delete {
   background: var(--surface);
   box-sizing: border-box;
 }
-.agents-admin-text {
+.members-admin-text {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--s-1);
 }
-.agents-admin-title { font-size: var(--t-15); font-weight: 600; }
-.agents-admin-sub, .agent-create-hint { font-size: var(--t-12); color: var(--ink-3); }
-.agents-env { font-family: var(--font-mono); }
-.agent-index-name {
+.members-admin-title { font-size: var(--t-15); font-weight: 600; }
+.members-admin-sub, .member-create-hint { font-size: var(--t-12); color: var(--ink-3); }
+.members-env { font-family: var(--font-mono); }
+.member-index-name {
   display: flex;
   align-items: center;
   gap: var(--s-2);
@@ -8495,29 +8464,29 @@ dialog.dialog-project-delete {
   font-size: var(--t-15);
   font-weight: 600;
 }
-.agent-index-label {
+.member-index-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.agents-index {
+.members-index {
   flex: 1;
   min-height: 0;
   overflow: auto;
 }
-.agents-section-label {
+.members-section-label {
   padding: var(--s-4) var(--s-4) var(--s-2);
   font: 600 var(--t-12)/1 var(--font-sans);
   color: var(--ink-3);
   letter-spacing: .06em;
   text-transform: uppercase;
 }
-.agents-empty-note {
+.members-empty-note {
   padding: var(--s-4);
   color: var(--ink-3);
   font-size: var(--t-13);
 }
-.shell-head.agent-stage-head {
+.shell-head.member-stage-head {
   flex: none;
   height: 52px;
   box-sizing: border-box;
@@ -8528,8 +8497,8 @@ dialog.dialog-project-delete {
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
-.agent-stage-title, .agents-list-admin-title { font-size: var(--t-15); font-weight: 600; }
-.shell-controls.agent-create-controls {
+.member-stage-title, .members-list-admin-title { font-size: var(--t-15); font-weight: 600; }
+.shell-controls.member-create-controls {
   flex: none;
   height: 40px;
   box-sizing: border-box;
@@ -8541,30 +8510,30 @@ dialog.dialog-project-delete {
   font-size: var(--t-13);
   color: var(--ink-2);
 }
-.agent-create-body {
+.member-create-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
   padding: var(--s-5) var(--s-5) 0;
 }
-.agent-create-column {
+.member-create-column {
   max-width: 640px;
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
 }
-.agent-create-stage-form {
+.member-create-stage-form {
   display: flex;
   flex-direction: column;
   gap: var(--s-4);
 }
-.agent-create-field {
+.member-create-field {
   display: flex;
   flex-direction: column;
   gap: var(--s-2);
 }
-.agent-create-label, .access-field-label { font-size: var(--t-13); font-weight: 600; }
-input.agent-create-input {
+.member-create-label, .access-field-label { font-size: var(--t-13); font-weight: 600; }
+input.member-create-input {
   height: 40px;
   box-sizing: border-box;
   padding: 0 var(--s-3);
@@ -8574,13 +8543,13 @@ input.agent-create-input {
   color: var(--ink);
   font: 500 var(--t-15)/1 var(--font-sans);
 }
-input.agent-create-id { font-family: var(--font-mono); }
-.agent-create-actions {
+input.member-create-id { font-family: var(--font-mono); }
+.member-create-actions {
   display: flex;
   gap: var(--s-2);
   padding-top: var(--s-1);
 }
-button.agent-create-submit {
+button.member-create-submit {
   height: 36px;
   padding: 0 var(--s-4);
   border-radius: var(--r-1);
@@ -8590,7 +8559,7 @@ button.agent-create-submit {
   font: 600 var(--t-15)/1 var(--font-sans);
   cursor: pointer;
 }
-button.agent-create-cancel,
+button.member-create-cancel,
 button.access-token-btn {
   height: 36px;
   padding: 0 var(--s-4);
@@ -8601,8 +8570,8 @@ button.access-token-btn {
   font: 600 var(--t-15)/1 var(--font-sans);
   cursor: pointer;
 }
-.agent-stage-meta { font: 500 var(--t-12)/1 var(--font-mono); color: var(--ink-3); }
-.shell-controls.agent-detail-controls {
+.member-stage-meta { font: 500 var(--t-12)/1 var(--font-mono); color: var(--ink-3); }
+.shell-controls.member-detail-controls {
   flex: none;
   height: 40px;
   box-sizing: border-box;
@@ -8613,12 +8582,12 @@ button.access-token-btn {
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
-.agent-token-note {
+.member-token-note {
   flex: 1;
   font-size: var(--t-13);
   color: var(--ink-2);
 }
-button.agent-reissue-btn {
+button.member-reissue-btn {
   flex: none;
   height: 30px;
   padding: 0 var(--s-3);
@@ -8629,15 +8598,15 @@ button.agent-reissue-btn {
   font: 600 var(--t-15)/1 var(--font-sans);
   cursor: pointer;
 }
-.agent-project-lock {
+.member-project-lock {
   flex: none;
   width: 24px;
   display: grid;
   place-items: center;
   color: var(--ink-2);
 }
-.agent-project-lead { flex: none; width: 24px; }
-.agent-project-name {
+.member-project-lead { flex: none; width: 24px; }
+.member-project-name {
   flex: 1;
   min-width: 0;
   font-size: var(--t-15);
@@ -8646,12 +8615,12 @@ button.agent-reissue-btn {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.agent-row-menu {
+.member-row-menu {
   flex: none;
   position: relative;
   display: inline-flex;
 }
-.agent-projects-empty {
+.member-projects-empty {
   display: flex;
   align-items: center;
   height: 48px;
@@ -8663,7 +8632,8 @@ button.agent-reissue-btn {
   font-size: var(--t-13);
   box-sizing: border-box;
 }
-button.agent-grant-open {
+.member-projects-empty.member-list-failed, .members-empty-note.member-list-failed { color: var(--ink); }
+button.member-grant-open {
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -8679,20 +8649,20 @@ button.agent-grant-open {
   text-align: left;
   cursor: pointer;
 }
-.agent-grant-glyph {
+.member-grant-glyph {
   flex: none;
   width: 24px;
   display: grid;
   place-items: center;
 }
-.agent-detail-body {
+.member-detail-body {
   flex: 1;
   min-height: 0;
   overflow: auto;
   padding: 0 var(--s-5);
 }
-.agent-detail-column { max-width: 640px; }
-.agent-detail-label {
+.member-detail-column { max-width: 640px; }
+.member-detail-label {
   padding: var(--s-5) 0 var(--s-2);
   font-size: var(--t-12);
   font-weight: 600;
@@ -8701,9 +8671,9 @@ button.agent-grant-open {
   color: var(--ink-3);
   letter-spacing: .06em;
 }
-.agent-detail-label .mono { text-transform: none; }
-.agent-detail-gap { height: 24px; }
-button.agent-revoke-btn {
+.member-detail-label .mono { text-transform: none; }
+.member-detail-gap { height: 24px; }
+button.member-revoke-btn {
   display: flex;
   align-items: center;
   width: 100%;
@@ -8718,7 +8688,7 @@ button.agent-revoke-btn {
   text-align: left;
   cursor: pointer;
 }
-.shell-head.agent-empty-head {
+.shell-head.member-empty-head {
   flex: none;
   height: 52px;
   box-sizing: border-box;
@@ -8728,7 +8698,7 @@ button.agent-revoke-btn {
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
-.shell-controls.agent-empty-controls {
+.shell-controls.member-empty-controls {
   flex: none;
   height: 40px;
   box-sizing: border-box;
@@ -8738,8 +8708,8 @@ button.agent-revoke-btn {
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
-.agent-empty-meta { font-size: var(--t-13); color: var(--ink-3); }
-.agent-empty-pad { padding: var(--s-5) var(--s-4); }
+.member-empty-meta { font-size: var(--t-13); color: var(--ink-3); }
+.member-empty-pad { padding: var(--s-5) var(--s-4); }
 .shell-controls.access-tools {
   display: flex;
   align-items: center;
@@ -8781,7 +8751,7 @@ button.access-ungrant-btn {
   letter-spacing: .06em;
   text-transform: uppercase;
 }
-.agent-grants-list { border-top: 1px solid var(--line); }
+.member-grants-list { border-top: 1px solid var(--line); }
 .access-grant-form {
   margin: 0 var(--s-4);
   padding: var(--s-4);
@@ -8819,14 +8789,14 @@ button.access-add-btn {
   font: 600 var(--t-15)/1 var(--font-sans);
   cursor: pointer;
 }
-.agents-list-text {
+.members-list-text {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: var(--s-1);
 }
-.agent-row .agent-row-name {
+.member-row .member-row-name {
   display: flex;
   align-items: center;
   gap: var(--s-2);
@@ -8834,7 +8804,7 @@ button.access-add-btn {
   font-weight: 600;
   min-width: 0;
 }
-.agent-row-chevron {
+.member-row-chevron {
   flex: none;
   width: 32px;
   height: 44px;
@@ -8849,7 +8819,7 @@ button.access-add-btn {
   max-width: 640px;
 }
 button.access-create-submit { align-self: flex-start; height: 36px; margin-top: var(--s-1); }
-.row.agents-list-admin {
+.row.members-list-admin {
   display: flex;
   align-items: center;
   gap: var(--s-3);
@@ -9542,6 +9512,8 @@ button.project-wiki-new {
 }
 .session-doc-content { max-width: 640px; margin: 0; padding: var(--s-5) var(--s-4); }
 .state-dot.live { background: var(--ok); }
+/* Active with nobody seen lately: the live dot with its fill taken out. */
+.state-dot.idle { border: 1.5px solid var(--ok); background: transparent; box-sizing: border-box; }
 .session-kv-read { margin: 0; padding: var(--s-4); font-size: var(--t-13); line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 .session-kv-missing { padding: var(--s-4); }
 .artifact-row-glyph { background: none; border-radius: 0; color: var(--ink-3); box-shadow: none; display: grid; place-items: center; }
@@ -9550,22 +9522,22 @@ button.project-wiki-new {
 .search-chip-count { font-family: var(--font-mono); font-weight: 500; }
 
 /* A row that draws its own hairline keeps it when it is the last row. */
-.row:is(.agent-index-row, .agent-project-row, .agent-row, .agents-admin-row, .access-grant-row, .agents-list-admin, .wiki-row, .wiki-version, .wiki-change, .wiki-finding, .wiki-review-row, .wiki-home-link, .storage-project-row):last-child {
+.row:is(.member-index-row, .member-project-row, .member-row, .members-admin-row, .access-grant-row, .members-list-admin, .wiki-row, .wiki-version, .wiki-change, .wiki-finding, .wiki-review-row, .wiki-home-link, .storage-project-row):last-child {
   border-bottom: 1px solid var(--line);
 }
 /* These controls had their fill written into the markup, which kept the shared
    hover lift off them. They keep the fill they rest with on hover, which
    DESIGN.md records as a deviation. */
-button:is(.agents-add-btn, .agent-create-cancel, .agent-reissue-btn, .access-token-btn, .access-ungrant-btn,
+button:is(.members-add-btn, .member-create-cancel, .member-reissue-btn, .access-token-btn, .access-ungrant-btn,
   .access-add-btn, .wiki-comment-resolve, .wiki-review-btn, .wiki-history-earlier, .wiki-versions-earlier,
   .wiki-revert-btn, .wiki-conflict-btn, .brain-promote-btn, .project-wiki-new, .storage-remeasure,
   .storage-prune-all):not([disabled]):not(.primary):not(.action):hover {
   background: none;
 }
-button.agents-add-btn[aria-pressed="true"]:not([disabled]):not(.primary):not(.action):hover {
+button.members-add-btn[aria-pressed="true"]:not([disabled]):not(.primary):not(.action):hover {
   background: var(--surface-2);
 }
-button:is(.agent-grant-open, .agent-revoke-btn):not([disabled]):not(.primary):not(.action):hover {
+button:is(.member-grant-open, .member-revoke-btn):not([disabled]):not(.primary):not(.action):hover {
   background: var(--surface);
 }
 
@@ -9821,6 +9793,15 @@ button:is(.agent-grant-open, .agent-revoke-btn):not([disabled]):not(.primary):no
     padding: 0; border: 0; border-radius: var(--r-1); background: none; color: var(--ink-2); cursor: pointer;
   }
   .project-filter-btn:hover, .project-filter-btn:focus-visible { color: var(--ink); }
+  /* A narrowing choice is held behind the glyph: it takes the ink and a dot, so
+     the reader sees a filter is on without opening the panel. */
+  .project-filter-btn { position: relative; }
+  .project-filter-btn.is-active { color: var(--ink); }
+  .project-filter-dot {
+    position: absolute; top: calc(50% - 14px); left: calc(50% + 6px);
+    width: 8px; height: 8px; border-radius: var(--r-pill);
+    background: var(--ink); box-shadow: 0 0 0 2px var(--surface);
+  }
 }
 /* At a phone's width the four sections and their counts do not fit beside
    the filter and the overflow. The counts go, as they do in a narrow desktop
@@ -9832,3 +9813,151 @@ button:is(.agent-grant-open, .agent-revoke-btn):not([disabled]):not(.primary):no
   .project-tools-mobile { display: none !important; }
 }
 /* end component: project tools row */
+
+/* component: bylines and who */
+/* A byline is a subject and receipts. The subject is what the sentence is about,
+   set in 600; the receipts are `agent · member` in mono, quieter, after it. Agent
+   text wraps: a long session name breaks at its dashes and slashes (the markup
+   carries a break opportunity after each) and inside a word only when nothing
+   else fits, and is never cut with an ellipsis. Receipts sit on a selected or
+   hovered ground that is the sunken one, where --ink-3 is under 4.5:1, so they
+   take --ink-2 there. */
+.by-s { font-weight: 600; overflow-wrap: anywhere; }
+.by-r {
+  margin-inline-start: var(--s-2);
+  font-family: var(--font-mono); font-size: var(--t-12); font-weight: 400;
+  color: var(--ink-3); overflow-wrap: anywhere;
+}
+.row:is(.selected, :hover, [aria-current="true"], [tabindex="0"]) .by-r { color: var(--ink-2); }
+.now-r-by { font-family: var(--font-mono); font-size: var(--t-12); }
+.feed-by { margin: 0; font-size: var(--t-12); line-height: 1.4; }
+.feed-by .by-r { margin-inline-start: 0; }
+.item-from .by-r, .feed-stage-from .by-r { margin-inline-start: var(--s-1); }
+.comment-author .by-r { margin-inline-start: var(--s-1); font-weight: 400; }
+.wiki-comment-author .by-r { margin-inline-start: var(--s-2); }
+
+/* Now's margin: the live sessions, a session in 600 over its project and who is
+   in it. Children are folded into the parent's "+3 subagents". */
+.now-live { list-style: none; margin: var(--s-3) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-3); }
+.now-live-row { display: flex; flex-direction: column; gap: var(--s-1); min-width: 0; }
+.now-live-name {
+  display: inline-flex; align-items: center; min-height: 24px;
+  font-size: var(--t-13); font-weight: 600; color: var(--ink); text-decoration: none; overflow-wrap: anywhere;
+}
+.now-live-name:hover { text-decoration: underline; }
+.now-live-meta { font-size: var(--t-12); color: var(--ink-3); overflow-wrap: anywhere; }
+.now-live-more { font-size: var(--t-12); color: var(--ink-3); }
+.now-live + .now-node { margin-top: var(--s-4); }
+@media (pointer: coarse) {
+  .now-live-name { min-height: var(--tap); }
+}
+
+/* The Who menu rides the Group menu's component. Nothing chosen, the trigger is
+   the person glyph and the menu chevron, 32px tall, as Group's is a word and a
+   chevron. A choice is named in it ("Who: laptop"), the name cut at 14ch, and
+   the trigger takes the chip's selected state: the sunken ground and a 2px ink
+   rule. The group names inside the menu are labels, not choices. */
+.who-menu.shell-group { flex: 0 1 auto; gap: var(--s-1); min-width: 0; }
+.who-menu .hub-group-toggle {
+  height: var(--ctl); min-height: var(--ctl); padding-inline: var(--s-2); gap: var(--s-1); min-width: 0;
+  font-size: var(--t-13); position: relative; box-sizing: border-box;
+}
+.who-menu .who-toggle.is-picked {
+  border-color: transparent; background: var(--surface-2); box-shadow: inset 0 -2px 0 var(--ink);
+}
+.who-menu .who-toggle.is-picked:focus-visible { box-shadow: inset 0 -2px 0 var(--ink), var(--focus); }
+/* The hit area grows only upward and downward: the trigger is already wider
+   than 44px, and a wider box would run under the glyph beside it. */
+@media (any-pointer: coarse) {
+  .who-menu .hub-group-toggle::after {
+    content: ""; position: absolute; top: 50%; left: 0;
+    width: 100%; height: max(100%, var(--tap));
+    transform: translateY(-50%);
+  }
+}
+/* The filter keeps a stub of its field, so a long choice is cut inside the
+   trigger and never takes the filter's room or widens the row. */
+.shell-controls:has(.who-menu) .shell-filter { min-width: 56px; }
+.shell-controls:not(.arts-controls):has(.who-menu) { gap: var(--s-1); }
+/* A glyph's 44px hit area reaches 6px past its 32px box, so under a coarse
+   pointer the row's gap is wide enough that no neighbour's reach lands on Who. */
+@media (any-pointer: coarse) {
+  .shell-controls:not(.arts-controls):has(.who-menu) { gap: var(--s-3); }
+}
+/* On Search the trigger sits in the header, an --s-2 from the field and with the
+   head's own gutter after it. A desktop head's gap is --s-3, so the trigger pulls
+   in by the difference; a phone head has no gap and a gutter of --s-2, so it
+   adds the gap and the rest of the gutter itself. */
+.shell-head > .who-menu { flex: none; margin-inline-start: calc(var(--s-2) - var(--s-3)); }
+@media (max-width: 1099px) {
+  .shell-head > .who-menu { margin-inline-start: var(--s-2); margin-inline-end: var(--s-2); }
+}
+.who-menu .who-text { display: inline-flex; min-width: 0; white-space: pre; }
+.who-menu .who-pick { display: block; min-width: 0; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.who-menu-list { min-width: 220px; }
+.shell-menu-head {
+  display: block; padding: var(--s-2) var(--s-2) var(--s-1);
+  font-size: var(--t-12); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3);
+}
+.who-menu-list [role="group"] + [role="group"] { border-top: 1px solid var(--line); margin-top: var(--s-1); }
+@media (pointer: coarse) {
+  .who-menu-list button { min-height: var(--tap); }
+}
+
+/* A member's stage: live sessions with their End verb, the agents seen, and the
+   approval card a pending member is decided on. */
+.member-session-list { border-top: 1px solid var(--line); }
+.row.member-session-row {
+  display: flex; align-items: center; gap: var(--s-3);
+  min-height: 56px; padding: var(--s-2) var(--s-1) var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--line); background: var(--surface); box-sizing: border-box;
+}
+.member-session-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s-1); }
+.member-session-name {
+  font-size: var(--t-15); font-weight: 600; color: var(--ink); text-decoration: none; overflow-wrap: anywhere;
+}
+.member-session-name:hover { text-decoration: underline; }
+.member-session-meta { font-size: var(--t-12); color: var(--ink-3); overflow-wrap: anywhere; }
+.member-end-btn { flex: none; }
+.member-agents { margin: 0; padding: var(--s-3); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--surface); font-size: var(--t-13); color: var(--ink-2); overflow-wrap: anywhere; }
+.member-approve { display: flex; flex-direction: column; gap: var(--s-3); padding-bottom: var(--s-5); }
+.member-approve .member-detail-label { padding-top: var(--s-5); }
+.member-facts { margin: 0; border-top: 1px solid var(--line); }
+.member-fact { display: grid; grid-template-columns: 7.5em minmax(0, 1fr); gap: var(--s-3); padding: var(--s-2) 0; border-bottom: 1px solid var(--line); font-size: var(--t-13); }
+.member-fact dt { color: var(--ink-3); }
+.member-fact dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.member-approve-note { margin: 0; font-size: var(--t-13); color: var(--ink-2); }
+.access-screen .member-approve { padding: var(--s-4); }
+
+/* The token reveal's split: what goes on the machine, and what goes in a repository. */
+.dialog.dialog-reveal { width: min(520px, calc(100vw - 2 * var(--s-4))); }
+.reveal-split { gap: var(--s-4); }
+.reveal-group { display: flex; flex-direction: column; gap: var(--s-2); }
+.reveal-group + .reveal-group { padding-top: var(--s-3); border-top: 1px solid var(--line); }
+.reveal-group-title, .reveal-group-hint { margin: 0; }
+
+/* A session's subagents sit under it on the sessions list, folded behind a
+   disclosure. The state dot stays in the row's glyph column; only the text is
+   set in. */
+.session-kids[hidden] { display: none; }
+.session-row.session-child .session-link { padding-inline-start: var(--s-5); }
+.session-fold {
+  display: flex; align-items: center; width: 100%; min-height: 32px; box-sizing: border-box;
+  padding: 0 var(--s-4) 0 calc(var(--s-4) + 10px + var(--s-3) + var(--s-5));
+  border: 0; border-bottom: 1px solid var(--line); border-radius: 0;
+  background: var(--surface); color: var(--ink-2); font: 500 var(--t-12)/1 var(--font-mono); text-align: start; cursor: pointer;
+}
+.session-fold:hover { background: var(--surface-2); color: var(--ink); }
+.session-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.session-fold::before {
+  content: ""; width: 6px; height: 6px; margin-inline-end: var(--s-2); flex: none;
+  border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg);
+}
+.session-fold[aria-expanded="true"]::before { transform: rotate(45deg); }
+@media (pointer: coarse) {
+  .session-fold { min-height: var(--tap); }
+}
+.who-menu-list .who-child { padding-inline-start: var(--s-5); }
+.session-participants { color: var(--ink-2); }
+.session-merged { margin-inline-start: var(--s-2); }
+/* end component: bylines and who */
