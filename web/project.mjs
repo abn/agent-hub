@@ -5,6 +5,7 @@
 // gallery are rendered by the modules that own them.
 
 import { api } from "./api.mjs";
+import { foldSessions, participantsText } from "./author.mjs";
 import { artifactGroupMenu, artifactIndex, artifactStage, endArtifactStage, wireArtifactStage } from "./artifacts.mjs";
 import { confirmAction, confirmProjectDelete, openCreateProjectDialog } from "./dialog.mjs";
 import { count, esc, main, paint, stale } from "./dom.mjs";
@@ -14,6 +15,7 @@ import {
   eventStage,
   feedCounts,
   feedEvent,
+  feedScope,
   feedSection,
   feedSelectBar,
   feedVisit,
@@ -47,6 +49,7 @@ import {
 } from "./shell-layout.mjs";
 import { formatBytes } from "./storage.mjs";
 import { toast } from "./toast.mjs";
+import { artifactsScope, loadWho, whoActive, whoMenu } from "./who.mjs";
 
 
 const SEGMENTS = ["feed", "wiki", "artifacts", "sessions"];
@@ -165,6 +168,14 @@ function projectToolsMobile(id, segment, stats, project) {
     }"${segment === seg ? ' aria-current="page"' : ""}>${label}${count(n)}</a>`;
   const filterGlyph = `<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="21" x2="4" y2="14"></line><line x1="4" y1="10" x2="4" y2="3"></line><line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line><line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line><line x1="1" y1="14" x2="7" y2="14"></line><line x1="9" y1="8" x2="15" y2="8"></line><line x1="17" y1="16" x2="23" y2="16"></line></svg>`;
 
+  // What narrows this segment now: each kind the feed is held to, and a Who
+  // choice. The glyph says so, since the panel it opens is shut.
+  const active =
+    segment === "feed"
+      ? activeKinds(id).size + (whoActive(feedScope(id)) ? 1 : 0)
+      : segment === "artifacts"
+        ? Number(whoActive(artifactsScope(id)))
+        : 0;
   const showCounts = typeof window === "undefined" || window.innerWidth >= 360;
   return `<div class="project-tools-mobile shell-controls" role="toolbar" aria-label="Project tools">
     <div class="project-tools-seg" role="tablist" aria-label="Project sections">
@@ -173,8 +184,8 @@ function projectToolsMobile(id, segment, stats, project) {
       ${tab("artifacts", "Artifacts", showCounts ? stats?.artifacts ?? null : null)}
       ${tab("sessions", "Sessions", showCounts ? stats?.sessions ?? null : null)}
     </div>
-    <button type="button" class="project-filter-btn" aria-label="Filter and group" data-action="project-filter-toggle">
-      ${filterGlyph}
+    <button type="button" class="project-filter-btn${active ? " is-active" : ""}" aria-label="${active ? `Filter and group, ${active} active` : "Filter and group"}" aria-pressed="${active > 0}" data-action="project-filter-toggle">
+      ${filterGlyph}${active ? `<span class="project-filter-dot" aria-hidden="true"></span>` : ""}
     </button>
     ${projectOverflow(project, { lock: false, newPage: segment === "wiki", feed: segment === "feed" })}
     ${segment === "feed" ? feedSelectBar() : ""}
@@ -336,7 +347,7 @@ export function wireProjectHeader(project, stats, footprint) {
         setConfidential(
           true,
           `Make ${name} confidential?`,
-          "Only agents you grant it can reach it. Any agent without a grant loses access now.",
+          "Only members you grant it can reach it. Any member without a grant loses access now.",
           "Make confidential",
         ),
       );
@@ -348,7 +359,7 @@ export function wireProjectHeader(project, stats, footprint) {
         setConfidential(
           false,
           `Make ${name} public?`,
-          "Every agent on this hub can reach it, and its grants are no longer needed.",
+          "Every member on this hub can reach it, and its grants are no longer needed.",
           "Make public",
         ),
       );
@@ -394,20 +405,20 @@ async function feedShell(id, segment, stats, params, mobileBar = "", project = n
   setFeedSelection(selected);
   const indexBody = await feedSection(id, stats, { chips: false });
   const held = feedVisit(id);
-  const group = kindMenu(activeKinds(id), feedCounts(id));
+  const group = kindMenu(activeKinds(id), feedCounts(id)) + whoMenu(feedScope(id), await loadWho(id));
   // An address that names an event the page does not hold says so rather than
   // opening the newest row under the old id. A dismissed event is one way an
   // id can be missing; an event older than the loaded page is another.
   const event = selected ? feedEvent(id, selected) : held?.events?.[0] || null;
   const missing = Boolean(selected) && !event;
-  const filtered = activeKinds(id).size > 0;
+  const filtered = activeKinds(id).size > 0 || whoActive(feedScope(id));
   // The stage's header says where the reader is, the project and its feed.
   // The event's own kind, title, author and time are the body's first lines,
   // so the header does not repeat them.
   const title = project?.display_name || id;
   const meta = [
     "feed",
-    stats && stats.sessions_live != null ? `${count(stats.sessions_live, "agent", "agents")} active` : "",
+    stats && stats.sessions_live != null ? `${count(stats.sessions_live, "live session", "live sessions")}` : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -428,7 +439,7 @@ async function feedShell(id, segment, stats, params, mobileBar = "", project = n
     stageBody: missing
       ? `<div class="shell-pad"><p class="empty">${
           filtered
-            ? "This event is not in the filtered feed. Clear the kind filter to see it."
+            ? "This event is not in the filtered feed. Clear a filter to see it."
             : "This event is not in the feed. It may have been dismissed, or it is older than the rows this page has loaded."
         }</p></div>`
       : await eventStage(event, id),
@@ -477,7 +488,7 @@ async function artifactsShell(id, segment, stats, params, mobileBar = "", projec
     html: shellHTML({
       segment,
       indexHead: `${mobileBar}${projectToolsMobile(id, segment, stats, project)}<div class="shell-head project-seg-head">${segSwitcher(id, segment, stats)}${projectOverflow(project, { lock: false })}</div>`,
-      indexControls: shellIndexControls("Filter artifacts", artifactGroupMenu()),
+      indexControls: shellIndexControls("Filter artifacts", artifactGroupMenu() + whoMenu(artifactsScope(id), await loadWho(id))),
       indexBody: rows,
       stageHead,
       stageControls,
@@ -496,14 +507,22 @@ async function sessionsShell(id, segment, stats, params, mobileBar = "", gen, pr
   const filePath = params?.get?.("file") || params?.get?.("entry") || "";
   const resumeMode = params?.get?.("resume") === "1";
   const { sessions, card } = await sessionRows(id, selectedId);
-  const activeSessionId = selectedId || (sessions.length > 0 ? sessions[0].id : null);
+  // With none chosen, the stage opens the list's first row as the list draws it:
+  // the active sessions first, a subagent never ahead of the parent it sits under.
+  const drawn = [
+    ...foldSessions(sessions.filter((s) => s.status === "active")),
+    ...foldSessions(sessions.filter((s) => s.status !== "active")),
+  ].map((row) => row.session);
+  const activeSessionId = selectedId || (drawn.length > 0 ? drawn[0].id : null);
   const selectedSession = sessions.find((s) => s.id === activeSessionId) || sessions[0] || null;
   let detailHTML = "";
   // The generation goes with it: the detail's own `stale` guard is what keeps
   // a slow paint off the screen, and without it every detail returned empty.
   if (selectedSession) detailHTML = await sessionDetailView(id, selectedSession.id, gen, resumeMode);
   const meta = selectedSession
-    ? `${selectedSession.started_label ?? ""} · ${formatBytes(selectedSession.brain_bytes || 0)}`
+    ? [participantsText(selectedSession.participants, { includeLeft: true }), formatBytes(selectedSession.brain_bytes || 0)]
+        .filter(Boolean)
+        .join(" · ")
     : "";
 
   let stageHead = shellStageHead(
@@ -656,11 +675,11 @@ export async function projectScreen(params, gen, path) {
   const footprint = await projectFootprint(id);
   if (stale(gen)) return;
 
-  const agentsText =
-    stats && stats.sessions_live != null ? `${count(stats.sessions_live, "agent", "agents")} active` : "";
+  const liveText =
+    stats && stats.sessions_live != null ? `${count(stats.sessions_live, "live session", "live sessions")}` : "";
   const mobileBar = shellMobileBar(
     project.display_name || id,
-    [agentsText, footprint].filter(Boolean).join(" · "),
+    [liveText, footprint].filter(Boolean).join(" · "),
     "#/projects",
   );
 

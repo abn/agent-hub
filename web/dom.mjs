@@ -165,18 +165,6 @@ export function isOpen(event) {
   return event.inbox_status === "action" || event.inbox_status === "waiting";
 }
 
-export function eventRow(event) {
-  const open = isOpen(event);
-  return `<div class="row ${open ? "unread" : ""}">
-    ${glyph(event.kind)}
-    <div class="grow">
-      <div class="title">${esc(event.summary)}</div>
-      <div class="meta mono">${esc(event.actor)} · ${when(event.created_at)}</div>
-    </div>
-    ${open ? actionFor(event) : ""}
-  </div>`;
-}
-
 // A section that could not load says so where it sits, rather than taking the
 // whole screen down with it. The title is the screen's own copy today, and is
 // escaped anyway so a later caller cannot make it data by accident.

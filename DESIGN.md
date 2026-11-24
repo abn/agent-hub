@@ -142,7 +142,7 @@ the field and the outline button share one border.
 
 The status pill ("Waiting on you") is 12/600 with a 6px dot, height 22, padding
 0 8, radius 2 and a 6px gap. A state that does not wait on the reader is a dot
-and a word with no fill: a session's "active" or "ended", a token's "live". Any
+and a word with no fill: a session's "live", "idle" or "ended", a token's "live". Any
 11px text is a defect: it is raised to 12 and the container grows.
 
 **Errors are ink with words.** A failed load, a failed search, a wrong
@@ -272,9 +272,11 @@ toggle is absent, not disabled, on feed, Now, an inbox item and settings.
 
 **Now's margin is a ledger, not a pane.** On a stage at least 940 wide, every
 row on Now carries its receipts in a 300 margin beside the 680 column, level
-with the row: for an ask, what it is and in which project, the event id, the
-session it was asked in, the artifact it points at and its deadline; for an
-event, the event id and, for a publish, the artifact. Each id is a mono link to
+with the row: for an ask, what it is and in which project, who wrote it as
+`agent · member`, the event id, the session it was asked in, the artifact it
+points at and its deadline; for an event, who wrote it, the event id and, for
+a publish, the artifact. A hub with one member leaves the member out of every
+receipt, and the embedded store's `local` is always named. Each id is a mono link to
 what it names. The margin is read against the row it sits beside, which is the
 one thing an aside is for, so it is held to the aside rule rather than being a
 fourth zone: it has no header, no control row, no splitter and no toggle, and
@@ -322,7 +324,7 @@ The desktop changes this round makes are these. Now's tiers are flat rows. The
 storage summary sits on the canvas between hairlines, not in a card. Settings is
 the round-11 row form and keeps its 40px control row; its THIS HUB group ends
 with Version, a value row that promises nothing. Storage adds a fourth bar
-segment and one helper line, and a zero cell reads a dash. Agents and tokens is
+segment and one helper line, and a zero cell reads a dash. Members and tokens is
 a list-and-item screen, an index beside a stage, like a project feed. The rail's
 sync line is hidden when healthy.
 
@@ -337,14 +339,14 @@ to the index.
 
 **The live band sits above the document in the stage.** While a version is
 live or idle, the stage carries a 34px band between the meta line and the
-document: a state dot, the state word (live or idle), the agent name, and a
+document: a state dot, the state word (live or idle), the writer's name, and a
 follow or pause control. A sealed artifact shows nothing. The band is a new
 element rather than a control row, so it offsets the document by 34px while
 something is being written. That is an exception to "the frame does not move",
 and it is recorded here for that reason.
 
 **Deviation: the band has no elapsed time, no jump-to-latest and no scroll
-anchor.** The handoff has follow or pause, the state word, the agent name, the
+anchor.** The handoff has follow or pause, the state word, the writer's name, the
 elapsed time, and "N updates, jump to latest", with auto-follow restoring the
 scroll anchor and stopping when the reader scrolls away. As built the band
 carries the first three. It counts pending updates while paused but has no jump
@@ -448,7 +450,7 @@ verb beside a field remains the defect the label rule came from.
 - One header and one tools row, sized as above. The tab bar is four labelled
   tabs: Now, Projects, Search, More. Now carries the needs-you badge, the
   count the Inbox tab carried before the two merged. More is a tab root, not an
-  overlay or a bare hamburger, and it holds Artifacts, Storage, Agents and
+  overlay or a bare hamburger, and it holds Artifacts, Storage, Members and
   tokens, Settings and the sync line.
 - Lists are flat rows, edge to edge under a hairline, with Now's row as the
   model. A card means "this is a summary"; the storage summary is one, and no
@@ -505,7 +507,7 @@ structure, not to line length.
   `web/app.css`, where the token, type and control-size gates read it.
   - **Deviation: no hover fill on eighteen controls.** The buttons whose fill
     the markup used to write keep their resting fill on hover instead of the
-    shared lift, as they did then: Add agent at both widths, Cancel, Reissue,
+    shared lift, as they did then: Add member at both widths, Cancel, Reissue,
     the phone token buttons, Remove access, Grant a project, Revoke token, the
     wiki's Resolve, Review, Revert, both Earlier buttons and the conflict
     buttons, Save to wiki, New page, Re-measure and Prune.
@@ -559,10 +561,72 @@ structure, not to line length.
 - **Chips and pills.** A chip is a filter: 2px radius and no border at rest;
   selected is the sunken ground with a 2px ink rule under the label. A pill is a
   value, not a door, at the 2px radius.
+- **Byline.** Who wrote a row is a subject and receipts, never a chip. The
+  subject is what the sentence is about, set in 600: the session's name when the
+  write named one, else the agent. The receipts follow it in 12/400 mono in
+  `--ink-3` (`--ink-2` on a selected or hovered row, where `--ink-3` is under
+  4.5:1) as `agent · member`; the member is left out while the hub has one
+  member, and a sessionless write shows the member alone. The human reads as
+  "you" and the hub's own act, an expired ask, as "the hub", with no receipts. A
+  row written before members keeps its old label as the subject, with
+  "before members" as its receipt in `--ink-3`, where a hover would hide the reason. A write from the embedded
+  store names `local` as its member. One helper, `byline(author, origin)` in
+  `web/author.mjs`, draws all of it, so no screen reads the wire's opaque
+  `actor` key, which is never displayed. Agent text wraps: a session
+  name too long for its row breaks at its dashes and slashes first and inside a
+  word only when nothing else fits, never with an ellipsis, and the receipts
+  wrap beneath it. A child session reads as
+  its last segment under its parent, folded into "+3 subagents" on lists that
+  show parents.
+- **Who menu.** One menu in the control row of the feed and the artifacts
+  list, and in the header beside Search's field (the scope chips fill that
+  control row), on the Group menu's component. Nothing chosen, the trigger is
+  the person glyph followed by the menu chevron, 32px tall, named "Who" in the
+  accessibility tree, like Group's trigger. A pick reads "Who: <name>", the
+  name cut at 14ch, with the chevron, drawn in the chip's selected state (the
+  sunken ground and a 2px ink rule), so a long name never pushes the control row
+  wider than its band. In the feed's 300px control row the trigger leaves the
+  filter about 107px, and the floor held is 100px. On a phone, an active Who pick or kind filter marks the
+  "Filter and group" glyph: it is `aria-pressed`, carries a dot, and is named
+  "Filter and group, 1 active" (a count of the kinds held and the Who pick). On
+  Search the trigger sits in the header an `--s-2` from the field, with the
+  header's 16px gutter kept after it. Under `any-pointer: coarse` the trigger's
+  44px hit area grows up and down only: it is already wider than 44px, and a
+  wider box would run under the glyph beside it. The menu is Anyone, then
+  Members, Agents and Sessions as labelled groups, then You and Before members.
+  Members is offered only with two or more members, and Before members only
+  where the hub has rows from before members (the sessions it sends say so).
+  Sessions set a parent's subagents in under it on their last segment, an ended
+  session is marked "(ended)" and sorted after the live ones, and a session with
+  no name reads as its agent and the last six characters of its id, never the
+  whole id. A pick keeps the name it was made under, so the trigger never shows
+  an id. One choice at a time; it sends the hub's own filter (`member`,
+  `agent`, `session` or `kind`), so the hub does the narrowing. Each screen's
+  choice is its own: the feed and the Artifacts segment of each project are
+  scoped by project (`feed:<project>`, `artifacts:<project>`), the hub-wide
+  Artifacts list and Search have theirs, and a pick in one narrows no other.
+  Keyboard: ArrowDown on the trigger opens it on its first choice, the arrows,
+  Home and End walk the choices, Enter picks, Escape closes it with focus on
+  the trigger, and Tab leaves it closed. After a pick the screen repaints and
+  focus returns to the trigger. The menu is placed once it is drawn, so its own
+  width keeps it inside the window.
+- **Live and idle.** One definition, used wherever a session's state is drawn. A
+  session is **live** when it is active and a participant who has not left was
+  seen inside the hub's activity window (15 minutes unless the hub is set
+  otherwise; the hub's own `live` on a session row is used when it sends one).
+  An active session with nobody seen lately is **idle**: it is open and nobody
+  is in it. A session that is neither is "ended". The state is a dot and a word,
+  never colour alone: a live session is a filled `--ok` dot and "live", an idle
+  one the same dot with its fill taken out and "idle", an ended one a ring in
+  `--ink-3` and "ended". The Sessions list leads each row's meta line with the
+  word, so a narrow pane cuts the id and the time and never the state. The head
+  over the active group counts what its rows show: "ACTIVE · 2 sessions, 1
+  subagent", subagents folded under their parents as Now's margin and the member
+  stage count them.
 - **Segmented control.** The selected segment carries a 2px ink rule along its
   foot, as a chip does, because a fill a shade off the track is not told apart
   at 3:1. Theme segments and the project section switcher, on desktop and on a
-  phone, carry it at rest; the phone Projects and Agent spaces register stays
+  phone, carry it at rest; the phone Projects and Member spaces register stays
   fill-only. A phone tab's focus ring is drawn inside the tab, beside the mark,
   so the scrolling track does not clip it.
 - **Key hints.** A key is named on a key chip: 12/500 mono in `--ink-2`, 20px
@@ -703,11 +767,11 @@ structure, not to line length.
 
 Now, an inbox item, Artifacts, Project (feed, artifacts, sessions under one
 shell), artifact viewer, session detail, Search, Storage and prune, Settings,
-Projects register, Agents and access, Connect, and the knowledge base.
+Projects register, Members and access, Connect, and the knowledge base.
 
 - **Projects register.** One header count, and every row it counts is
-  listed. A desktop shows the projects, then the agent spaces under an
-  "Agent spaces" section label; a desktop with no agent space draws no label.
+  listed. A desktop shows the projects, then the member spaces under a
+  "Member spaces" section label; a desktop with no member space draws no label.
   A phone splits the two with the segmented switcher in its tools row; the
   header counts both tabs. Once the register passes eight rows the row also
   carries a filter glyph that swaps the switcher for a search field and
@@ -720,14 +784,22 @@ Projects register, Agents and access, Connect, and the knowledge base.
   three chips, All, Needs you and Since you looked, each with its count,
   and on a fine pointer the keys on the right.
   - **The opening line.** One written line at 22/400, 17 on a narrow stage,
-    built from the data by templates, never by a model: Two agents need you.
-    build-bot wants a decision on “Ship 1.10 tonight”, and docs-writer asks
-    “Keep the CSV export?” It names one ask per agent, two at most, and
-    counts the rest ("and three more"); it counts asks apart from agents when
-    one agent asks twice. What follows, in `--ink-3`, says what can wait and
+    built from the data by templates, never by a model: Two sessions need you.
+    feat-x wants a decision on “Ship 1.10 tonight”, and docs-pass asks
+    “Keep the CSV export?” It counts sessions and names one ask per session,
+    two at most, and counts the rest ("and three more"); an ask that named no
+    session counts per agent and member, and when any asker named no session
+    the line says "agents" and not "sessions" ("Two agents need you."). It
+    counts asks apart from sessions when one session asks twice. Your own asks
+    and the hub's are not an agent's session and are left out of that count; a
+    line made only of them says "One ask needs you." Verbs agree with the
+    subject: "you ask", "you want a decision", "you are waiting on", and
+    "claude-code asks" for anyone else. What follows, in `--ink-3`, says what can wait and
     what changed since the reader looked. When nothing waits it says so first:
     "Nothing waits on you." Every value in it is the agent's and is escaped.
-  - **Needs you.** The label is copper. Each ask is one sentence, the agent in
+    When nothing waits it adds how many sessions are working: "Two sessions
+    are working."
+  - **Needs you.** The label is copper. Each ask is one sentence, the session in
     600 and then what it wants, with its verbs at the end of the line: an
     approval's Approve and Decline, a question's suggested answers and Reply,
     an idea's Resolve and Clear. The sentence is the link that opens the item.
@@ -762,13 +834,17 @@ Projects register, Agents and access, Connect, and the knowledge base.
     nothing, since an approval is an ask and not an answer.
   - **Empty.** The empty state when nothing has happened at all, and one per
     chip when that tier is empty, each with a link back to All.
-  - **Deviation: the chips are tiers, not projects, and the margin's head is
-    a count.** The handoff's control row filters by project and its opening
-    margin lists each working session with its age. The build's chips are the
-    three tiers, because the Inbox's address has to land on one of them and
-    the rail already lists the projects, and the margin says how many agents
-    are active, because the Home response carries the count and not the
-    sessions. An ask's row also keeps its verbs when it can wait, where the
+  - **Deviation: the chips are tiers, not projects, and the margin lists
+    live sessions.** The handoff's control row filters by project and its
+    opening margin lists each working session with its age. The build's chips
+    are the three tiers, because the Inbox's address has to land on one of
+    them and the rail already lists the projects. The margin's head counts the
+    live sessions and their subagents, as its rows show them ("2 live
+    sessions, 1 subagent"), says "Could not list live sessions." in ink when the
+    hub would not list them, and lists them across projects, each a session in 600 over
+    its project and who is in it, with a session's subagents folded into
+    "+3 subagents"; it shows six and says how many more. It carries no age,
+    because the sessions list does not. An ask's row also keeps its verbs when it can wait, where the
     handoff shows only Open, so a snoozed or far-off ask is still answered in
     place.
 - **Inbox item.** `#/inbox?open=<id>` opens one item at full size in a stage
@@ -781,8 +857,8 @@ Projects register, Agents and access, Connect, and the knowledge base.
   - **The body.** A kind line (the kind's glyph and word, the state in copper
     while it waits on the reader, "Waiting on you", and the deadline in words
     with the clock glyph), the title at 28 on a stage of 940 or more and 22
-    below it, then a byline: the agent in 600, the project, the asked time and
-    how long ago. The agent's body is markdown through the same sanitising
+    below it, then a byline: the session in 600, the project, its receipts, the
+    asked time and how long ago. The agent's body is markdown through the same sanitising
     renderer as a feed event's. A code block gets a row of its own above it with
     its language and the copy glyph, so a literal command is lifted out whole
     and nothing floats over the code.
@@ -796,7 +872,7 @@ Projects register, Agents and access, Connect, and the knowledge base.
     the address so Back does not return to something answered. Approve and
     Decline still ask in the decision dialog. Adding to an idea keeps it open.
   - **The thread.** When the item has replies, the ask and each reply on the
-    shared row anatomy: the kind glyph, the agent in 600 and what it said, the
+    shared row anatomy: the kind glyph, the session in 600 and what it said, the
     mono time on the right. The replies are the events whose thread is the
     item's, read forward from it on the project's feed.
   - Snoozing an item for an hour moves it to the can-wait end of Now's first
@@ -825,19 +901,20 @@ Projects register, Agents and access, Connect, and the knowledge base.
   with a "Points at" card carrying the reader to the artifact or session it is
   about.
   - **The feed's rows.** Each event is one row on Now's anatomy: the kind glyph,
-    one sentence (the agent in 600 and what it did, "build-bot started
-    flaky-hunt", or an open ask the way Now says it, "build-bot wants a
+    one sentence (the session in 600 and what it did, "feat-x started
+    flaky-hunt", with its receipts in mono after it, "claude-code · laptop", or an open ask the way Now says it, "build-bot wants a
     decision: Ship 1.10"), and the clock in mono on the right. A day heads its
     rows as Now heads a tier: the day as a label with its date in mono beside
     it, over a darker rule. A row above the read cursor is ink with the unread
-    dot under its time; a seen row is `--ink-2` with the agent at 500. A reply
+    dot under its time; a seen row is `--ink-2` with the subject at 500. A reply
     on a question's thread is set in under the row's sentence behind a 2px rule,
     as one sentence with its own time. An ask that still waits carries "Waiting
     on you" in copper under its sentence and an **Answer** control that opens it
     as an item; the row itself opens the event in the stage.
   - **The event in the stage** opens with a kind line (the glyph and the
     kind's word, and "Waiting on you" in copper while it waits), the title, and
-    a byline: the agent, the time and how long ago. A thread is drawn under it
+    a byline: the session, its receipts, the time and how long ago. A thread is
+    drawn under it
     on the same row anatomy as an opened item's.
   - **Deviation: the feed keeps its index and stage.** The handoff draws the
     feed as one 680 stream in the stage with a "Working here" margin. The build
@@ -856,7 +933,7 @@ Projects register, Agents and access, Connect, and the knowledge base.
   outlined glyph (a bulb) named on hover and to a screen reader, so the filter
   keeps the width to show what is typed in it: copper is for what needs the
   reader. The stage's header names where the reader is, the project and
-  "feed" with its active agents; the event's kind, title, author and time are
+  "feed" with its live sessions; the event's kind, title, author and time are
   the body's first lines, so the header does not repeat them. The
   project's overflow carries the feed's own verbs: **Select items** and
   **Dismiss read**. Select items replaces the control row with the count,
@@ -977,13 +1054,49 @@ Projects register, Agents and access, Connect, and the knowledge base.
   leaf and closed by its own control, its backdrop or Esc. Never both. An `fs`
   file opens in the stage rendered by the same parser as an artifact, read-only,
   with a back control and a mono provenance line. The header side carries the
-  owner, the handoff note and the lineage, with a Reassign control beside the
-  copy-id glyph: a secondary menu trigger that names the agent a session moves
-  to in the confirmation dialog. Reassign never takes the Prune/End slot, which
-  belongs to the session's own life.
+  participants and who started it, the handoff note and the lineage. A session
+  is shared and has no owner, so there is nothing to reassign. A brain a
+  merge touched says "merged on upgrade" in its header line, over the entries
+  kept under `merged`. A session's subagents sit under it on the list, set in
+  under their last segment.
+- **Members and access.** `#/access` is a list and an item. The index lists
+  the members, a member being one token holder and usually one machine: its
+  display name, and under it "2 live sessions · seen 4m ago". A member that
+  asked to join reads "waiting to join" in a pill and "asked 13m" under it, and
+  sorts with the rest. A
+  desktop's stage is the selected member: the token line with **Reissue token**
+  (the way a member moves to a new machine), then Live sessions (each a session
+  in 600 over its project and the agents of this member in it, with **End**, a
+  parent carrying "+3 subagents"; the head counts what the rows show, "2 ·
+  1 subagent"), Agents seen, Projects with **Grant a
+  project**, and **Revoke token** at the foot. A pending member's stage is its
+  approval card instead: the name, editable, what the machine said about itself
+  (first agent, system, host and source address), the reason it gave, "Approving
+  covers every agent on <member>." and **Approve** and **Refuse**; the name it
+  is approved under is the one it lands on. **Add member** opens the form in the
+  stage; creating issues the token once, in a dialog that splits what to do with
+  it: *Store on that machine* (the `[[credential]]` entry for the config file,
+  or the two exports) and two blocks that hold no token and are safe to commit:
+  *With the agent-hub binary* (the `.agent-hub.toml` and an `agent-hub mcp`
+  entry per client, which finds the token in the machine's store) and *Without
+  it* (the client entry that reads `HUB_TOKEN` from the environment, in each
+  client's own syntax; Antigravity expands no variables and has the binary form
+  only). Each snippet is a row with its own copy glyph; Done is the only way
+  out, and the token leaves the page with the dialog.
+  - **Deviation: one choice in the Who menu, and subagents folded under their
+    parent.** The hub's filters could be combined; the menu takes one at a
+    time, since each is a different question. The sessions list folds a
+    session's subagents under it behind a "+3 subagents" disclosure, closed
+    until opened and open when the selected session is one of them; opened,
+    each sits on its last segment with its state dot still in the row's glyph
+    column, only the text set in. The margin and the member stage fold them
+    into the count.
+  - **Deviation: two labels from before members read as people.** A row whose
+    legacy label is `human` or `hub` reads as "you" and "the hub", keeping the
+    "before members" receipt, since neither was ever an agent.
 - **Settings.** Rows under three quiet group labels. THIS DEVICE: theme as a
   three-way segmented group, compact rows, waiting on you. KEYBOARD: single-key
-  shortcuts, the group absent under a coarse pointer. THIS HUB: storage, agents
+  shortcuts, the group absent under a coarse pointer. THIS HUB: storage, members
   and tokens, Connect, and Version, a value row reading the version and short
   commit the binary was built from, with no destination, no chevron and no tab
   stop. One
@@ -1068,14 +1181,17 @@ Agent voice, past tense, no exclamation marks. Approvals name the action and
 its blast radius. Toasts state what happened and the reversible path. Empty
 states say what this is and what to do. No emoji anywhere.
 
-The revoke-token dialog carries round 14's copy: "Its token stops working now.
-Its projects stay granted, and a new token restores its access." Revoking stops
-the token and nothing else; the Access screen keeps revoke and grant removal as
-separate controls. The stage's foot reads **Revoke token**, and an agent with no
-live token reads "No live token" with **Issue token** beside it.
+The revoke-token dialog carries round 14's copy under a title that names the
+member, "Revoke laptop's token?": "Its token stops working now. Its projects
+stay granted, and a new token restores its access." Revoking stops the token
+and nothing else; the Access screen keeps revoke and grant removal as separate
+controls. The stage's foot reads **Revoke token**, and a member with no live
+token reads "No live token" with **Issue token** beside it. Reissue is how a
+member moves to a new machine: its confirmation says so, "its sessions carry
+over", because a member, its sessions and its cursors outlive any one token.
 
 A grant is access or no access, with no read or write level, so no screen renders
-`read` or `write` as an access value. The agent's PROJECTS rows are the project
+`read` or `write` as an access value. The member's PROJECTS rows are the project
 name, with the lock glyph and the word "confidential" only on a confidential
 project, and a trailing overflow with **Remove access**. The project's own screen
 carries the lock control in its overflow: **Make confidential** and **Make
@@ -1135,7 +1251,7 @@ named checks from the current handoff.
     desktop width, a phone width and under a coarse pointer, and in the states
     the check lists (the token, grant, new project, delete project, new page,
     save to wiki, revert, end session and prune dialogs, a brain file and key,
-    a comment thread, a refused save and the add-agent form), no element's
+    a comment thread, a refused save and the add-member form), no element's
     `style` attribute declares a box size, spacing, type, colour, fill, border,
     shadow or outline, or a custom property the check does not name.
 15. **Forms.** Every form column is 640 or the pane that holds it, every button
@@ -1161,6 +1277,19 @@ named checks from the current handoff.
     project chips are cut short with an ellipsis, and a screen reader's label
     is pinned to its containing block's left edge, so a title cut short never
     pushes one out.
+17. **A byline fits.** At a 360px phone a feed row for each kind of author (a
+    session with a long name, a sessionless agent, the human, the hub, the
+    embedded store and a row from before members) wraps its subject at a
+    dash or slash rather than clipping it, keeps its time inside the row, and
+    scrolls nothing sideways; the
+    receipts are the author's own and the wire's `actor` key is never drawn. A
+    screenshot of the day holds it.
+18. **The Who menu is a keyboard menu.** On the feed, the artifacts list and
+    Search it opens from the trigger with ArrowDown, walks with the arrows,
+    Home and End, picks with Enter, closes with Escape onto the trigger, and
+    what it picks reaches the hub as the matching filter. Opened, it has no
+    axe violation in either theme. A pick in one project's Artifacts segment
+    filters no other project and not the hub-wide list.
 
 `make web/styles`, `make web/units` and the browser gates enforce what they can;
 a UI change is not done until someone has looked at it at both widths and said

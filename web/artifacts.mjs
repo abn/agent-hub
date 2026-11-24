@@ -4,6 +4,7 @@
 // shell with the artifact selected, and reload and the browser's Back keep it.
 
 import { api } from "./api.mjs";
+import { authorOf, bylineOf } from "./author.mjs";
 import { artifactLine, artifactSlug, formatBytes, seeOne } from "./artifact-model.mjs";
 import {
   closeCommentsDrawer,
@@ -27,6 +28,7 @@ import { render } from "./router.mjs";
 import { asideAvailable, installShellLayout, toggleAside } from "./shell-layout.mjs";
 import { relative } from "./time.mjs";
 import { toast } from "./toast.mjs";
+import { artifactsScope, whoActive, whoParams } from "./who.mjs";
 
 // The live band: whether a version is being written, who is writing it, and
 // whether the reader is following. It rides above the document in the stage.
@@ -55,8 +57,8 @@ function wireLiveBand(id, kind, protectedArtifact, frame, band) {
     const state = band.dataset.state || "sealed";
     band.hidden = state === "sealed";
     band.dataset.following = following ? "yes" : "no";
-    const agent = band.dataset.agent || "";
-    const who = agent ? ` · ${agent}` : "";
+    const writer = band.dataset.writer || "";
+    const who = writer ? ` · ${writer}` : "";
     const extra = pending ? ` · ${pending} update${pending === 1 ? "" : "s"}` : "";
     band.querySelector(".hub-live-label").textContent = `${state}${who}${extra}`;
     const follow = band.querySelector(".hub-live-follow");
@@ -69,7 +71,7 @@ function wireLiveBand(id, kind, protectedArtifact, frame, band) {
     try {
       const state = await api(`/api/v1/artifacts/${encodeURIComponent(id)}/live`);
       band.dataset.state = state.state;
-      band.dataset.agent = state.actor || "";
+      band.dataset.writer = state.actor || state.author ? bylineOf(state).subject : "";
       version = state.version || null;
       liveVersion = state.version || null;
       // A version sheet the stage mounted before this read answered already
@@ -285,7 +287,7 @@ export async function artifactStage(id, projectId, version = null, listing = nul
   // that it is sealed.
   const who = current.protected
     ? "Encrypted"
-    : (listing && listing.actor) || current.actor || "agent";
+    : bylineOf(listing || current).subject;
   return {
     aside,
     title: slug,
@@ -549,10 +551,17 @@ export function wireArtifactStage(root, id, info) {
 // The artifacts index in the one shell: one row per artifact, the same shape
 // as every other list, with the fixed glyph column so every title starts at
 // the same x. The document itself is read in the stage.
+// The Who menu's choice in one project's Artifacts segment, as a query on its
+// list, or nothing. The choice is that project's own.
+const whoFilter = (projectId) => {
+  const scope = artifactsScope(projectId);
+  return whoActive(scope) ? `?${whoParams(scope)}` : "";
+};
+
 // The artifacts index is grouped, and the group is a value the reader picks.
 // Date and Kind both come from the listing; the writer is not on an artifact,
-// so an Agent group would need backend data the list does not carry.
-export const ARTIFACT_GROUPS = { day: "Date", kind: "Kind", agent: "Agent" };
+// so a Session group reads the session each artifact carries.
+export const ARTIFACT_GROUPS = { day: "Date", kind: "Kind", session: "Session" };
 export let artifactGrouping = "day";
 
 export function setArtifactGrouping(group) {
@@ -571,7 +580,7 @@ export function artifactGroupMenu() {
     <button type="button" class="hub-group-toggle" data-group-toggle aria-haspopup="menu" aria-expanded="false">Group${GROUP_CHEVRON}</button>
     <span class="pill shell-group-pill">${ARTIFACT_GROUPS[artifactGrouping]}</span>
     <div class="shell-group-menu" role="menu" aria-label="Group artifacts" data-group-menu hidden>
-      ${item("day", "Date")}${item("kind", "Kind")}${item("agent", "Agent")}
+      ${item("day", "Date")}${item("kind", "Kind")}${item("session", "Session")}
     </div>
   </div>`;
 }
@@ -591,12 +600,21 @@ function artifactDay(iso) {
   return `${month} ${at.getDate()}, ${at.getFullYear()}`;
 }
 
+// An artifact's session by name; one written outside a session says so, and one
+// from before members says that instead.
+function sessionGroupLabel(artifact) {
+  const name = artifact.session && artifact.session.name;
+  if (name) return String(name).toUpperCase();
+  const { author } = authorOf(artifact);
+  return author.kind === "legacy" ? "BEFORE MEMBERS" : "NO SESSION";
+}
+
 function artifactGroups(artifacts) {
   const groups = new Map();
   for (const a of artifacts) {
     let label;
-    if (artifactGrouping === "agent") {
-      label = (a.actor ? String(a.actor) : "Unattributed").toUpperCase();
+    if (artifactGrouping === "session") {
+      label = sessionGroupLabel(a);
     } else if (artifactGrouping === "kind") {
       label = String(a.kind || "other").toUpperCase();
     } else {
@@ -610,9 +628,10 @@ function artifactGroups(artifacts) {
 }
 
 export async function artifactIndex(projectId, selectedId = "") {
-  const { artifacts } = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/artifacts`);
+  const { artifacts } = await api(`/api/v1/projects/${encodeURIComponent(projectId)}/artifacts${whoFilter(projectId)}`);
   if (!artifacts || !artifacts.length) {
-    return { rows: `<div class="shell-body-pad"><p class="empty">No artifacts yet.</p></div>`, artifacts: [] };
+    const none = whoActive(artifactsScope(projectId)) ? "No artifacts match this filter." : "No artifacts yet.";
+    return { rows: `<div class="shell-body-pad"><p class="empty">${none}</p></div>`, artifacts: [] };
   }
   // The newest artifact is what the stage shows when the reader has not chosen
   // one, so its row is the marked one from the first paint.
@@ -823,7 +842,7 @@ function openVersionPicker(button, { id, versions, shown, root }, asMenu) {
     if (isCurrent) row.setAttribute("aria-current", "true");
 
     const age = v.created_at ? relative(Date.parse(v.created_at)) : "";
-    const actor = v.actor || "agent";
+    const actor = bylineOf(v).subject;
     const isLive = v.version === liveVersion;
     const primaryText = isLive ? "Being written" : isCurrent ? "Current" : actor;
     const secondaryText = isCurrent || isLive ? `${actor} · ${age}` : age;

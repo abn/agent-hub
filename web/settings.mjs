@@ -182,18 +182,18 @@ function desktopAlertsRow() {
 }
 
 export async function settingsScreen(gen) {
-  const [agentsRes, storage] = await Promise.all([
+  const [membersRes, storage] = await Promise.all([
     api("/api/v1/members").catch(() => ({ members: [] })),
     api("/api/v1/storage").catch(() => null),
   ]);
-  const agents = agentsRes.members || [];
+  const members = membersRes.members || [];
   let latestSeen = null;
-  for (const a of agents) {
+  for (const a of members) {
     if (a.last_seen_at && (!latestSeen || a.last_seen_at > latestSeen)) latestSeen = a.last_seen_at;
   }
-  const agentCount = agents.length;
-  const agentCountText = `${agentCount} ${agentCount === 1 ? "agent" : "agents"}`;
-  const agentText = `${agentCountText}${latestSeen ? ` · last call ${relative(latestSeen)}` : ""}`;
+  const memberCount = members.length;
+  const memberCountText = `${memberCount} ${memberCount === 1 ? "member" : "members"}`;
+  const memberText = `${memberCountText}${latestSeen ? ` · last call ${relative(latestSeen)}` : ""}`;
 
   const currentTheme = prefs.theme || "system";
   const densityCompact = (prefs.density || "comfortable") === "compact";
@@ -312,9 +312,9 @@ export async function settingsScreen(gen) {
           </a>
           <a class="form-row" href="#/access">
             <div class="form-row-main">
-              <span class="form-row-title">Agents and tokens</span>
+              <span class="form-row-title">Members and tokens</span>
             </div>
-            <span class="form-row-value">${esc(agentCountText)}</span>
+            <span class="form-row-value">${esc(memberCountText)}</span>
             ${NAV_CHEVRON}
           </a>
           <a class="form-row" href="#/connect">
@@ -386,8 +386,8 @@ export async function settingsScreen(gen) {
           <span class="settings-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
         <a href="#/access" class="settings-flat-row row settings-nav-row">
-          <span class="title settings-row-label">Agents and tokens</span>
-          <span class="meta settings-row-count">${esc(agentCountText)}</span>
+          <span class="title settings-row-label">Members and tokens</span>
+          <span class="meta settings-row-count">${esc(memberCountText)}</span>
           <span class="settings-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
         <a href="#/connect" class="settings-flat-row row settings-nav-row">

@@ -239,7 +239,7 @@ export function shellHTML({
 }
 
 export function shellStageHead(title, meta, actions = "", backHref = "") {
-  const isPushed = title === "Settings" || title === "Storage" || title === "Access" || title.startsWith("Agents");
+  const isPushed = title === "Settings" || title === "Storage" || title === "Access" || title.startsWith("Members");
   const effectiveBack = backHref || (isPushed ? "#/more" : "");
   const leading = effectiveBack
     ? `<a class="shell-slot shell-back" href="${esc(effectiveBack)}" aria-label="Back to list">${BACK_CHEVRON}</a>`
@@ -258,7 +258,7 @@ export function shellStageHead(title, meta, actions = "", backHref = "") {
 // the screen's own name and its meta. The title starts at the same x on every
 // screen, whether or not there is somewhere to go back to.
 export function shellMobileBar(title, meta = "", backHref = "") {
-  const isPushed = title === "Settings" || title === "Storage" || title === "Access" || title.startsWith("Agents");
+  const isPushed = title === "Settings" || title === "Storage" || title === "Access" || title.startsWith("Members");
   const effectiveBack = backHref || (isPushed ? "#/more" : "");
   const leading = effectiveBack
     ? `<a class="shell-slot shell-back" href="${esc(effectiveBack)}" aria-label="Back">${BACK_CHEVRON}</a>`
@@ -342,13 +342,16 @@ export function installIndexFilter(shell) {
   field.addEventListener("input", apply);
 }
 
-// The Group menu: a fixed word on the trigger, the value beside it as a pill,
-// and the options in a menu. It is placed against the trigger rather than
-// inside the pane, because the pane clips its overflow. One document listener
-// closes it, installed once, not per render.
+// The control row's menus (Group, Who, More): a fixed word on the trigger, the
+// value beside it as a pill, and the options in a menu. It is placed against
+// the trigger rather than inside the pane, because the pane clips its overflow.
+// One document listener closes it, installed once, not per render.
 export function installGroupMenu(shell) {
-  const wrap = shell.querySelector(".shell-group");
-  if (!wrap || wrap.dataset.wired === "on") return;
+  for (const wrap of shell.querySelectorAll(".shell-group")) wireGroupMenu(wrap);
+}
+
+function wireGroupMenu(wrap) {
+  if (wrap.dataset.wired === "on") return;
   wrap.dataset.wired = "on";
   const toggle = wrap.querySelector("[data-group-toggle]");
   const menu = /** @type {HTMLElement} */ (wrap.querySelector("[data-group-menu]"));
@@ -357,12 +360,13 @@ export function installGroupMenu(shell) {
   toggle.addEventListener("click", (event) => {
     event.stopPropagation();
     const open = menu.hidden;
+    menu.hidden = !open;
     if (open) {
+      // Placed once it is drawn, so its own width keeps it inside the window.
       const rect = toggle.getBoundingClientRect();
       menu.style.top = `${Math.round(rect.bottom + 6)}px`;
-      menu.style.left = `${Math.round(Math.max(8, Math.min(rect.left, window.innerWidth - 200)))}px`;
+      menu.style.left = `${Math.round(Math.max(8, Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8)))}px`;
     }
-    menu.hidden = !open;
     toggle.setAttribute("aria-expanded", String(open));
     if (open) menu.querySelector("button")?.focus();
   });
@@ -387,8 +391,12 @@ if (typeof document !== "undefined") {
     closeGroupMenus(inside ? inside.querySelector?.("[data-group-menu]") : null);
   });
   document.addEventListener("keydown", (event) => {
-    if (event.key !== "Escape" || !document.querySelector("[data-group-menu]:not([hidden])")) return;
+    const open = document.querySelector("[data-group-menu]:not([hidden])");
+    if (event.key !== "Escape" || !open) return;
+    const toggle = open.closest(".shell-group")?.querySelector("[data-group-toggle]");
+    const held = open.contains(document.activeElement);
     closeGroupMenus(null);
+    if (held && toggle instanceof HTMLElement) toggle.focus();
   });
 }
 

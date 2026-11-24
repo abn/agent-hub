@@ -470,7 +470,7 @@ describe("a row on Now", () => {
 
   it("words an answer as the feed does", () => {
     expect(sentence({ kind: "answer", actor: "human", summary: "re: Roll the log files?" })).toBe(
-      "human answered Roll the log files?",
+      "you answered Roll the log files?",
     );
   });
 

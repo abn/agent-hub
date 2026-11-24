@@ -593,7 +593,7 @@ export function confirmProjectDelete({ project, stats = null, footprint = "" }) 
       manifestRows.push({ label: "Files on disk", value: footprint });
     }
     if (stats.members_written > 0) {
-      manifestRows.push({ label: "Agents that have written here", value: String(stats.members_written) });
+      manifestRows.push({ label: "Members that have written here", value: String(stats.members_written) });
     }
   }
 
@@ -619,7 +619,7 @@ export function confirmProjectDelete({ project, stats = null, footprint = "" }) 
   const strong = document.createElement("strong");
   strong.textContent = "There is no undo and no restore. ";
   consequence.appendChild(strong);
-  consequence.appendChild(document.createTextNode("Agents writing to "));
+  consequence.appendChild(document.createTextNode("Sessions writing to "));
   const slugSpan = document.createElement("span");
   slugSpan.className = "mono";
   slugSpan.textContent = `/p/${project.id}`;

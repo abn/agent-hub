@@ -4,6 +4,8 @@
 // threads in a comment list. Pure functions over plain data, so the words are
 // held by unit tests rather than by a page.
 
+import { bylineOf } from "./author.mjs";
+
 // What the reader has looked at, on this device: the version of each artifact
 // they last saw, and when the record began. An artifact is new to the reader
 // when its version moved past the one they saw, or when it was published after
@@ -113,7 +115,8 @@ export function commentWords(total, open) {
 // the rail names it when the caller knows that name.
 export function artifactLine(artifact) {
   const parts = [artifact.project_name || artifact.project_id];
-  if (artifact.actor) parts.push(artifact.actor);
+  const by = bylineOf(artifact).subject;
+  if (artifact.author || artifact.actor) parts.push(by);
   parts.push(`v${int(artifact.version) || 1}`);
   if (artifact.live_version) parts.push("being written");
   else if (artifact.protected) parts.push("encrypted in your browser");

@@ -438,10 +438,13 @@ class Connection(list):
     """The MCP session id a connection holds, and the hub session its writes
     belong to: the connection names it once, every write passes it."""
 
-    def __init__(self, project: str, name: str):
+    def __init__(self, project: str, name: str, token: str | None = None):
         super().__init__()
         self.project = project
         self.name = name
+        # The bearer the connection speaks with: the admin's unless a member's
+        # token is named, so a write is attributed to that member.
+        self.token = token or ADMIN_TOKEN
 
 
 def with_session(connection: list[str], payload: dict) -> dict:
@@ -460,7 +463,7 @@ def with_session(connection: list[str], payload: dict) -> dict:
 def mcp_call(port: int, session: list[str], payload: dict) -> dict:
     payload = with_session(session, payload)
     headers = {
-        "Authorization": f"Bearer {ADMIN_TOKEN}",
+        "Authorization": f"Bearer {getattr(session, 'token', ADMIN_TOKEN)}",
         "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream",
     }
@@ -485,10 +488,13 @@ def mcp_call(port: int, session: list[str], payload: dict) -> dict:
     return {}
 
 
-def seed(port: int) -> dict[str, str]:
+def seed(port: int, as_member: tuple[str, str] | None = None) -> dict[str, str]:
     """Fill the hub with one of everything the screens show.
 
-    Returns the ids the checks need to address a route.
+    Returns the ids the checks need to address a route. The checks project's
+    session writes as the admin unless `as_member` names a member's token and
+    the agent it runs, so a capture can show asks from an agent and not from
+    the human.
     """
     request(port, "POST", "/api/v1/projects", {"id": PROJECT_ID, "display_name": PROJECT_NAME})
     request(
@@ -634,7 +640,7 @@ def seed(port: int) -> dict[str, str]:
                     "params": {"name": "session_end", "arguments": {"session": {"session_id": started}}},
                 },
             )
-    session = Connection(PROJECT_ID, SESSION_NAME)
+    session = Connection(PROJECT_ID, SESSION_NAME, token=as_member[0] if as_member else None)
     mcp_call(
         port,
         session,
@@ -645,7 +651,7 @@ def seed(port: int) -> dict[str, str]:
             "params": {
                 "protocolVersion": "2025-06-18",
                 "capabilities": {},
-                "clientInfo": {"name": "checks", "version": "0.0.0"},
+                "clientInfo": {"name": as_member[1] if as_member else "checks", "version": "0.0.0"},
             },
         },
     )
@@ -836,6 +842,182 @@ def seed(port: int) -> dict[str, str]:
         "inbox_read_id": results.get("inbox-read", {}).get("event_id", ""),
         "anchor_id": anchor_id,
     }
+
+
+# The people the identity screens show. A member is a machine's credential, an
+# agent is the client that machine runs, and a session is what the agent worked
+# in. None of it is in the main seed: the browser checks count against that one,
+# so the wiki capture adds this on top of it.
+IDENTITY_MEMBERS = (("laptop", "Laptop"), ("desktop", "Desktop"))
+# A request to join that nobody has decided, so Members shows the approval card.
+IDENTITY_PENDING = {
+    "member": "studio",
+    "display_name": "Studio",
+    "why": "Run opencode on the studio machine for the docs sweep",
+    "agent": "opencode",
+    "os": "Linux",
+    "host": "studio",
+}
+# The session two agents share, and the one with subagents under it.
+SHARED_SESSION = "release-14"
+PARENT_SESSION = "docs-sweep"
+SUBAGENT_SESSIONS = ("docs-sweep/links", "docs-sweep/images")
+
+
+def member_connection(port: int, project: str, name: str, token: str, agent: str) -> Connection:
+    """An MCP connection a member's token speaks on, named for its agent.
+
+    The agent is the client's handshake name, which the hub folds to a slug; the
+    session is the one the connection's writes name.
+    """
+    connection = Connection(project, name, token=token)
+    mcp_call(
+        port,
+        connection,
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": agent, "version": "0.0.0"},
+            },
+        },
+    )
+    mcp_call(port, connection, {"jsonrpc": "2.0", "method": "notifications/initialized"})
+    return connection
+
+
+def member_call(port: int, connection: Connection, tool: str, arguments: dict, number: int = 2) -> dict:
+    answer = mcp_call(
+        port,
+        connection,
+        {
+            "jsonrpc": "2.0",
+            "id": number,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": arguments},
+        },
+    )
+    result = answer.get("result", {})
+    if answer.get("error") or result.get("isError"):
+        raise RuntimeError(f"{tool} was refused: {answer.get('error') or result}")
+    return result.get("structuredContent", {}) or {}
+
+
+def seed_members(port: int) -> dict[str, str]:
+    """The identity members, each with a live token. Returns id to token."""
+    tokens: dict[str, str] = {}
+    for member, display in IDENTITY_MEMBERS:
+        request(port, "POST", "/api/v1/members", {"id": member, "display_name": display})
+        issued = json.loads(request(port, "POST", f"/api/v1/members/{member}/token"))
+        tokens[member] = issued["token"]
+    return tokens
+
+
+def seed_identity(port: int, tokens: dict[str, str]) -> dict[str, str]:
+    """Agents and shared sessions, written through the members' tokens.
+
+    `seed_members` made two active members (`laptop`, `desktop`); this adds one
+    pending request. Two agents (`claude-code` on the laptop, `opencode` on the
+    desktop) write under session names: one live session both are in, and one
+    parent session with two subagent sessions under it. The checks project's own
+    session, written by the laptop's agent through `seed`, is left, so the list
+    holds an active session nobody is in: idle beside the live ones. Returns the
+    member ids and the shared session's name for a capture to address.
+    """
+    # Enrolment is open to a caller with no token: it is how a machine asks.
+    pending = urllib.request.Request(
+        f"http://127.0.0.1:{port}/api/v1/enrol",
+        data=json.dumps(IDENTITY_PENDING).encode(),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    urllib.request.urlopen(pending, timeout=30).read()
+
+    laptop = member_connection(port, PROJECT_ID, SHARED_SESSION, tokens["laptop"], "claude-code")
+    desktop = member_connection(port, PROJECT_ID, SHARED_SESSION, tokens["desktop"], "opencode")
+    start = {"project_id": PROJECT_ID, "session_name": SHARED_SESSION}
+    member_call(port, laptop, "session_start", start)
+    member_call(port, desktop, "session_start", start)
+    member_call(
+        port,
+        laptop,
+        "signal_append",
+        {"project_id": PROJECT_ID, "kind": "signal", "summary": "Changelog drafted for 1.4"},
+        3,
+    )
+    member_call(
+        port,
+        desktop,
+        "signal_append",
+        {"project_id": PROJECT_ID, "kind": "finished", "summary": "Release build passed on the desktop"},
+        3,
+    )
+    member_call(
+        port,
+        laptop,
+        "question_post",
+        {"project_id": PROJECT_ID, "subject": "Cut the 1.4 branch today?", "options": ["Cut it", "Wait for Monday"]},
+        4,
+    )
+    member_call(
+        port,
+        laptop,
+        "brain_put",
+        {"store": "session", "path": "/kv/release-branch", "content": "release/1.4"},
+        5,
+    )
+
+    # The parent starts first, since a child needs a live parent.
+    parent = member_connection(port, PROJECT_ID, PARENT_SESSION, tokens["desktop"], "opencode")
+    member_call(port, parent, "session_start", {"project_id": PROJECT_ID, "session_name": PARENT_SESSION})
+    member_call(
+        port,
+        parent,
+        "signal_append",
+        {"project_id": PROJECT_ID, "kind": "signal", "summary": "Docs sweep split into two subagents"},
+        3,
+    )
+    for number, child in enumerate(SUBAGENT_SESSIONS, start=4):
+        kid = member_connection(port, PROJECT_ID, child, tokens["desktop"], "opencode")
+        member_call(port, kid, "session_start", {"project_id": PROJECT_ID, "session_name": child}, 2)
+        member_call(
+            port,
+            kid,
+            "signal_append",
+            {"project_id": PROJECT_ID, "kind": "signal", "summary": f"{child.split('/')[-1]} checked"},
+            number,
+        )
+    member_call(
+        port,
+        parent,
+        "signal_append",
+        {"project_id": PROJECT_ID, "kind": "approval", "summary": "Publish the docs rewrite to the site"},
+        9,
+    )
+    member_call(
+        port,
+        parent,
+        "artifact_publish",
+        {
+            "project_id": PROJECT_ID,
+            "title": "Docs sweep report",
+            "kind": "markdown",
+            "content": "# Docs sweep\n\nTwo subagents checked links and images.\n",
+        },
+        10,
+    )
+    # The nightly session's agent has gone: its participant left, so the session
+    # is still active and nobody is in it.
+    member_call(
+        port,
+        member_connection(port, PROJECT_ID, SESSION_NAME, tokens["laptop"], "claude-code"),
+        "session_leave",
+        {"session": {"project_id": PROJECT_ID, "name": SESSION_NAME}},
+    )
+    return {"laptop": "laptop", "desktop": "desktop", "pending": IDENTITY_PENDING["member"], "shared_session": SHARED_SESSION}
 
 
 def object_keys(source: str, opener: str) -> list[str]:

@@ -10,6 +10,7 @@
 // literal data, no trust ladder, no rename or move in this version.
 
 import { api } from "./api.mjs";
+import { bylineOf, receiptsHTML } from "./author.mjs";
 import { composer } from "./composer.mjs";
 import { confirmAction, slugify } from "./dialog.mjs";
 import { diffStat, hunks, lineDiff, onlyFinalNewline } from "./diff.mjs";
@@ -45,7 +46,7 @@ export function wikiPageHash(id, path, extra = "") {
 // A page's comment threads. One level: a reply is a comment on the page, not on
 // another comment. Open threads are listed; resolved ones fold under a count.
 // The anchor line is the quote alone, clamped to two lines. The human cannot
-// delete an agent's comment, so there is no delete control here.
+// delete a participant's comment, so there is no delete control here.
 async function commentsSection(id, path) {
   let comments = [];
   try {
@@ -60,7 +61,7 @@ async function commentsSection(id, path) {
   const done = comments.filter((comment) => comment.done);
   const thread = (comment, resolved) => `<div class="wiki-comment">
     <div class="wiki-comment-head">
-      <span class="wiki-comment-author">${esc(comment.actor)}</span>
+      <span class="wiki-comment-author">${esc(bylineOf(comment).subject)}${receiptsHTML(comment)}</span>
       <span class="mono wiki-comment-time">${timeHTML(comment.created_at)}</span>
       <span class="wiki-comment-gap"></span>
       ${resolved ? "" : `<button type="button" class="btn-outline wiki-comment-resolve" data-action="wiki-comment-resolve" data-id="${esc(id)}" data-comment="${esc(comment.id)}">Resolve</button>`}
@@ -317,7 +318,7 @@ async function pageStage(id, path, shellStageHead) {
   // header to itself.
   const reviewBtn = `<button type="button" class="btn-outline wiki-review-btn" data-action="wiki-review" data-id="${esc(id)}" data-path="${esc(displayPath(page.path))}" data-version="${esc(page.version)}">${needsReview ? "Review" : "Review again"}</button>`;
   const last = page.last_write
-    ? `${esc(page.last_write.actor)} · ${timeHTML(page.last_write.at)}`
+    ? `${esc(bylineOf(page.last_write).subject)} · ${timeHTML(page.last_write.at)}`
     : "no write recorded";
   const meta = [
     displayPath(page.path),
@@ -426,7 +427,7 @@ function historyRows(rows, changesProject) {
     // its title and its accessible name, and a click toggles it.
     out += `<a class="row wiki-change" href="${wikiPageHash(changesProject, displayPath(row.path), "&history=1")}">
       <span class="wiki-change-time">${timeHTML(stamp)}</span>
-      <span class="wiki-change-actor">${esc(row.actor)}</span>
+      <span class="wiki-change-actor">${esc(bylineOf(row).subject)}</span>
       <span class="mono wiki-change-path">${esc(displayPath(row.path))}</span>
       <span class="wiki-change-op">${esc(OP_WORDS[row.op] || row.op)}</span>
     </a>`;
@@ -507,7 +508,7 @@ function versionRows(id, path, rows) {
   return rows
     .map((row) => {
       const size = row.size_bytes == null ? "" : `${row.size_bytes} B`;
-      const facts = [row.actor, row.summary, size].filter(Boolean).join(" · ");
+      const facts = [bylineOf(row).subject, row.summary, size].filter(Boolean).join(" · ");
       const state = row.current ? "current" : row.version && !row.kept ? "not kept" : "";
       const inner = `<span class="wiki-version-line">
           <span class="wiki-version-time">${timeHTML(row.at)}</span>
@@ -622,7 +623,7 @@ async function versionStage(id, path, version, shellStageHead) {
   const lines = lineDiff(older.content, now ? now.content : "");
   const name = pageFrontmatter(older.content).title || displayPath(path).split("/").pop();
   const at = Date.parse(when);
-  const meta = [Number.isFinite(at) ? placeTime(at) : "", older.actor].filter(Boolean).join(" · ");
+  const meta = [Number.isFinite(at) ? placeTime(at) : "", bylineOf(older).subject].filter(Boolean).join(" · ");
   const revert = older.current
     ? ""
     : `<button type="button" class="btn-outline wiki-revert-btn" data-action="wiki-revert" data-id="${esc(id)}" data-path="${esc(displayPath(path))}" data-version="${esc(version)}" data-current="${esc(now ? now.version : "absent")}" data-when="${esc(when)}" data-name="${esc(name)}">${now ? "Revert to this" : "Restore this"}</button>`;

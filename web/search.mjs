@@ -10,6 +10,8 @@ import { registerScreen } from "./keys.mjs";
 import { formatBytes } from "./storage.mjs";
 import { read as readFrontmatter } from "./frontmatter.mjs";
 import { relative } from "./time.mjs";
+import { bylineOf } from "./author.mjs";
+import { loadWho, onWhoChange, whoMenu, whoQuery } from "./who.mjs";
 
 // The design asks for results as you type inside 50 ms.
 const DEBOUNCE = 50;
@@ -165,7 +167,7 @@ export function displayTitle(text, kind) {
 function whereLine(hit) {
   const parts = [projectName(hit)];
   if (hit.kind === "feed") {
-    parts.push(said(hit.actor));
+    parts.push(said(bylineOf(hit).subject));
   } else if (hit.kind === "artifact") {
     if (Number.isFinite(hit.version)) parts.push(`v${hit.version}`);
     if (Number.isFinite(hit.size_bytes)) parts.push(formatBytes(hit.size_bytes));
@@ -250,7 +252,7 @@ async function find(term, type, project) {
   const scope = type ? `&type=${encodeURIComponent(type)}` : "";
   const proj = project ? `&project=${encodeURIComponent(project)}` : "";
   try {
-    state.data = await api(`/api/v1/search?q=${encodeURIComponent(trimmed)}${scope}${proj}`);
+    state.data = await api(`/api/v1/search?q=${encodeURIComponent(trimmed)}${scope}${proj}${whoQuery("search")}`);
     state.line = resultsLine(state.data);
   } catch {
     // A request that failed is said to have failed, not to have found nothing.
@@ -456,7 +458,7 @@ export async function searchScreen(term, gen) {
   let project = params.get("project") || "";
 
   asked += 1;
-  const first = await find((term || "").trim(), type, project);
+  const [first, who] = await Promise.all([find((term || "").trim(), type, project), loadWho(project)]);
   if (stale(gen)) return;
 
   const title = el("h1", "search-title sr-only", "Search");
@@ -579,7 +581,11 @@ export async function searchScreen(term, gen) {
   const headColumn = el("div", "shell-title");
   headColumn.append(title, form);
   const indexHead = el("div", "shell-head");
-  indexHead.append(slot, headColumn);
+  // The scope chips fill the 300px control row, so the Who menu sits in the
+  // header beside the field it narrows.
+  const whoHolder = document.createElement("template");
+  whoHolder.innerHTML = whoMenu("search", who);
+  indexHead.append(slot, headColumn, whoHolder.content);
   const indexControls = el("div", "shell-controls");
   indexControls.append(scopes);
 
@@ -714,6 +720,7 @@ export async function searchScreen(term, gen) {
     updateResults(state);
   }
 
+  onWhoChange("search", run);
   input.addEventListener("input", () => {
     clearTimeout(timer);
     clear.hidden = !input.value;

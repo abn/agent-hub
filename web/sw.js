@@ -86,7 +86,7 @@ sw.addEventListener("message", (/** @type {any} */ event) => {
   const items = count === 1 ? "item" : "items";
   event.waitUntil(
     sw.registration.showNotification("Agent Hub", {
-      body: `An agent reported new work. ${count} ${items} waiting on you.`,
+      body: `A session reported new work. ${count} ${items} waiting on you.`,
       icon: new URL("icon.svg", sw.registration.scope).href,
       badge: new URL("icon.svg", sw.registration.scope).href,
       tag: "agent-hub-waiting",

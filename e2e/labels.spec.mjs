@@ -22,7 +22,7 @@ import { expectEveryScreen, openScreen, screenRoutes, seedWikiPage } from "./scr
 
 // The classes that draw a section label.
 const LABELS =
-  ".form-group-label, .settings-group-title, .agents-section-label, .access-section-label, .storage-section-label, .wiki-section-label, .wiki-history-day, .session-group-header, .brain-label, .settings-group-label, .shell-group-label, .section-label, .wiki-stat-label, .agent-detail-label";
+  ".form-group-label, .settings-group-title, .members-section-label, .access-section-label, .storage-section-label, .wiki-section-label, .wiki-history-day, .session-group-header, .brain-label, .settings-group-label, .shell-group-label, .section-label, .wiki-stat-label, .member-detail-label";
 
 test.describe("one section-label style", () => {
   test("every section label is the one style, and no label is set in the mono family", async ({ hub, page }) => {
@@ -72,10 +72,10 @@ test.describe("one section-label style", () => {
     }
     // The agent's own detail is a screen of its own: the bare address lists the
     // agents and draws none of its labels.
-    await openScreen(page, hub, "#/access", "main .agent-index-row");
-    await page.locator("main .agent-index-row").first().click();
-    await expect(page.locator(".agent-detail-label").first()).toBeVisible();
-    const detail = await page.$$eval(".agent-detail-label", (els) =>
+    await openScreen(page, hub, "#/access", "main .member-index-row");
+    await page.locator("main .member-index-row").first().click();
+    await expect(page.locator(".member-detail-label").first()).toBeVisible();
+    const detail = await page.$$eval(".member-detail-label", (els) =>
       els.map((el) => {
         const cs = getComputedStyle(el);
         const count = el.querySelector(".mono");

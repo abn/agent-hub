@@ -26,7 +26,7 @@ import { expectEveryScreen, openScreen, screenRoutes, seedWikiPage } from "./scr
 // own title is not among them: it starts at the gutter plus the row's fixed
 // glyph column, which is the row's own layout.
 const ON_THE_GUTTER =
-  ".section-label, .shell-group-label, .form-group-label, .agents-section-label, .access-section-label, .storage-section-label, .wiki-history-day, h2.day, .shell-title-line, .now-sum, .now-grp-name, .now-end-line, .audit-row, .brain-header-line, .session-actions-footer, .search-stage-path, .pset-sub, .wiki-editor-label, .wiki-comment-body, .shell-pad > .empty, .shell-body-pad > .empty, .empty-state";
+  ".section-label, .shell-group-label, .form-group-label, .members-section-label, .access-section-label, .storage-section-label, .wiki-history-day, h2.day, .shell-title-line, .now-sum, .now-grp-name, .now-end-line, .audit-row, .brain-header-line, .session-actions-footer, .search-stage-path, .pset-sub, .wiki-editor-label, .wiki-comment-body, .shell-pad > .empty, .shell-body-pad > .empty, .empty-state";
 
 // Content that sits inside a row rather than on it, and the margins of Now and
 // the artifacts list, which are ruled off by their own hairline and carry their
@@ -152,7 +152,7 @@ test.describe("empty notes", () => {
     await oneOffEvent(hub, id, "signal", "A signal for the filter check");
     await page.goto(`${hub.baseUrl}/#/projects/${encodeURIComponent(id)}/feed`);
     await expect(page.locator("main .shell-index .feed-row").first()).toBeVisible();
-    await page.locator("main .shell-index [data-group-toggle]").click();
+    await page.locator("main .shell-index [data-group-toggle]", { hasText: "Group" }).click();
     await page.getByRole("menuitemradio", { name: /^Scores/ }).click();
     await expect(page.locator("main .shell-index .empty-state")).toBeVisible();
     await expect(page.locator("main .shell-stage .empty")).toHaveText("No events match this filter.");

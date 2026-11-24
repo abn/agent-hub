@@ -118,7 +118,7 @@ test.describe("a waiting row in the feed", () => {
       const what = `the ${scheme} theme`;
       const { index, link, row } = await waitingRow(page, hub);
       await expect.soft(link, `${what}: the link does not say the row is waiting`).toHaveAccessibleDescription("Waiting on you");
-      await expect.soft(link, `${what}: the sentence does not name the agent and the ask`).toContainText(`asks: ${SUBJECT}`);
+      await expect.soft(link, `${what}: the sentence does not name who asks and the ask`).toContainText(`you ask: ${SUBJECT}`);
       const sentence = row.locator(".feed-s");
       const fits = await sentence.evaluate((el) => el.scrollWidth <= el.clientWidth + 0.5);
       expect.soft(fits, `${what}: the sentence is cut rather than wrapped`).toBe(true);
