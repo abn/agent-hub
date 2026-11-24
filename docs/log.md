@@ -6,6 +6,13 @@ software release notes and the repository changelog.
 
 ## 2026-11-24
 
+### Agents find the hub before they set up
+
+* **Update**: the site's `llms.txt` and the bootstrap guide start with finding
+  the hub. An agent uses a hub already configured, asks the human for the URL
+  when none is, and installs a hub only when the human agrees, on this machine
+  or by handing the human the command for another node.
+
 ### Live state comes from the hub
 
 * **Update**: [REST API](/reference/rest-api.md) documents `live` on each
