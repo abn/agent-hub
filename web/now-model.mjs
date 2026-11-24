@@ -201,6 +201,15 @@ function named(items) {
   return picked;
 }
 
+// What is working now, as the hub counts it: sessions, then the subagents
+// apart from them.
+function workingLine(sessions, subagents) {
+  const kids = `${word(subagents)} ${subagents === 1 ? "subagent" : "subagents"}`;
+  if (!sessions) return `${capital(kids)} ${subagents === 1 ? "is" : "are"} working.`;
+  const head = `${capital(word(sessions))} ${sessions === 1 ? "session is" : "sessions are"} working`;
+  return subagents ? `${head}, with ${kids}.` : `${head}.`;
+}
+
 // The opening line, as markup. Every value an agent wrote is escaped here, so
 // the caller can put the result straight into the page. It counts the agents'
 // sessions: an ask names the session that wrote it, or the agent when it named
@@ -212,7 +221,7 @@ function named(items) {
 //   no session      "One agent needs you. claude-code asks “Ship it?”"
 //   two sessions    "Two sessions need you. a wants a decision on “x”, and b asks “y?”"
 //   more            "... and three more." after the two it names
-export function summaryHTML({ now = [], later = 0, since = 0, sessions = 0, unlisted = 0 } = {}) {
+export function summaryHTML({ now = [], later = 0, since = 0, sessions = 0, subagents = 0, unlisted = 0 } = {}) {
   const total = now.length + unlisted;
   const parts = [];
   const rest = [];
@@ -240,9 +249,7 @@ export function summaryHTML({ now = [], later = 0, since = 0, sessions = 0, unli
   if (later) rest.push(`${capital(word(later))} more can wait.`);
   if (since) rest.push(`${capital(word(since))} ${since === 1 ? "thing" : "things"} changed since you looked.`);
   else rest.push(total || later ? "Nothing else is new." : "Nothing is new since you looked.");
-  if (!total && !later && sessions) {
-    rest.push(`${capital(word(sessions))} ${sessions === 1 ? "session is" : "sessions are"} working.`);
-  }
+  if (!total && !later && (sessions || subagents)) rest.push(workingLine(sessions, subagents));
   return `${parts.join(" ")} <span class="now-rest">${rest.join(" ")}</span>`;
 }
 

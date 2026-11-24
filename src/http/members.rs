@@ -51,7 +51,10 @@ pub async fn list(
     headers: HeaderMap,
 ) -> std::result::Result<Json<MemberList>, Problem> {
     admin(&state, bearer_token(&headers).as_deref())?;
-    let members = identity::list_members(&state.db)
+    let mut members = identity::list_members(&state.db)
+        .await
+        .map_err(|err| Problem::from_error(&err))?;
+    identity::fill_live(&state.db, &mut members, &state.config.active_since())
         .await
         .map_err(|err| Problem::from_error(&err))?;
     Ok(Json(MemberList { members }))
@@ -72,9 +75,16 @@ pub async fn create(
             request.id
         ))));
     }
-    let member = identity::create_member(&state.db, &request.id, &request.display_name)
+    let mut member = identity::create_member(&state.db, &request.id, &request.display_name)
         .await
         .map_err(|err| Problem::from_error(&err))?;
+    identity::fill_live(
+        &state.db,
+        std::slice::from_mut(&mut member),
+        &state.config.active_since(),
+    )
+    .await
+    .map_err(|err| Problem::from_error(&err))?;
     Ok((StatusCode::CREATED, Json(member)))
 }
 

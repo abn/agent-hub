@@ -28,6 +28,8 @@ pub struct Project {
     /// Carried on the listing so a screen showing many projects learns it
     /// once, not once per project on every navigation.
     pub sessions_live: i64,
+    /// Live subagent sessions here, counted apart from `sessions_live`.
+    pub subagents_live: i64,
     /// Whether the project is confidential and hidden without a grant.
     pub confidential: bool,
     /// Status: 'active' or 'deleting'.
@@ -63,8 +65,14 @@ pub async fn list(db: &Database, active_since: &str) -> Result<Vec<Project>> {
     // One grouped count for the whole listing rather than one per project.
     let unseen = crate::store::events::unseen_counts(db).await?;
     let sessions_live = crate::store::sessions::live_by_project(db, active_since).await?;
+    let subagents_live =
+        crate::store::sessions::live_subagents_by_project(db, active_since).await?;
     for project in &mut projects {
         project.sessions_live = sessions_live
+            .iter()
+            .find(|(id, _)| id == &project.id)
+            .map_or(0, |(_, count)| *count);
+        project.subagents_live = subagents_live
             .iter()
             .find(|(id, _)| id == &project.id)
             .map_or(0, |(_, count)| *count);
@@ -214,6 +222,7 @@ pub async fn create_with_confidential(
         created_at,
         unseen_events: 0,
         sessions_live: 0,
+        subagents_live: 0,
         confidential,
         status: "active".to_string(),
     })
@@ -310,8 +319,11 @@ pub struct ProjectStats {
     pub sessions: i64,
     /// Pages in the project knowledge base.
     pub kb_pages: i64,
-    /// Live sessions: active, with a participant seen inside the window.
+    /// Live top-level sessions: active, with a participant seen inside the
+    /// window.
     pub sessions_live: i64,
+    /// Live subagent sessions, counted apart.
+    pub subagents_live: i64,
     /// Distinct non-null threads across events in this project.
     pub threads: i64,
     /// Distinct members that wrote events in this project.
@@ -401,6 +413,8 @@ pub async fn stats(
         kb_pages: count("SELECT COUNT(*) FROM search_docs WHERE project_id = ?1 AND type = 'kb'")
             .await?,
         sessions_live: crate::store::sessions::live_count(db, active_since, Some(id)).await?,
+        subagents_live: crate::store::sessions::live_subagent_count(db, active_since, Some(id))
+            .await?,
         threads: count(
             "SELECT COUNT(DISTINCT thread_id) FROM events WHERE project_id = ?1 AND thread_id IS NOT NULL",
         )
@@ -756,6 +770,7 @@ fn project_from_row(row: &turso::Row) -> Result<Project> {
         // query rather than one query per row.
         unseen_events: 0,
         sessions_live: 0,
+        subagents_live: 0,
         confidential,
         status,
     })

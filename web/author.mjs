@@ -183,8 +183,10 @@ const subagents = (n) => `+${n} ${n === 1 ? "subagent" : "subagents"}`;
 // Sessions in a list, children folded under their parent. A child whose parent
 // is not in the list stands alone under its full name, because its leaf would
 // say nothing. Returns `[{ session, children, folded }]` in the list's order,
-// where `folded` is the "+3 subagents" mark ("" when there are none).
-export function foldSessions(sessions) {
+// where `folded` is the "+3 subagents" mark ("" when there are none). A list
+// the hub filtered to live sessions says `live`: its parents' `children_count`
+// also counts ended children, so only the children listed are folded.
+export function foldSessions(sessions, { live = false } = {}) {
   const rows = Array.isArray(sessions) ? sessions : [];
   const byId = new Map(rows.map((s) => [s.id, s]));
   const children = new Map();
@@ -200,17 +202,28 @@ export function foldSessions(sessions) {
   }
   return top.map((session) => {
     const kids = children.get(session.id) || [];
-    // The hub counts children it did not list (a list filtered to live ones).
-    const n = kids.length || Math.max(0, Math.trunc(Number(session.children_count)) || 0);
+    // The hub counts children it did not list (a list split by status).
+    const n = live ? kids.length : kids.length || Math.max(0, Math.trunc(Number(session.children_count)) || 0);
     return { session, children: kids, folded: n ? subagents(n) : "" };
   });
 }
 
-// What a list of sessions holds, counted the way its rows show it: the
-// sessions that head a row, and the subagents folded under them.
+// What a list of sessions holds, counted as the hub counts: a session with a
+// parent is a subagent, whether or not its parent is in the list.
 export function liveCounts(sessions) {
+  const rows = Array.isArray(sessions) ? sessions : [];
+  const subagents = rows.filter((s) => s && s.parent_id).length;
+  return { sessions: rows.length - subagents, subagents };
+}
+
+// What a project's list holds, counted the way its rows show it: the sessions
+// that head a row, and the subagents folded under them.
+function rowCounts(sessions) {
   const rows = foldSessions(sessions);
-  const subagents = rows.reduce((sum, row) => sum + (row.children.length || Math.max(0, Math.trunc(Number(row.session.children_count)) || 0)), 0);
+  const subagents = rows.reduce(
+    (sum, row) => sum + (row.children.length || Math.max(0, Math.trunc(Number(row.session.children_count)) || 0)),
+    0,
+  );
   return { sessions: rows.length, subagents };
 }
 
@@ -219,38 +232,35 @@ const subagentWord = (n) => `${n} ${n === 1 ? "subagent" : "subagents"}`;
 
 // "2 sessions, 1 subagent": the counts over a list, as its rows show them.
 export function sessionCountText(sessions) {
-  const { sessions: n, subagents } = liveCounts(sessions);
+  const { sessions: n, subagents } = rowCounts(sessions);
   return subagents ? `${sessionWord(n)}, ${subagentWord(subagents)}` : sessionWord(n);
 }
 
-// "2 live sessions, 1 subagent": the head over those rows.
+// "2 live sessions, 1 subagent": the hub's two counts said one way everywhere.
+// The subagents are left out when there are none.
+export function liveWords(sessions, subagents = 0) {
+  const n = Math.max(0, Math.trunc(Number(sessions)) || 0);
+  const m = Math.max(0, Math.trunc(Number(subagents)) || 0);
+  const head = `${n} live ${n === 1 ? "session" : "sessions"}`;
+  return m ? `${head}, ${subagentWord(m)}` : head;
+}
+
+// The head over the hub's list of live sessions, split the way the hub splits
+// its own counts.
 export function liveCountText(sessions) {
   const { sessions: n, subagents } = liveCounts(sessions);
-  const head = n ? `${n} live ${n === 1 ? "session" : "sessions"}` : "No live sessions";
-  return subagents ? `${head}, ${subagentWord(subagents)}` : head;
+  return n ? liveWords(n, subagents) : subagents ? liveWords(0, subagents) : "No live sessions";
 }
 
-// How long a participant may be quiet and the session still be live. The hub's
-// own default; a hub that sends `live` on its session rows is believed instead.
-export const LIVE_WINDOW_MS = 15 * 60 * 1000;
-
-// A session is live when it is active and a participant who has not left was
-// seen inside the activity window. An active session with nobody seen lately
-// is idle: it is open, and nobody is there. The hub's `live` wins when it says.
-export function isLive(session, now = Date.now()) {
-  if (!session || session.status !== "active") return false;
-  if (typeof session.live === "boolean") return session.live;
-  return (session.participants || []).some((p) => {
-    if (!p || p.left_at) return false;
-    const seen = Date.parse(p.last_seen_at);
-    return Number.isFinite(seen) && now - seen <= LIVE_WINDOW_MS;
-  });
-}
+// A session is live when the hub says so: it is active and a participant who
+// has not left was seen inside the hub's activity window. An active session
+// that is not live is idle: it is open, and nobody is there.
+export const isLive = (session) => Boolean(session && session.status === "active" && session.live === true);
 
 // The word a session's state is read by: live, idle (active, nobody seen
 // lately), or the status itself once it is no longer active.
-export const stateWord = (session, now = Date.now()) =>
-  session && session.status === "active" ? (isLive(session, now) ? "live" : "idle") : (session && session.status) || "";
+export const stateWord = (session) =>
+  session && session.status === "active" ? (isLive(session) ? "live" : "idle") : (session && session.status) || "";
 
 // A session with no name, read by its agent and the tail of its id. The head of
 // a ULID is its timestamp, shared by every session made that minute.

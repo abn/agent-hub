@@ -72,6 +72,18 @@ describe("the opening line", () => {
     );
   });
 
+  it("counts the working subagents apart from the sessions", () => {
+    expect(text(summaryHTML({ sessions: 2, subagents: 1 }))).toBe(
+      "Nothing waits on you. Nothing is new since you looked. Two sessions are working, with one subagent.",
+    );
+    expect(text(summaryHTML({ sessions: 0, subagents: 3 }))).toBe(
+      "Nothing waits on you. Nothing is new since you looked. Three subagents are working.",
+    );
+    expect(text(summaryHTML({ sessions: 0, subagents: 1 }))).toBe(
+      "Nothing waits on you. Nothing is new since you looked. One subagent is working.",
+    );
+  });
+
   it("counts what changed when nothing waits", () => {
     expect(text(summaryHTML({ since: 1 }))).toBe("Nothing waits on you. One thing changed since you looked.");
     expect(text(summaryHTML({ since: 14 }))).toBe("Nothing waits on you. 14 things changed since you looked.");

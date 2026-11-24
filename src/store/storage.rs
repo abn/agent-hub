@@ -28,10 +28,13 @@ pub struct ProjectUsage {
     pub prunable_bytes: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_write: Option<String>,
-    /// Live sessions in this project. Carried here so the storage screen can
-    /// mark a project live without asking once per project, which on this hub
-    /// would be six round trips for six booleans.
+    /// Live top-level sessions in this project. Carried here so the storage
+    /// screen can mark a project live without asking once per project, which
+    /// on this hub would be six round trips for six booleans.
     pub sessions_live: i64,
+    /// Live subagent sessions in this project, counted apart from
+    /// `sessions_live`.
+    pub subagents_live: i64,
 }
 
 /// Bytes on the data volume by what holds them, which is the stacked bar the
@@ -153,6 +156,7 @@ pub async fn usage_from(
                 prunable_bytes: 0,
                 last_write: None,
                 sessions_live: 0,
+                subagents_live: 0,
             });
         }
     };
@@ -267,6 +271,13 @@ pub async fn usage_from(
     for (project_id, count) in crate::store::sessions::live_by_project(db, active_since).await? {
         if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == project_id) {
             entry.sessions_live = count;
+        }
+    }
+    for (project_id, count) in
+        crate::store::sessions::live_subagents_by_project(db, active_since).await?
+    {
+        if let Some(entry) = by_project.iter_mut().find(|p| p.project_id == project_id) {
+            entry.subagents_live = count;
         }
     }
 

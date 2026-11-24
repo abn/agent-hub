@@ -345,7 +345,7 @@ impl HubServer {
         let limit = params
             .limit
             .unwrap_or(crate::limits::SESSION_LIST_LIMIT_DEFAULT);
-        let since = params.live.then(|| active_since(&self.state));
+        let since = active_since(&self.state);
         let listed = sessions::list_filtered(
             &self.state.db,
             &sessions::SessionFilter {
@@ -355,7 +355,7 @@ impl HubServer {
                 agent: agent.as_deref(),
                 live: params.live,
                 parent: None,
-                since: since.as_deref(),
+                since: Some(&since),
                 limit: Some(limit),
             },
         )
@@ -386,6 +386,7 @@ impl HubServer {
                     "forked_from": session.forked_from,
                     "started_by": row.started_by,
                     "participants": row.participants,
+                    "live": sessions::is_live(session, &row.participants, &since),
                     "children_count": row.children_count,
                     "brain_bytes": self.brain_bytes(session),
                 })

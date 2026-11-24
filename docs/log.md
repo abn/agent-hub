@@ -6,6 +6,17 @@ software release notes and the repository changelog.
 
 ## 2026-11-24
 
+### Live state comes from the hub
+
+* **Update**: [REST API](/reference/rest-api.md) documents `live` on each
+  session row, `subagents_live` beside `sessions_live` on home, projects,
+  project stats and storage, `live_subagents` and `token_issued_at` on a
+  member. Live counts cover top-level sessions only; subagents are counted
+  apart. A member's live sessions are those where that member's own
+  participation is live, in the member row and in `member` with `live=1`.
+  [MCP tools](/reference/mcp-tools.md) `session_list` carries `live` too, and
+  `children_count` is documented as the children that still exist.
+
 ### Members docs checked against the server
 
 * **Update**: [REST API](/reference/rest-api.md) lists sessions by `project=`,

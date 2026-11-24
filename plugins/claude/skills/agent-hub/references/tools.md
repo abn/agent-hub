@@ -54,7 +54,7 @@ session_leave(session)
 session_end(session, handoff?)
 session_list(project_id?, status?, member?, agent?, kind?, live?, limit?)
       -> sessions: [{session_id, project_id, session_name, status, participants,
-                     started_by, children_count, created_at, last_activity,
+                     started_by, live, children_count, created_at, last_activity,
                      handoff, handoff_truncated, forked_from, brain_bytes}], truncated
 session_brief(project_id)
       -> {project_id, agent, since: {event_id, basis},

@@ -7,6 +7,7 @@ import {
   LEGACY_RECEIPT,
   liveCountText,
   liveCounts,
+  liveWords,
   authorOf,
   askerKey,
   byline,
@@ -248,8 +249,28 @@ describe("the count over live sessions", () => {
     expect(liveCountText(rows)).toBe("2 live sessions, 1 subagent");
   });
 
-  it("counts subagents the hub did not list from its own count", () => {
-    expect(liveCountText([{ id: "p", session_name: "feat-x", children_count: 3 }])).toBe("1 live session, 3 subagents");
+  it("does not count children the hub did not list, which may have ended", () => {
+    expect(liveCounts([{ id: "p", session_name: "feat-x", children_count: 3 }])).toEqual({ sessions: 1, subagents: 0 });
+    expect(liveCountText([{ id: "p", session_name: "feat-x", children_count: 3 }])).toBe("1 live session");
+  });
+
+  it("counts a live child whose parent is not listed as a subagent, as the hub does", () => {
+    const orphan = { id: "c", session_name: "feat-x/a", parent_id: "idle-parent" };
+    expect(liveCounts([...rows, orphan])).toEqual({ sessions: 2, subagents: 2 });
+    expect(liveCountText([...rows, orphan])).toBe("2 live sessions, 2 subagents");
+    expect(liveCountText([orphan])).toBe("0 live sessions, 1 subagent");
+  });
+
+  it("folds only the children a live list holds", () => {
+    const folded = foldSessions(
+      [
+        { id: "p", session_name: "feat-x", children_count: 3 },
+        { id: "q", session_name: "other", children_count: 1 },
+        { id: "k", session_name: "other/a", parent_id: "q" },
+      ],
+      { live: true },
+    );
+    expect(folded.map((entry) => entry.folded)).toEqual(["", "+1 subagent"]);
   });
 
   it("says no live sessions when there are none", () => {
@@ -285,28 +306,33 @@ describe("you and the hub", () => {
 });
 
 describe("a session that is live or idle", () => {
-  const NOW = Date.parse("2026-11-24T12:00:00Z");
-  const seen = (minutes, over = {}) => ({ member: "laptop", agent: "claude-code", left_at: null, last_seen_at: new Date(NOW - minutes * 60000).toISOString(), ...over });
-
-  it("is live when it is active and a participant who has not left was seen lately", () => {
-    expect(isLive({ status: "active", participants: [seen(2)] }, NOW)).toBe(true);
-    expect(stateWord({ status: "active", participants: [seen(2)] }, NOW)).toBe("live");
+  it("is live when the hub says it is", () => {
+    expect(isLive({ status: "active", live: true })).toBe(true);
+    expect(stateWord({ status: "active", live: true })).toBe("live");
   });
 
-  it("is idle when it is active and nobody was seen lately, or everybody left", () => {
-    expect(stateWord({ status: "active", participants: [seen(60)] }, NOW)).toBe("idle");
-    expect(stateWord({ status: "active", participants: [seen(1, { left_at: "2026-11-24T11:59:00Z" })] }, NOW)).toBe("idle");
-    expect(stateWord({ status: "active", participants: [] }, NOW)).toBe("idle");
+  it("is idle when it is active and the hub does not say live", () => {
+    expect(stateWord({ status: "active", live: false })).toBe("idle");
+    expect(stateWord({ status: "active" })).toBe("idle");
+  });
+
+  it("does not guess from participants", () => {
+    const seen = { member: "laptop", agent: "claude-code", left_at: null, last_seen_at: new Date().toISOString() };
+    expect(isLive({ status: "active", participants: [seen] })).toBe(false);
   });
 
   it("is neither once it has ended, and says what it is", () => {
-    expect(isLive({ status: "ended", participants: [seen(1)] }, NOW)).toBe(false);
-    expect(stateWord({ status: "ended" }, NOW)).toBe("ended");
+    expect(isLive({ status: "ended", live: true })).toBe(false);
+    expect(stateWord({ status: "ended" })).toBe("ended");
   });
+});
 
-  it("believes the hub when it says", () => {
-    expect(isLive({ status: "active", live: true, participants: [] }, NOW)).toBe(true);
-    expect(isLive({ status: "active", live: false, participants: [seen(1)] }, NOW)).toBe(false);
+describe("live counts said one way", () => {
+  it("names sessions, then subagents when there are any", () => {
+    expect(liveWords(2, 1)).toBe("2 live sessions, 1 subagent");
+    expect(liveWords(1, 3)).toBe("1 live session, 3 subagents");
+    expect(liveWords(4, 0)).toBe("4 live sessions");
+    expect(liveWords(0)).toBe("0 live sessions");
   });
 });
 
