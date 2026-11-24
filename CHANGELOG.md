@@ -4,6 +4,45 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.12.0...agent-hub-v1.13.0) (2026-11-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* **daemon:** add hub.lock, start/stop/status/logs and a status-only bare command
+
+### Features
+
+* **client:** credential store, lock dir, resolver, CLI and proxy ([07d8295](https://github.com/agync/agent-hub/commit/07d829507e7eeb491956826d9ddca7c16da4d001))
+* **daemon:** add hub.lock, start/stop/status/logs and a status-only bare command ([163bf65](https://github.com/agync/agent-hub/commit/163bf6519137dff475373ba225b5682f294a4b5f))
+* **http:** members routes, enrolment context and session filters ([9160f08](https://github.com/agync/agent-hub/commit/9160f080ac898d2cac173b986d2f863c792885da))
+* **install:** add the install scripts and their release-server test harness ([b6da73f](https://github.com/agync/agent-hub/commit/b6da73f62880b641e728d697be23cb5712a8cbf1))
+* **mcp:** per-write sessions, shared brains and participant delivery ([3ae5125](https://github.com/agync/agent-hub/commit/3ae5125830fa8e31a0a427b3f6bee52a6b26402d))
+* **opencode:** add the credential resolver and config.toml store twin ([f6b63e3](https://github.com/agync/agent-hub/commit/f6b63e393a38d87fc1995dc3246d71d3ba61ab66))
+* **opencode:** honour the default credential for a hub ([0994b0d](https://github.com/agync/agent-hub/commit/0994b0d2eccd2982154f0a2ec71ca4219c4df7b7))
+* **plugins:** add a launcher that fetches the agent-hub binary ([fec0a9d](https://github.com/agync/agent-hub/commit/fec0a9d44a815e2557bdcf3eb3619223fe255f56))
+* **plugins:** put hooks and plugins on the member and session model ([5b0bcfb](https://github.com/agync/agent-hub/commit/5b0bcfb250244000221a905966bd9c827829e96f))
+* **server:** identity contract types and signatures ([6adce4c](https://github.com/agync/agent-hub/commit/6adce4cddf1c010e622c7850b774b54ee47a59dc))
+* **service:** add systemd and launchd service backends, service install and uninstall ([4b025b0](https://github.com/agync/agent-hub/commit/4b025b0963e4183a260d1c4477b840f4f0fcdbcc))
+* **service:** add the Windows scheduled task, the supervisor and the stop event ([ff4b006](https://github.com/agync/agent-hub/commit/ff4b00664028d243991b9823eec231f0286d35e1))
+* **site:** show one tab per harness in the connect step ([c32d165](https://github.com/agync/agent-hub/commit/c32d16533eba88fe66df331ad2c4eaea5b8add61))
+* **store:** members, participants and the v28 migration ([c338d9b](https://github.com/agync/agent-hub/commit/c338d9b782a1a6c28a47388a6e062ed7aa15eb0b))
+* **web:** show members, agents and shared sessions ([6fcf3ae](https://github.com/agync/agent-hub/commit/6fcf3aeb24bd994cba1115d8be165cee039d9a58))
+* **windows:** compile the crate for Windows and fall back to USERPROFILE ([56f3270](https://github.com/agync/agent-hub/commit/56f32703c811f2fed3e7267bf78e9e9d4e31203e))
+
+
+### Bug Fixes
+
+* **client:** pick the default credential when several share a hub ([c17e70e](https://github.com/agync/agent-hub/commit/c17e70ed98b182ad1601ac55595e1e0bfadb9cc6))
+* **http:** say which sessions are live and count subagents apart ([fadc7c9](https://github.com/agync/agent-hub/commit/fadc7c95d4dbf2c3f84b88b7372749514ee5aa7e))
+* **mcp:** page a peek past its cursor and report each item once ([926f646](https://github.com/agync/agent-hub/commit/926f64642b64784537664a68f671f28884fd4653))
+* **opencode:** reap the lock break guard only when its owner is gone ([fc3acc4](https://github.com/agync/agent-hub/commit/fc3acc4980b12c5f24ea4b486a9e72508a3ff632))
+* **plugins:** key the launcher's notice by Antigravity conversation ([4a0a43c](https://github.com/agync/agent-hub/commit/4a0a43ce9412ad4cac0e9ab12aa3af2c99631fa8))
+* **plugins:** say hooks are off once per session ([6807263](https://github.com/agync/agent-hub/commit/680726322119723b853eecd55d54d1f61c378839))
+* **web:** draw errors and validation in ink, keep red for deletion ([b576843](https://github.com/agync/agent-hub/commit/b5768437bf22e906a0b44b1fb8ba46359341ed45))
+* **web:** tidy the leftovers from the UI pass ([463a33d](https://github.com/agync/agent-hub/commit/463a33de629931320c1bc8ce58729ead1c68930e))
+* **web:** type the offline replay count under its lock ([c0d6452](https://github.com/agync/agent-hub/commit/c0d64521469b1c9ed8fe9203b37398bbeb26af49))
+
 ## [1.12.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.11.0...agent-hub-v1.12.0) (2026-11-23)
 
 
