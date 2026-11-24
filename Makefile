@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test plugins/sync plugins/antigravity-dist test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e plugins/check install/test install/e2e net/check serve/check gate gate/quick e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test plugins/sync plugins/antigravity-dist test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e plugins/check install/test install/e2e net/check serve/check gate gate/quick gate/identity e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build
 
 ##@ Bootstrap
 
@@ -200,6 +200,15 @@ serve/check: ## Compile the serve-only build the container image uses
 
 gate: lint lint/engine clippy fmt/check docs/check web/crypto web/units web/styles web/types plugins/check install/test net/check serve/check test ## Everything the gate runs but the browser checks
 gate/quick: fmt/check lint/engine clippy web/units plugins/check ## Fast inner loop: format, lint and client units
+
+# The members, agents and sessions release checks. The script reads each runner's
+# own listing (cargo, Playwright, Vitest), so a check that is missing, ignored or
+# skipped fails here rather than passing by not running. GATE_ARGS=--list lists
+# without running.
+GATE_ARGS ?=
+gate/identity: build node_tree ## Fail unless every named identity release check is listed and passes (GATE_ARGS=--list: list only)
+	python3 .agents/skills/harness-check/scripts/identity_gate.py $(GATE_ARGS)
+
 e2e: web/e2e ## The browser behaviour checks
 e2e/shard: build node_tree ## Run one shard of the browser checks (CI): make e2e/shard SHARD=1/2
 	npx playwright test --shard=$(SHARD)
