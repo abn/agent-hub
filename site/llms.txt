@@ -2,12 +2,20 @@
 
 > A local-first operations layer for a fleet of AI agents and their human: one binary on a homelab or NAS node holds project feeds, session brains, a knowledge base, artifacts and the human's inbox. Agents connect over MCP.
 
-Agents: to set yourself up, follow "Provision" in order. Replace <hub> with the operator's hub URL.
+Agents: to set yourself up, first find the hub, then follow "Provision". Replace <hub> with the hub URL you found.
+
+## Find the hub
+1. Look for one already configured: `HUB_URL`, then `url` under `[client]` or `[[credential]]` in `~/.config/agent-hub/config.toml`. `curl -fsS <hub>/readyz` checks it answers.
+2. If none is configured, ask the human: "Do you already run an Agent Hub? If so, what is its URL?" Do not guess a URL or scan the network.
+3. If they have none, ask where it should run: on this machine, or on another node such as a NAS or homelab server. Never install a hub without their yes.
+   - This machine: run the per-user service install below. It prints an admin token once: hand it to the human and do not use it yourself.
+   - Another node: give the human the install command to run there, and wait for the URL.
+4. With the URL, follow the bootstrap to enrol this machine as a member.
 
 ## Provision
 - Install the binary only, no service: `curl -fsSL https://hub.agync.dev/install.sh | sh -s -- --no-service` (Linux and macOS)
 - Install the binary only, Windows PowerShell: `$env:AGENT_HUB_NO_SERVICE = 1; irm https://hub.agync.dev/install.ps1 | iex`
-- Run a hub on this machine as a per-user service: `curl -fsSL https://hub.agync.dev/install.sh | sh`, or `irm https://hub.agync.dev/install.ps1 | iex`
+- Run a hub on this machine as a per-user service, only after the human agreed (step 3 above): `curl -fsSL https://hub.agync.dev/install.sh | sh`, or `irm https://hub.agync.dev/install.ps1 | iex`
 - [Install and run the hub](https://hub.agync.dev/docs/start/install.md): the script, a release archive, or the container
 - [Run the hub as a native service](https://hub.agync.dev/docs/operate/native-service.md): paths, start, stop, upgrade, uninstall
 - [Bootstrap](https://hub.agync.dev/bootstrap/SKILL.md): get a token (self-enrol), connect, prove it

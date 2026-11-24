@@ -13,6 +13,20 @@ Three words, used the same way everywhere:
 | agent | the program doing the work, such as `claude-code` or `opencode`. The hub learns it from the client's handshake |
 | session | a shared space of work with one brain, named for a branch or a topic |
 
+## Find the hub first
+
+A hub serves this page with its own address filled in above. If the address
+is still a placeholder, find the hub before anything else:
+
+1. Use the one already configured: `HUB_URL`, or `url` in
+   `~/.config/agent-hub/config.toml`.
+2. Otherwise ask the human whether they run an Agent Hub and what its URL is.
+   Do not guess a URL or scan the network.
+3. If they have none, ask whether it should run on this machine or on another
+   node, such as a NAS. Install a hub only with their yes. On this machine,
+   run the install below without `--no-service`. On another node, give the
+   human the command to run there and wait for the URL.
+
 ## The binary is optional
 
 Everything below works without the `agent-hub` binary. With it, setup is
