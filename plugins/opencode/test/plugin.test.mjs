@@ -229,8 +229,8 @@ describe("the plugin against a fake hub", () => {
     expect(ctx.prompts).toEqual([]);
     const hook = { sessionID: "ses_root", system: [] };
     ctx.hooks.context(hook);
-    expect(hook.system[0].text).toContain("- [signal] t evt_8 (proj, evt_8)");
-    expect(hook.system[0].text).toContain("- [answer] t evt_9 (proj, evt_9)");
+    expect(hook.system[0].text).toMatch(/- \[\w+\] t evt_8 \(proj, http:\/\/[^/ ]+\/id\/evt_8\)/);
+    expect(hook.system[0].text).toMatch(/- \[\w+\] t evt_9 \(proj, http:\/\/[^/ ]+\/id\/evt_9\)/);
     ctx.emit(event("session.compaction.ended", "ses_root"));
     await until(() => ctx.entries.length === 2);
     expect(ctx.entries[1].value).toBe(ctx.entries[0].value);
@@ -354,7 +354,7 @@ describe("the plugin against a fake hub", () => {
       expect(ctx.prompts).toEqual([]);
       const texts = call(ctx);
       expect(texts).toHaveLength(1);
-      expect(texts[0]).toContain("- [answer] t evt_1 (proj, evt_1)");
+      expect(texts[0]).toMatch(/- \[\w+\] t evt_1 \(proj, http:\/\/[^/ ]+\/id\/evt_1\)/);
     });
 
     it("gives a child session the subagent instruction through the context hook", async () => {
@@ -388,7 +388,7 @@ describe("the plugin against a fake hub", () => {
       await new Promise((r) => setTimeout(r, 30));
       expect(ctx.prompts).toEqual([]);
       const texts = call(ctx, "ses_new");
-      expect(texts[0]).toContain("- [answer] t evt_1 (proj, evt_1)");
+      expect(texts[0]).toMatch(/- \[\w+\] t evt_1 \(proj, http:\/\/[^/ ]+\/id\/evt_1\)/);
     });
 
     it("falls back to the context hook when the entry put is refused", async () => {
@@ -416,7 +416,7 @@ describe("the plugin against a fake hub", () => {
       fake.pending.push(item("evt_1", true));
       await until(() => fake.count("notify_wait") >= 1);
       await new Promise((r) => setTimeout(r, 30));
-      expect(call(ctx)[0]).toContain("- [answer] t evt_1 (proj, evt_1)");
+      expect(call(ctx)[0]).toMatch(/- \[\w+\] t evt_1 \(proj, http:\/\/[^/ ]+\/id\/evt_1\)/);
     });
   });
 
@@ -436,7 +436,7 @@ describe("the plugin against a fake hub", () => {
     fake.pending.push(item("evt_1", true));
     await until(() => ctx.prompts.length === 1);
     expect(ctx.prompts[0].sessionID).toBe("ses_root");
-    expect(ctx.prompts[0].text).toContain("- [answer] t evt_1 (proj, evt_1)");
+    expect(ctx.prompts[0].text).toMatch(/- \[\w+\] t evt_1 \(proj, http:\/\/[^/ ]+\/id\/evt_1\)/);
   });
 
   it("queues for the context hook while the session is busy, with no network call", async () => {
@@ -454,7 +454,7 @@ describe("the plugin against a fake hub", () => {
     const before = fake.requests.length;
     const hook = { sessionID: "ses_root", system: [] };
     ctx.hooks.context(hook);
-    expect(hook.system[0].text).toContain("- [answer] t evt_1 (proj, evt_1)");
+    expect(hook.system[0].text).toMatch(/- \[\w+\] t evt_1 \(proj, http:\/\/[^/ ]+\/id\/evt_1\)/);
     expect(fake.requests.length).toBe(before);
 
     const again = { sessionID: "ses_root", system: [] };
@@ -489,7 +489,7 @@ describe("the plugin against a fake hub", () => {
     expect(fake.count("notify_wait")).toBe(base + 1);
     const hook = { sessionID: "ses_root", system: [] };
     ctx.hooks.context(hook);
-    expect(hook.system[0].text).toContain("- [signal] t evt_1 (proj, evt_1)");
+    expect(hook.system[0].text).toMatch(/- \[\w+\] t evt_1 \(proj, http:\/\/[^/ ]+\/id\/evt_1\)/);
   });
 
   it("makes no hub call from the prompt hook when nothing is known to be pending", async () => {
@@ -632,7 +632,7 @@ describe("the plugin against a fake hub", () => {
     expect(ctx.prompts).toEqual([]);
     const hook = { sessionID: "ses_root", system: [] };
     ctx.hooks.context(hook);
-    expect(hook.system[0].text).toContain("- [answer] t evt_1 (proj, evt_1)");
+    expect(hook.system[0].text).toMatch(/- \[\w+\] t evt_1 \(proj, http:\/\/[^/ ]+\/id\/evt_1\)/);
   });
 
   it("does not count a busy session's drain as a wake", async () => {

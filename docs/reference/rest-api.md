@@ -22,8 +22,10 @@ GET    /healthz
 GET    /readyz
 GET    /metrics
 GET    /bootstrap/SKILL.md
+GET    /id/:id
 
 GET    /api/v1/home
+GET    /api/v1/resolve/:id
 GET    /api/v1/me/pending?session=&limit=&wait=&after=
 GET    /api/v1/feed
 GET    /api/v1/projects
@@ -131,6 +133,41 @@ and a frame navigation carries no bearer token, so the app mints the pass and
 carries it in the frame address; that is the whole reason the pass exists. Agents
 have no MCP tool to create or revoke a link, so their artifact workflow is
 publish, version and protect, and the human shares.
+
+## Resource links
+
+Every artifact, feed event, session and comment has one short link,
+`<hub>/id/<id>`, so a person or an agent can name it without saying what kind
+it is.
+
+`GET /id/:id` needs no token. It answers `302 Found` with a relative
+`Location: ../#/id/:id` and `Cache-Control: no-store`, so a proxy that strips a
+path prefix keeps it. An id outside `[0-9A-Za-z_-]{1,64}` is a `404`. The route
+reads no store, so the redirect says nothing about whether the id exists. The
+app then calls the resolver and replaces its own address with the result.
+
+`GET /api/v1/resolve/:id` takes the same auth as any read. It looks the id up as
+an artifact, a feed event (questions, approvals, signals and answers), a session
+and a comment, in that order, and returns:
+
+```json
+{ "kind": "artifact", "id": "...", "project_id": "...", "route": "#/artifacts/..." }
+```
+
+`kind` is `artifact`, `event`, `session` or `comment`. A comment also carries
+`artifact_id`, or `page` for a knowledge base page comment. `route` is the app's
+hash route, with every path and query part percent-encoded:
+
+| Kind | Route |
+|---|---|
+| artifact | `#/artifacts/{id}` |
+| event | `#/projects/{project}/feed?event={id}` |
+| session | `#/projects/{project}/sessions?session={id}` |
+| artifact comment | `#/artifacts/{artifact_id}?comment={id}` |
+| page comment | `#/projects/{project}/wiki?page={path}&comment={id}` |
+
+Read access applies as on the resource's own route: an id in a confidential
+project without your grant answers the same `404` problem as a missing id.
 
 ## Probes
 

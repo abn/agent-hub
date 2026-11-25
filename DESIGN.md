@@ -689,7 +689,12 @@ structure, not to line length.
   request that never reached the hub reads "Could not reach the hub", not the
   browser's wording. A refusal to authenticate still routes to Connect. An
   artifact the hub does not hold is said in the Artifacts shell with a way back
-  to Artifacts, and an address no screen answers to is replaced by Now's own.
+  to Artifacts, and an address no screen answers to is replaced by Now's own. The short address `#/id/<id>`
+  shows a quiet **Opening the link.** status in the stage while the hub says
+  what the id names, then replaces itself with that route. An id the hub does
+  not resolve, or may not show the reader, reads the same sentence, "Nothing is
+  at this address.", with one **Go to Now** link, and says nothing about
+  whether the id exists elsewhere.
 - **Filter field.** Every index over about eight rows carries a `--ctl`, 32px,
   `type="search"` field in its control row, naming the list it
   filters ("Filter artifacts"). It filters in place and does not navigate.

@@ -143,6 +143,11 @@ export const ERROR_COPY = {
     title: "This artifact is not on this hub.",
     link: "Back to Artifacts",
   },
+  resourceGone: {
+    screen: "not found",
+    title: "Nothing is at this address.",
+    link: "Go to Now",
+  },
   artifactUnlisted: {
     screen: "artifacts",
     title: "This artifact is on this hub, but no project lists it.",

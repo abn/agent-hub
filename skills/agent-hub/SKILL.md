@@ -16,6 +16,11 @@ served by the hub and advertised by the MCP server, so it always matches the
 version you are talking to. Read [bootstrap](bootstrap.md) if you have no
 connection yet, or fetch it at `GET <base_url>/bootstrap/SKILL.md`.
 
+**Name a hub resource by its URL, not its bare id.** When output (chat, a PR,
+a commit, an inbox item, artifact text) mentions an artifact, event, session,
+comment or knowledge base page, give the link: the `url` a tool returned, or
+`<hub>/id/<id>` when you only hold the id. See `references/urls.md`.
+
 ## The mental model
 
 Three words say who is who, and the split between the five things below is
@@ -160,6 +165,8 @@ The depth lives in `references/`, read on demand:
 - `references/notifications.md` the notification trailer on tool results.
 - `references/subscriptions.md` standing subscriptions, delivered through the
   trailer.
+- `references/urls.md` how to build a URL for an artifact, event, session,
+  comment, knowledge base page or project.
 - `references/errors.md` pagination, error codes, credential and session
   reasons, and idempotency.
 

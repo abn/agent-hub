@@ -120,14 +120,30 @@ pub fn sanitize(text: &str) -> String {
     out
 }
 
+/// The URL that opens a hub resource by id: `<hub>/id/<id>`.
+pub fn resource_url(hub_url: &str, id: &str) -> String {
+    format!(
+        "{}/id/{}",
+        sanitize(hub_url).trim_end_matches('/'),
+        sanitize(id)
+    )
+}
+
 /// One waiting item as a line.
 pub fn notice_line(item: &Item) -> String {
+    notice_line_at(item, None)
+}
+
+/// One waiting item as a line. With a hub URL the id is spelled as the
+/// resource's URL.
+pub fn notice_line_at(item: &Item, hub_url: Option<&str>) -> String {
+    let reference = hub_url.map_or_else(|| sanitize(&item.id), |hub| resource_url(hub, &item.id));
     format!(
         "- [{}] {} ({}, {})",
         sanitize(&item.kind),
         clip(&sanitize(&item.title), TITLE_MAX),
         sanitize(&item.project),
-        sanitize(&item.id)
+        reference
     )
 }
 
@@ -162,7 +178,13 @@ pub struct Notices {
 }
 
 /// Decide whether `items` wake an idle agent, and what a wake prints.
-pub fn notices(mode: WakeMode, now: u64, last_wake_at: Option<u64>, items: &[Item]) -> Notices {
+pub fn notices(
+    mode: WakeMode,
+    now: u64,
+    last_wake_at: Option<u64>,
+    items: &[Item],
+    hub_url: Option<&str>,
+) -> Notices {
     let eligible = match mode {
         WakeMode::All => !items.is_empty(),
         WakeMode::Direct => items.iter().any(|item| item.direct),
@@ -171,10 +193,13 @@ pub fn notices(mode: WakeMode, now: u64, last_wake_at: Option<u64>, items: &[Ite
     let cooled = last_wake_at.is_none_or(|last| now.saturating_sub(last) >= WAKE_COOLDOWN_SECONDS);
     let wake = eligible && cooled;
     Notices {
-        lines: items.iter().map(notice_line).collect(),
+        lines: items
+            .iter()
+            .map(|item| notice_line_at(item, hub_url))
+            .collect(),
         wake,
         watch_lines: if wake {
-            direct_first(items)
+            direct_first(items, hub_url)
         } else {
             Vec::new()
         },
@@ -182,12 +207,12 @@ pub fn notices(mode: WakeMode, now: u64, last_wake_at: Option<u64>, items: &[Ite
 }
 
 /// Every item as a line, direct items first and each group in the order given.
-pub fn direct_first(items: &[Item]) -> Vec<String> {
+pub fn direct_first(items: &[Item], hub_url: Option<&str>) -> Vec<String> {
     items
         .iter()
         .filter(|item| item.direct)
         .chain(items.iter().filter(|item| !item.direct))
-        .map(notice_line)
+        .map(|item| notice_line_at(item, hub_url))
         .collect()
 }
 
@@ -227,6 +252,9 @@ pub struct ContextInput {
     pub kb_index: Vec<String>,
     #[serde(default)]
     pub pending: Vec<String>,
+    /// The hub's base URL, for the line that asks for resources by URL.
+    #[serde(default)]
+    pub hub_url: Option<String>,
 }
 
 fn plugin_adds_session() -> bool {
@@ -276,6 +304,14 @@ fn bind_line(input: &ContextInput) -> String {
     )
 }
 
+fn url_line(input: &ContextInput) -> Option<String> {
+    let hub = input.hub_url.as_deref().filter(|hub| !hub.is_empty())?;
+    Some(format!(
+        "Refer to hub resources by URL, {}/id/<id>, never a bare id.",
+        sanitize(hub).trim_end_matches('/')
+    ))
+}
+
 /// Render the full block, removing whole lines from the lowest-priority group
 /// until it fits [`BLOCK_CAP`].
 pub fn context_block(input: &ContextInput) -> Block {
@@ -283,6 +319,7 @@ pub fn context_block(input: &ContextInput) -> Block {
     head.extend(input.context_lines.iter().map(|line| sanitize(line)));
     head.push(bind_line(input));
     head.push("Do not call session_brief; this block is the brief.".to_string());
+    head.extend(url_line(input));
 
     let mut brief = cut(&input.brief, BRIEF_MAX);
     let mut anchor = input
@@ -355,6 +392,7 @@ pub fn context_block(input: &ContextInput) -> Block {
 /// lines, then whatever is waiting.
 pub fn pointer_block(input: &ContextInput) -> String {
     let mut body = vec![header_line(input), bind_line(input)];
+    body.extend(url_line(input));
     let pending = cut(&input.pending, usize::MAX);
     if !pending.is_empty() {
         body.push("Pending:".to_string());

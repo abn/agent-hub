@@ -41,7 +41,7 @@ import { moreScreen } from "./more.mjs";
 import { savePrefs } from "./prefs.mjs";
 import { projectFromHash, projectScreen } from "./project.mjs";
 import { projectSettingsScreen } from "./project-settings.mjs";
-import { render, setScreens } from "./router.mjs";
+import { render, resourceRoute, setScreens } from "./router.mjs";
 import { searchScreen } from "./search.mjs";
 import { endSession, pruneSession, sessionInProject } from "./sessions.mjs";
 import { deleteProject, enableNotifications, settingsScreen, signOut } from "./settings.mjs";
@@ -96,6 +96,8 @@ setScreens({
   more: (params, gen) => moreScreen(gen),
   access: (params, gen) => accessScreen(gen),
   connect: (params, gen) => connectScreen(params, gen),
+  // `#/id/<id>` is the short address for any resource; the hub names its route.
+  id: (params, gen, path) => resourceRoute(path, gen),
 });
 
 // What a failed write says. The detail is the hub's own; the sentence around

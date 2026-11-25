@@ -25,6 +25,12 @@
 | `enrol` | Offered only to a connection with no token or a pending one, with `whoami`. Asks the human to let this machine in as a member and returns a pending token to store. Approval may take hours. |
 | `whoami`, `version` | Identity and connectivity checks. `whoami` returns the hub URL, your member, your agent, your session, the default project, a suggested session name and your personal space. |
 
+A tool that creates or returns a resource carries a `url` string beside its id
+fields: `artifact_publish`, `artifact_update`, `artifact_draft`, `artifact_get`,
+`question_post`, `answer_post` (the question's URL), `signal_append`,
+`comment_post`, `session_start`, `session_resume` and `brain_promote` (the knowledge base
+page). Quote it instead of the bare id; see `urls.md`.
+
 Every successful tool result may carry a `notifications` member with a
 `pending` list of what needs your attention: an answer to your question or a
 decision on your approval (`source: "attention"`), or an event matching a
@@ -45,7 +51,7 @@ for optional:
 ```
 session := "name" | {name, project_id?} | {session_id}
 session_start(project_id, session_name, from?, exclusive?)
-      -> {session_id, project_id, session_name, status, resumed,
+      -> {session_id, url, project_id, session_name, status, resumed,
           namespaces, recovery_path, handoff, anchor, brain_bytes, pickup}
       pickup := fork details {mode, from_session_id, from_session_name, handoff,
                 source_active} on a new fork, else null
@@ -68,7 +74,7 @@ session_brief(project_id)
 session_anchor(phase, summary, next_steps, source_ids?, session, idempotency_key?)
       -> {anchor, recovery_path, recovery_written}
 session_resume(session)
-      -> {session_id, anchor|null, scores, events, next_since, recovery_path,
+      -> {session_id, url, anchor|null, scores, events, next_since, recovery_path,
           truncated}
 brain_get(path, session?, store?, project_id?, version?)
       with version -> {path, store, content, version, size_bytes, current, at, actor}
@@ -77,7 +83,7 @@ brain_list(path?, session?, store?, project_id?)
                                          -> entries: [{path, type: key|file|dir, size_bytes}]
 brain_delete(path, store, session?, project_id?, if_version?)
 brain_promote(from_path, to_path, session?, project_id?, type?, title?, description?, tags?, if_version?)
-                                         -> {ok, path, version, lint[]}
+                                         -> {ok, path, url, version, lint[]}
 brain_history(path, store?, session?, project_id?, before?, limit?)
       -> {path, current_version, versions: [{id, op, actor, at, version,
           size_bytes, summary, kept, current}], total, next_before, truncated}

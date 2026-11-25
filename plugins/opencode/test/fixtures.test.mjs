@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { briefLines } from "../bundle.mjs";
 import { contextBlock, notices } from "../format.mjs";
 import { resume, startNew } from "../child.mjs";
 import { HubError } from "../hub.mjs";
@@ -30,6 +31,16 @@ describe("notice fixtures", () => {
   for (const fixture of cases) {
     it(fixture.name, () => {
       expect(notices(fixture.input)).toEqual(fixture.expected);
+    });
+  }
+});
+
+describe("brief fixtures", () => {
+  const cases = family("brief");
+  it("finds the family", () => expect(cases.length).toBeGreaterThan(0));
+  for (const fixture of cases) {
+    it(fixture.name, () => {
+      expect({ lines: briefLines(fixture.input.brief, fixture.input.hub_url) }).toEqual(fixture.expected);
     });
   }
 });

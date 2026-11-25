@@ -14,6 +14,7 @@ import {
   commentsToggle,
   openCommentsDrawer,
   openCompose,
+  openLinkedThread,
   renderDesktopCards,
   startComments,
   openThreadsOn,
@@ -382,6 +383,16 @@ export function wireArtifactStage(root, id, info) {
     renderDesktopCards();
   } else if (aside) {
     aside.hidden = true;
+  }
+  // A link that names a comment opens its thread, once the comments are in.
+  const linked = new URLSearchParams(location.hash.split("?")[1] || "").get("comment");
+  if (linked) {
+    openLinkedThread(linked, {
+      beside: () => asideAvailable(aside),
+      reveal: () => {
+        if (aside.hidden && commentsBtn) toggleAside(commentsBtn);
+      },
+    }).catch(() => {});
   }
   if (commentsBtn) {
     const threads = commentsBtn.dataset.threads === "yes";
@@ -1170,9 +1181,10 @@ function buildShareSheet(id, current, shown, moreBtn) {
 
 // The address an artifact is read at: its project's Artifacts segment with it
 // selected, and the version when the reader asked for one.
-export function artifactHref(projectId, id, version = null) {
+export function artifactHref(projectId, id, version = null, comment = null) {
   const query = new URLSearchParams({ artifact: id });
   if (version) query.set("version", String(version));
+  if (comment) query.set("comment", String(comment));
   return `#/projects/${encodeURIComponent(projectId)}/artifacts?${query}`;
 }
 
@@ -1239,5 +1251,5 @@ export async function artifactRoute(params, gen, path) {
     notOnHub(gen, ERROR_COPY.artifactUnlisted);
     return;
   }
-  location.replace(artifactHref(project, id, params.get("version")));
+  location.replace(artifactHref(project, id, params.get("version"), params.get("comment")));
 }

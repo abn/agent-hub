@@ -1,12 +1,13 @@
 // The hash router. It owns which screen is current, the nav marking, and the
 // one place a screen's failure becomes an error state inside the shell.
 
+import { api } from "./api.mjs";
 import { primeMembers } from "./author.mjs";
 import { beginRender, main, paint, stale } from "./dom.mjs";
 import { ERROR_COPY, errorDetail, errorShellHTML } from "./empty.mjs";
 import { refreshBadge } from "./events.mjs";
 import { applyPrefs, prefs } from "./prefs.mjs";
-import { installShellLayout, resetScrollCollapse } from "./shell-layout.mjs";
+import { installShellLayout, resetScrollCollapse, shellHTML, shellStageHead } from "./shell-layout.mjs";
 
 // The screen table, registered by the entry point. Keeping it out of this
 // module is what lets a screen ask for a render without an import cycle.
@@ -112,6 +113,7 @@ const TITLES = {
   more: "More",
   access: "Access",
   connect: "Connect",
+  id: "Opening",
 };
 
 function failedTitle(screen, path) {
@@ -212,4 +214,52 @@ export async function render() {
       main.focus({ preventScroll: true });
     }
   }
+}
+
+// `#/id/<id>` is the short address an agent hands over for a hub resource. The
+// hub says what the id names and where it is read; this screen asks, then
+// replaces itself with that route so Back leaves the link rather than landing
+// on a hop that forwards again.
+const OPENING = shellHTML({
+  noIndex: true,
+  segment: "opening",
+  stageHead: shellStageHead("Opening", ""),
+  stageControls: `<div class="shell-controls"></div>`,
+  stageBody: `<div class="shell-pad"><p class="empty" role="status">Opening the link.</p></div>`,
+});
+
+// Only a route inside the app is followed, and never this screen again.
+const isRoute = (route) => typeof route === "string" && route.startsWith("#/") && !route.startsWith("#/id/");
+
+export async function resourceRoute(path, gen) {
+  let id = "";
+  try {
+    id = decodeURIComponent((path || "").split("/")[2] || "");
+  } catch {}
+  if (!id) {
+    location.replace("#/home");
+    return;
+  }
+  paint(gen, OPENING);
+  if (stale(gen)) return;
+  installShellLayout(main);
+  let found;
+  try {
+    found = await api(`/api/v1/resolve/${encodeURIComponent(id)}`);
+  } catch (error) {
+    // The same sentence for a missing id and one the reader may not read, so
+    // the page says nothing about whether the id exists elsewhere. Any other
+    // failure is the router's: Connect for a refusal, Retry for the rest.
+    if (stale(gen) || error.status !== 404) throw error;
+    paint(gen, errorShellHTML("Not found", ERROR_COPY.resourceGone, { where: { href: "#/home" } }));
+    if (!stale(gen)) installShellLayout(main);
+    return;
+  }
+  if (stale(gen)) return;
+  if (!isRoute(found?.route)) {
+    paint(gen, errorShellHTML("Not found", ERROR_COPY.resourceGone, { where: { href: "#/home" } }));
+    if (!stale(gen)) installShellLayout(main);
+    return;
+  }
+  location.replace(found.route);
 }

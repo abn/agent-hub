@@ -277,6 +277,10 @@ const SKILL_FILES: &[SkillFile] = &[
         rel: "references/tools.md",
         body: include_str!("../../skills/agent-hub/references/tools.md"),
     },
+    SkillFile {
+        rel: "references/urls.md",
+        body: include_str!("../../skills/agent-hub/references/urls.md"),
+    },
 ];
 
 /// The skill namespace. Its final segment is the skill's `name`, as the

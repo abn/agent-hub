@@ -19,6 +19,8 @@ use crate::store::artifacts;
 use crate::store::comments::{self, comment_view, parse_anchor};
 use crate::store::identity;
 
+use crate::http::origin::resource_url;
+
 use super::brain::with_session;
 use super::session_arg::{Mode, SessionArg};
 use super::{HubServer, to_error_data};
@@ -26,7 +28,7 @@ use super::{HubServer, to_error_data};
 #[tool_router(router = comments_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Post a comment on an artifact and return it with a delete token. Comments are flat: there is no parent or reply id. The PWA groups comments into one displayed thread when their anchors share a quote on the same version (text anchors) or when both are point anchors on the same version, so reply by posting with that same anchor and version. Unanchored comments never group."
+        description = "Post a comment on an artifact and return it with a delete token and its url. Comments are flat: there is no parent or reply id. The PWA groups comments into one displayed thread when their anchors share a quote on the same version (text anchors) or when both are point anchors on the same version, so reply by posting with that same anchor and version. Unanchored comments never group."
     )]
     async fn comment_post(
         &self,
@@ -86,7 +88,11 @@ impl HubServer {
         }
 
         self.state.notify();
-        let mut payload = json!({ "comment": comment_view(&comment) });
+        let url = resource_url(
+            &super::guide_origin(&self.state.config, &context),
+            &comment.id,
+        );
+        let mut payload = json!({ "comment": comment_view(&comment), "url": url });
         if !replayed {
             payload["delete_token"] = Value::String(plaintext);
         }

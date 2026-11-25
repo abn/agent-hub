@@ -1624,7 +1624,7 @@ async fn promote_writes_identical_bytes_over_rest_and_mcp_and_signals_once() {
         let result = agent.ok("brain_promote", over_mcp).await;
         assert_eq!(result["path"], format!("/fs/mcp/{index}.md"));
         let keys: Vec<&String> = result.as_object().expect("object").keys().collect();
-        assert_eq!(keys, ["lint", "ok", "path", "version"]);
+        assert_eq!(keys, ["lint", "ok", "path", "url", "version"]);
 
         let mut over_rest = fields.clone();
         over_rest["from_session_id"] = json!(session_id);

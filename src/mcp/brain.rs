@@ -24,6 +24,7 @@ use serde_json::json;
 use crate::brain::shared::{BrainOp, SessionWrite};
 use crate::brain::{self, Brain, RECOVERY_PATH, knowledge};
 use crate::error::{Error, Result, SessionReason};
+use crate::http::origin::{kb_page_url, resource_url};
 use crate::limits::{HANDOFF_SUMMARY_CHARS, SESSION_LIST_LIMIT_MAX};
 use crate::policy::{self, Access};
 use crate::principal::Principal;
@@ -37,7 +38,7 @@ use super::{HubServer, SessionOnlyParams, to_error_data};
 #[tool_router(router = brain_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Start or resume a session by project and name, and join it. A session is shared: any agent that starts the same name joins the same session and sees the same brain, and every call that names it afterwards joins it too. A name the project has not seen is created; one that ended is reopened; a child is named <parent>/<task> and needs a live parent. Pass exclusive to refuse a name that already exists (a conflict that names the session). Pass from to fork another session's brain into the new name. Pass session on later calls as {\"project_id\", \"name\"} or {\"session_id\"}."
+        description = "Start or resume a session by project and name, and join it. A session is shared: any agent that starts the same name joins the same session and sees the same brain, and every call that names it afterwards joins it too. A name the project has not seen is created; one that ended is reopened; a child is named <parent>/<task> and needs a live parent. Pass exclusive to refuse a name that already exists (a conflict that names the session). Pass from to fork another session's brain into the new name. Pass session on later calls as {\"project_id\", \"name\"} or {\"session_id\"}. The result carries the session's url; refer to it by that url, not the bare id."
     )]
     async fn session_start(
         &self,
@@ -105,8 +106,13 @@ impl HubServer {
         let anchor = anchors::latest_anchor_view(&self.state.db, &session.id)
             .await
             .map_err(to_error_data)?;
+        let url = resource_url(
+            &super::guide_origin(&self.state.config, &context),
+            &session.id,
+        );
         Ok(CallToolResult::structured(json!({
             "session_id": session.id,
+            "url": url,
             "project_id": session.project_id,
             "session_name": session.session_name,
             "agent": principal.agent(),
@@ -224,7 +230,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Read a session's resume view: its latest anchor, the scores that cite it, the session events after the anchor oldest first, the recovery path and a cursor to page on. Name the session in `session`. A session with no anchor returns the empty view, and its handoff note and full log still reach the caller through session_start and feed_read."
+        description = "Read a session's resume view: its latest anchor, the scores that cite it, the session events after the anchor oldest first, the recovery path and a cursor to page on. Name the session in `session`. A session with no anchor returns the empty view, and its handoff note and full log still reach the caller through session_start and feed_read. The result carries the session's url."
     )]
     async fn session_resume(
         &self,
@@ -239,7 +245,17 @@ impl HubServer {
         let resumed = anchors::resume(&self.state.db, &session, crate::limits::FEED_LIMIT_DEFAULT)
             .await
             .map_err(to_error_data)?;
-        Ok(CallToolResult::structured(json!(resumed)))
+        let mut view = json!(resumed);
+        if let Some(view) = view.as_object_mut() {
+            view.insert(
+                "url".to_string(),
+                json!(resource_url(
+                    &super::guide_origin(&self.state.config, &context),
+                    &session.id
+                )),
+            );
+        }
+        Ok(CallToolResult::structured(view))
     }
 
     #[tool(
@@ -929,7 +945,7 @@ impl HubServer {
     }
 
     #[tool(
-        description = "Promote an entry from a session brain into the project knowledge base, adding a sources citation and frontmatter. Name the source session in `session`. Leaves the session brain entry untouched. Pass if_version to write only while nothing changed, or \"absent\" to create a page that does not exist yet."
+        description = "Promote an entry from a session brain into the project knowledge base, adding a sources citation and frontmatter. Name the source session in `session`. Leaves the session brain entry untouched. The result carries the page's url. Pass if_version to write only while nothing changed, or \"absent\" to create a page that does not exist yet."
     )]
     async fn brain_promote(
         &self,
@@ -976,9 +992,15 @@ impl HubServer {
         .await
         .map_err(to_error_data)?;
 
+        let url = kb_page_url(
+            &super::guide_origin(&self.state.config, &context),
+            &project_id,
+            &written.path,
+        );
         Ok(CallToolResult::structured(json!({
             "ok": true,
             "path": written.path,
+            "url": url,
             "version": written.version,
             "lint": written.lint,
         })))

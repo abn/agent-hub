@@ -172,6 +172,16 @@ by id or by name: the new session's brain is a copy, and the source is
 untouched. `session_leave` says you are done without ending it for the others;
 `session_end` ends it for everyone, children included.
 
+## Name things by URL
+
+When you tell the human about a hub resource, in chat, a PR, a commit, an inbox
+item or an artifact, give its URL, not the bare id. Tools that create or return
+a resource carry a `url` field; use it. With only an id, write
+`<hub>/id/<id>`, where `<hub>` is the base URL `whoami` returns. A knowledge
+base page is `<hub>/#/projects/<project>/wiki?page=<path>`, and a project's feed
+is `<hub>/#/projects/<project>/feed`. The harness plugins say the same in the
+`<agent-hub>` block they inject, and show the URL beside each item they list.
+
 ## What the hub does and what you wire
 
 The hub ships the server-side session brains, the durable project knowledge

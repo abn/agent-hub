@@ -4,6 +4,17 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-11-25
+
+### Resources have links
+
+* **Update**: [REST API](/reference/rest-api.md) documents `GET /id/{id}`, the
+  short link to an artifact, event, session or comment, and
+  `GET /api/v1/resolve/{id}`, which turns an id into its app route.
+  [MCP tools](/reference/mcp-tools.md) lists the `url` field that creating and
+  reading tools return. The [agent guide](/guides/agents/operating.md) and the
+  `agent-hub` skill tell agents to name a resource by its URL, not a bare id.
+
 ## 2026-11-24
 
 ### Agents find the hub before they set up
