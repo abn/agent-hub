@@ -30,6 +30,37 @@ pub fn request_origin(config: &Config, headers: &HeaderMap) -> String {
     format!("{scheme}://{host}")
 }
 
+/// The short URL of a hub resource: `{origin}/id/{id}`.
+///
+/// The one place a resource URL is built. Ids are ULIDs, so there is nothing
+/// to escape; the id is still encoded so a stray character cannot break out of
+/// the path.
+pub fn resource_url(origin: &str, id: &str) -> String {
+    format!("{origin}/id/{}", encode(id))
+}
+
+/// The URL of a knowledge base page: `{origin}/#/projects/{project}/wiki?page={path}`.
+pub fn kb_page_url(origin: &str, project_id: &str, path: &str) -> String {
+    format!(
+        "{origin}/#/projects/{}/wiki?page={}",
+        encode(project_id),
+        encode(path)
+    )
+}
+
+/// What `encodeURIComponent` leaves alone, so a URL built here matches the one
+/// the interface builds.
+const COMPONENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'_')
+    .remove(b'.')
+    .remove(b'~');
+
+/// Percent-encode one path or query component.
+pub fn encode(component: &str) -> String {
+    percent_encoding::utf8_percent_encode(component, COMPONENT).to_string()
+}
+
 /// The authority to use when no request host is available. An unspecified
 /// bind such as `0.0.0.0:8080` is not a usable URL, so it becomes loopback on
 /// the same port.

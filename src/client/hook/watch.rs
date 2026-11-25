@@ -237,7 +237,13 @@ async fn hold(
 
         let now_ms = now_millis();
         let last_wake = store.read().last_wake_ms.map(|ms| ms / 1000);
-        let decision = notices(mode, now_ms / 1000, last_wake, &peek.items);
+        let decision = notices(
+            mode,
+            now_ms / 1000,
+            last_wake,
+            &peek.items,
+            Some(hub.settings().url.as_str()),
+        );
         if !decision.wake {
             cursor = peek.cursor.or(cursor);
             continue;
@@ -259,7 +265,7 @@ async fn hold(
             Ok(items) => {
                 let recorded = store.update_existing(|state| state.last_wake_ms = Some(now_ms));
                 return if recorded.is_some() {
-                    Outcome::Wake(direct_first(&items))
+                    Outcome::Wake(direct_first(&items, Some(hub.settings().url.as_str())))
                 } else {
                     Outcome::Quiet
                 };

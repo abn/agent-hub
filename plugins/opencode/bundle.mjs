@@ -1,7 +1,7 @@
 // The session-start bundle: resolve, brief, bind, read the index, subscribe and
 // render the <agent-hub> block.
 
-import { ago, contextBlock } from "./format.mjs";
+import { ago, contextBlock, resourceUrl } from "./format.mjs";
 import { gatherGit, readTopLevelFile, resolveContext } from "./resolve.mjs";
 
 const splitLines = (text) =>
@@ -14,8 +14,9 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const total = (section) => (section?.items?.length ?? 0) + (section?.more ?? 0);
 
-export function briefLines(brief) {
+export function briefLines(brief, hubUrl) {
   if (!brief) return [];
+  const link = (item) => (hubUrl && item.id ? `${resourceUrl(hubUrl, item.id)} ` : "");
   const answers = total(brief.answers);
   const events = total(brief.events);
   const stale = total(brief.stale_pages);
@@ -25,10 +26,10 @@ export function briefLines(brief) {
   if (stale) parts.push(plural(stale, "stale page"));
   const lines = [`Since your last look: ${parts.length ? parts.join(", ") : "nothing new"}.`];
   for (const item of (brief.answers?.items ?? []).slice(0, 3)) {
-    lines.push(`- ${item.kind} ${item.outcome}: ${item.summary ?? item.id}`);
+    lines.push(`- ${item.kind} ${item.outcome}: ${link(item)}${item.summary ?? item.id}`);
   }
   for (const item of (brief.events?.items ?? []).slice(0, 6)) {
-    lines.push(`- [${item.kind}]${item.open ? " open" : ""} ${item.summary ?? item.id}`);
+    lines.push(`- [${item.kind}]${item.open ? " open" : ""} ${link(item)}${item.summary ?? item.id}`);
   }
   return lines;
 }
@@ -99,7 +100,8 @@ export async function startSession({ hub, cwd, env = process.env, now = Date.now
     member,
     agent,
     context_lines: [...notices, ...(resolved.context_line ? resolved.context_line.split("\n") : [])],
-    brief: briefLines(brief),
+    brief: briefLines(brief, hub.url),
+    hub_url: hub.url,
     anchor: anchorView(started.anchor, now),
     handoff: splitLines(started.handoff),
     kb_index: splitLines(index?.content),

@@ -23,7 +23,7 @@ pub mod watch;
 
 use hub::{HOOK_BUDGET, Hub, OFFLINE, reason};
 use input::{Event, Harness, HookInput};
-use render::{ContextInput, Output, notice_block, notice_line, pending_block, pointer_block};
+use render::{ContextInput, Output, notice_block, notice_line_at, pending_block, pointer_block};
 use state::{Leave, Leaves, State, Store, now_millis};
 
 /// What `agent-hub hook` takes on its command line.
@@ -182,6 +182,7 @@ impl Run<'_> {
             handoff: Vec::new(),
             kb_index: Vec::new(),
             pending,
+            hub_url: self.hub().ok().map(|hub| hub.settings().url.clone()),
         })
     }
 
@@ -559,7 +560,10 @@ async fn peek_and_drain(run: &Run<'_>, session_id: &str) -> Result<Vec<String>, 
     }
     .await;
     match drained {
-        Ok(items) => Ok(items.iter().map(notice_line).collect()),
+        Ok(items) => Ok(items
+            .iter()
+            .map(|item| notice_line_at(item, Some(hub.settings().url.as_str())))
+            .collect()),
         Err(failure) => {
             warn("hook", &describe(&failure));
             Ok(Vec::new())

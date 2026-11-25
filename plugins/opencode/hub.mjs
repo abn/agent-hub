@@ -287,7 +287,7 @@ export function createHub({ url, token: initialToken, fetch: fetchImpl = globalT
     }
   }
 
-  return { rest, peek, projects, callTool, drain, close, setToken, timeouts: limits };
+  return { url: base, rest, peek, projects, callTool, drain, close, setToken, timeouts: limits };
 }
 
 export function normalizeItem(item) {

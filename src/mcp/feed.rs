@@ -20,6 +20,8 @@ use crate::error::Error;
 use crate::policy::{self, Access};
 use crate::store::events::{self, FeedQuery, NewEvent};
 
+use crate::http::origin::resource_url;
+
 use super::brain::with_session;
 use super::session_arg::{Mode, SessionArg};
 use super::{HubServer, to_error_data};
@@ -31,7 +33,7 @@ const SIGNAL_KINDS: &[&str] = &["signal", "finished", "approval", "idea"];
 #[tool_router(router = feed_router, vis = "pub")]
 impl HubServer {
     #[tool(
-        description = "Append an event to a project feed and return its id. kind is one of \"signal\", \"finished\", \"approval\", or \"idea\"; the kinds owned by other surfaces are refused, and `anchor` and `score` are refused here too because they have their own tools (`session_anchor`, and the human's score route). An approval may carry expires_in_seconds (60 to 2592000) and on_expiry (\"approve\" or \"decline\", \"decline\" by default): if no one has decided by then, the hub records that outcome as its own, marked expired. An idea lands in the inbox for triage and carries no question or decision."
+        description = "Append an event to a project feed and return its id and url. kind is one of \"signal\", \"finished\", \"approval\", or \"idea\"; the kinds owned by other surfaces are refused, and `anchor` and `score` are refused here too because they have their own tools (`session_anchor`, and the human's score route). An approval may carry expires_in_seconds (60 to 2592000) and on_expiry (\"approve\" or \"decline\", \"decline\" by default): if no one has decided by then, the hub records that outcome as its own, marked expired. An idea lands in the inbox for triage and carries no question or decision."
     )]
     async fn signal_append(
         &self,
@@ -132,8 +134,12 @@ impl HubServer {
             self.state.notify();
         }
         let event_id = appended.id;
+        let url = resource_url(
+            &super::guide_origin(&self.state.config, &context),
+            &event_id,
+        );
         Ok(CallToolResult::structured(with_session(
-            json!({ "event_id": event_id }),
+            json!({ "event_id": event_id, "url": url }),
             &resolved,
         )))
     }

@@ -21,6 +21,8 @@ use crate::store::events;
 use crate::store::inbox::{self, InboxItem};
 use crate::store::questions::{self, NewQuestion};
 
+use crate::http::origin::resource_url;
+
 use super::brain::with_session;
 use super::session_arg::{Mode, SessionArg};
 use super::{HubServer, to_error_data};
@@ -34,7 +36,8 @@ impl HubServer {
                        expires_in_seconds (60 to 2592000) when you can only wait \
                        so long: if no one has answered by then, the hub closes \
                        the question with no answer, recorded as the hub's and \
-                       marked expired.")]
+                       marked expired. The result carries the \
+                       question's url; refer to it by that url, not the bare id.")]
     async fn question_post(
         &self,
         context: RequestContext<RoleServer>,
@@ -97,11 +100,16 @@ impl HubServer {
         // question id, the event id, and the thread id are the same value.
         let thread_id = event_id.clone();
         let question_id = event_id.clone();
+        let url = resource_url(
+            &super::guide_origin(&self.state.config, &context),
+            &event_id,
+        );
         Ok(CallToolResult::structured(with_session(
             json!({
                 "event_id": event_id,
                 "question_id": question_id,
                 "thread_id": thread_id,
+                "url": url,
             }),
             &resolved,
         )))
@@ -110,7 +118,8 @@ impl HubServer {
     #[tool(
         description = "Answer a question and resolve its inbox item. Pass the \
                        question_id returned by question_post, which is the \
-                       question event's id."
+                       question event's id. The result's url is the \
+                       question's."
     )]
     async fn answer_post(
         &self,
@@ -158,8 +167,12 @@ impl HubServer {
         .map_err(to_error_data)?;
 
         self.state.notify();
+        let url = resource_url(
+            &super::guide_origin(&self.state.config, &context),
+            &params.question_id,
+        );
         Ok(CallToolResult::structured(with_session(
-            json!({ "event_id": event_id }),
+            json!({ "event_id": event_id, "url": url }),
             &resolved,
         )))
     }

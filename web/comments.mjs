@@ -1032,6 +1032,38 @@ export function openCommentSheet(comment) {
   }
 }
 
+// A link names one comment. Its thread is read in the one surface the layout
+// has: the aside beside the document, or the sheet where there is no aside.
+// `beside` asks the layout at the moment of the call and `reveal` opens the
+// aside; the card or sheet then takes focus. A comment the thread no longer
+// holds opens nothing.
+export async function openLinkedThread(commentId, { beside, reveal }) {
+  await loadComments();
+  const wanted = String(commentId);
+  const comment = commentsState.comments.find((c) => String(c.id) === wanted);
+  if (!comment) return;
+  const open = commentsState.comments.filter((c) => !c.done);
+  const thread = commentThreads(open).find(
+    (t) => String(t.root.id) === wanted || t.replies.some((r) => String(r.id) === wanted),
+  );
+  const root = thread ? thread.root : comment;
+  if (!beside()) {
+    openCommentSheet(root);
+    return;
+  }
+  reveal();
+  if (root.done) commentsState.resolvedExpanded = true;
+  commentsState.activeThreadId = root.id;
+  renderDesktopCards();
+  const card = /** @type {HTMLElement | null} */ (
+    document.querySelector(`.hub-comment-card[data-comment-id="${CSS.escape(String(root.id))}"]`)
+  );
+  if (!card) return;
+  card.tabIndex = -1;
+  card.scrollIntoView({ block: "nearest" });
+  card.focus({ preventScroll: true });
+}
+
 export function openCompose(selection) {
   const els = commentsState.elements;
   if (!els) return;

@@ -335,6 +335,7 @@ test.describe("races", () => {
       access: [["access", "#/access", "/api/v1/members"]],
       more: [["more", "#/more", "/api/v1/storage"]],
       connect: [["connect", "#/connect?next=%2Fstorage", "/api/v1/home"]],
+      id: [["short address", `#/id/${encodeURIComponent(artifact)}`, "/api/v1/resolve/"]],
     };
 
     await page.goto(`${hub.baseUrl}/`);

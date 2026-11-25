@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 
 use agent_hub::client::Failure;
+use agent_hub::client::hook::bundle::brief_lines;
 use agent_hub::client::hook::child::{self, Starter};
 use agent_hub::client::hook::input::{self, Event, Harness};
 use agent_hub::client::hook::render::{
@@ -74,6 +75,8 @@ struct NoticeInput {
     now: u64,
     last_wake_at: Option<u64>,
     items: Vec<Item>,
+    #[serde(default)]
+    hub_url: Option<String>,
 }
 
 #[test]
@@ -88,6 +91,7 @@ fn notice_fixtures() {
             input.now,
             input.last_wake_at,
             &input.items,
+            input.hub_url.as_deref(),
         );
         assert_eq!(
             got.lines,
@@ -106,6 +110,22 @@ fn notice_fixtures() {
             serde_json::from_value::<Vec<String>>(case.expected["watch_lines"].clone())
                 .expect("watch_lines"),
             "{}: watch_lines",
+            case.name
+        );
+    }
+}
+
+#[test]
+fn brief_fixtures() {
+    let cases = family("brief");
+    assert!(!cases.is_empty(), "found no brief cases");
+    for case in cases {
+        let hub_url = case.input["hub_url"].as_str();
+        let got = brief_lines(Some(&case.input["brief"]), hub_url);
+        assert_eq!(
+            serde_json::to_value(got).expect("lines"),
+            case.expected["lines"],
+            "{}",
             case.name
         );
     }

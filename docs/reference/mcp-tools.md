@@ -117,6 +117,25 @@ identity.
 | `whoami` | Report `state`, `hub_url`, `member`, `agent`, `kind`, the `session` the call named (or null), `default_project`, a `suggested_session` name, `personal_project`, `admin` and the URL of the agent guide. |
 | `version` | Report the server version, for a connectivity check. |
 
+## Resource URLs
+
+A tool that creates or returns a resource carries a `url` string beside its id
+fields. It is `<hub>/id/<id>`, built from the configured public URL, else the
+origin of the request. REST responses do not carry it.
+
+| Tool | `url` is |
+|---|---|
+| `artifact_publish`, `artifact_update`, `artifact_draft`, `artifact_get` | the artifact |
+| `question_post` | the question |
+| `answer_post` | the question it answers |
+| `signal_append` | the event |
+| `comment_post` | the comment |
+| `session_start`, `session_resume` | the session |
+| `brain_promote` | the knowledge base page it wrote (`<hub>/#/projects/<project>/wiki?page=<path>`) |
+
+Agents quote the `url`, not the bare id. See [Resource links](/reference/rest-api.md#resource-links)
+for how the hub resolves one.
+
 ## Server instructions
 
 The `initialize` result carries a short `instructions` text, and the stdio proxy

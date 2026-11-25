@@ -1,0 +1,36 @@
+{
+  "name": "notice-hub-url",
+  "input": {
+    "hub_wake": "all",
+    "now": 1000000,
+    "last_wake_at": null,
+    "hub_url": "http://hub.example:47318/",
+    "items": [
+      {
+        "id": "evt_01A",
+        "kind": "answer",
+        "title": "Answer to: which port?",
+        "project": "agent-hub",
+        "direct": true
+      },
+      {
+        "id": "evt_01C",
+        "kind": "page",
+        "title": "Page changed: /fs/ops.md",
+        "project": "agent-hub",
+        "direct": false
+      }
+    ]
+  },
+  "expected": {
+    "lines": [
+      "- [answer] Answer to: which port? (agent-hub, http://hub.example:47318/id/evt_01A)",
+      "- [page] Page changed: /fs/ops.md (agent-hub, http://hub.example:47318/id/evt_01C)"
+    ],
+    "wake": true,
+    "watch_lines": [
+      "- [answer] Answer to: which port? (agent-hub, http://hub.example:47318/id/evt_01A)",
+      "- [page] Page changed: /fs/ops.md (agent-hub, http://hub.example:47318/id/evt_01C)"
+    ]
+  }
+}

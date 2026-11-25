@@ -35,7 +35,9 @@ detached), then the directory name of a linked worktree, then
 ## notice-*
 
 Input: `hub_wake` (`direct`, `all`, `never`, an unknown string, or `null` for
-unset), `now` and `last_wake_at` (epoch seconds, or `null`), and `items`, each
+unset), `now` and `last_wake_at` (epoch seconds, or `null`), `hub_url`
+(optional; when set, an item's id is spelled `<hub_url>/id/<id>`, a trailing
+slash dropped) and `items`, each
 `{id, kind, title, project, direct}`. `direct` is computed by the server and is
 plain input here.
 
@@ -53,7 +55,9 @@ false).
 Input: `project_id`, `session_name`, `session_id` (or `null`), `member`,
 `agent`, `plugin_adds_session` (optional, default true), `context_lines`
 (optional, default empty; the resolution lines, placed after the header line),
-`brief`,
+`hub_url` (optional; adds the line `Refer to hub resources by URL,
+<hub_url>/id/<id>, never a bare id.` after the `Do not call session_brief`
+line), `brief`,
 `anchor` (`{phase, age, lines}` or `null`), `handoff`, `kb_index` and `pending`
 (notice lines). Lists are lines before any cap.
 
@@ -66,6 +70,12 @@ Expected: `text`, the whole `<agent-hub>` block without a trailing newline, and
 The header line reads `you are <member> · <agent>`. The bind line is `Pass
 session: {"project_id": ..., "name": ...} on hub calls (the plugin adds it).`,
 or `... on every hub call.` when `plugin_adds_session` is false.
+
+## brief-*
+
+Input: `brief` (the hub's brief) and `hub_url` (optional). Expected: `lines`, the
+brief lines. With `hub_url`, an item that has an id carries `<hub_url>/id/<id>`
+before its text.
 
 ## claude-* and antigravity-*
 

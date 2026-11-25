@@ -16,6 +16,8 @@ use crate::error::Error;
 use crate::policy::{self, Access};
 use crate::store::artifacts::{self, EnvelopeUpdate, LiveOptions, NewArtifact, UpdateOptions};
 
+use crate::http::origin::resource_url;
+
 use super::brain::with_session;
 use super::feed::author_filter;
 use super::session_arg::{Mode, SessionArg};
@@ -33,7 +35,9 @@ fn request_headers(context: &RequestContext<RoleServer>) -> axum::http::HeaderMa
 
 #[tool_router(router = artifacts_router, vis = "pub")]
 impl HubServer {
-    #[tool(description = "Publish an artifact and return its id and version.")]
+    #[tool(
+        description = "Publish an artifact and return its id, version and url. Refer to the artifact by that url, not the bare id."
+    )]
     async fn artifact_publish(
         &self,
         context: RequestContext<RoleServer>,
@@ -84,16 +88,23 @@ impl HubServer {
         .map_err(to_error_data)?;
 
         self.state.notify();
+        let url = resource_url(
+            &super::guide_origin(&self.state.config, &context),
+            &artifact.id,
+        );
         Ok(CallToolResult::structured(with_session(
             json!({
                 "artifact_id": artifact.id,
                 "version": artifact.version,
+                "url": url,
             }),
             &resolved,
         )))
     }
 
-    #[tool(description = "Publish a new version of an existing artifact.")]
+    #[tool(
+        description = "Publish a new version of an existing artifact. Returns the version and the artifact's url."
+    )]
     async fn artifact_update(
         &self,
         context: RequestContext<RoleServer>,
@@ -146,14 +157,18 @@ impl HubServer {
         // Tell a viewer of this artifact that its live version has sealed, so
         // the band clears and the document settles without a reload.
         self.state.notify_live(&artifact.id, artifact.version, 0);
+        let url = resource_url(
+            &super::guide_origin(&self.state.config, &context),
+            &artifact.id,
+        );
         Ok(CallToolResult::structured(with_session(
-            json!({ "version": artifact.version }),
+            json!({ "version": artifact.version, "url": url }),
             &resolved,
         )))
     }
 
     #[tool(
-        description = "Write the version an artifact holds live, forking one when none is held. Use this while you are still working: each call rewrites the same version in place, so the version count grows by one per live session rather than one per write, and the artifact's page always serves the last version you sealed. Returns a viewer_url you can open in your browser to show the human as you work; it carries no credential. A version held by another session is a conflict unless force is set. Publishing with artifact_update seals the live version."
+        description = "Write the version an artifact holds live, forking one when none is held. Use this while you are still working: each call rewrites the same version in place, so the version count grows by one per live session rather than one per write, and the artifact's page always serves the last version you sealed. Returns the artifact's url, and a viewer_url you can open in your browser to show the human as you work; it carries no credential. A version held by another session is a conflict unless force is set. Publishing with artifact_update seals the live version."
     )]
     async fn artifact_draft(
         &self,
@@ -213,6 +228,7 @@ impl HubServer {
                 "version": artifact.version,
                 "live_version": artifact.live_version,
                 "live_rev": artifact.live_rev,
+                "url": resource_url(&origin, &artifact.id),
                 // The page is the artifact's own, so it needs no credential: an
                 // artifact with no active share is already readable at this
                 // address. The live version is named explicitly because the plain
@@ -223,7 +239,9 @@ impl HubServer {
         )))
     }
 
-    #[tool(description = "Read an artifact's metadata and its content, optionally at a version.")]
+    #[tool(
+        description = "Read an artifact's metadata, its url and its content, optionally at a version."
+    )]
     async fn artifact_get(
         &self,
         context: RequestContext<RoleServer>,
@@ -273,7 +291,12 @@ impl HubServer {
             )))
         })?;
 
+        let url = resource_url(
+            &super::guide_origin(&self.state.config, &context),
+            &artifact.id,
+        );
         Ok(CallToolResult::structured(json!({
+            "url": url,
             "actor": artifact.actor,
             "title": artifact.title,
             "description": artifact.description,

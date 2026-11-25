@@ -37,6 +37,7 @@ pub mod metrics;
 pub mod origin;
 pub mod problem;
 pub mod projects;
+pub mod resolve;
 pub mod search;
 pub mod sessions;
 pub mod skill;
@@ -211,6 +212,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/prune/undo/{token}", post(storage::undo))
         .route("/api/v1/backups", post(backup::create))
         .route("/api/v1/search", get(search::search))
+        .route("/id/{id}", get(resolve::redirect))
+        .route("/api/v1/resolve/{id}", get(resolve::resolve))
         .route("/artifacts/{id}", get(artifacts::host))
         .route("/artifacts/{id}/frame", get(artifacts::frame))
         .route("/artifacts/{id}/og.svg", get(artifacts::og_svg))

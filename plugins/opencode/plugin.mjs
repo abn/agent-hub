@@ -156,7 +156,7 @@ export function createPlugin({
       async function deliver(key, items) {
         const session = sessions.get(key);
         if (!session) return;
-        session.queue.push(...items.map(noticeLine));
+        session.queue.push(...items.map((item) => noticeLine(item, hub.url)));
         void flush(session);
       }
 
@@ -411,7 +411,7 @@ export function createPlugin({
           event.system.push({ type: "text", text: session.stable });
           session.stable = null;
         }
-        const lines = [...startup.map(noticeLine), ...session.queue.splice(0)];
+        const lines = [...startup.map((item) => noticeLine(item, hub.url)), ...session.queue.splice(0)];
         if (lines.length) event.system.push({ type: "text", text: pendingText(lines) });
       }
 
@@ -443,7 +443,7 @@ export function createPlugin({
         if (!session.info?.hubSessionId) return;
         try {
           const items = await loop.takePending(session.key, session.info.hubSessionId);
-          session.queue.push(...items.map(noticeLine));
+          session.queue.push(...items.map((item) => noticeLine(item, hub.url)));
         } catch {
           // the items stay pending on the hub for the next prompt
         }

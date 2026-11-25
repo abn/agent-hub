@@ -1,0 +1,29 @@
+{
+  "name": "brief-hub-url",
+  "input": {
+    "hub_url": "http://hub.example:47318",
+    "brief": {
+      "answers": {
+        "items": [
+          {"id": "evt_01A", "kind": "question", "outcome": "answered", "summary": "which port?"}
+        ],
+        "more": 0
+      },
+      "events": {
+        "items": [
+          {"id": "evt_01B", "kind": "comment", "open": true, "summary": "move the docs task to now"},
+          {"kind": "signal", "summary": "build green"}
+        ],
+        "more": 2
+      }
+    }
+  },
+  "expected": {
+    "lines": [
+      "Since your last look: 1 answer, 4 events.",
+      "- question answered: http://hub.example:47318/id/evt_01A which port?",
+      "- [comment] open http://hub.example:47318/id/evt_01B move the docs task to now",
+      "- [signal] build green"
+    ]
+  }
+}

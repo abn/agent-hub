@@ -7,7 +7,9 @@ use serde_json::{Value, json};
 
 use super::hub::{CLOSE_BUDGET, Conn, Hub, NOT_A_MEMBER, STARTUP_BUDGET, dedupe};
 use super::input::Harness;
-use super::render::{Anchor, ContextInput, Item, ago, context_block, notice_line, sanitize};
+use super::render::{
+    Anchor, ContextInput, Item, ago, context_block, notice_line_at, resource_url, sanitize,
+};
 use super::resolve::{ResolveInput, Resolved, gather_git, read_top_level_file, resolve_context};
 use crate::client::Failure;
 
@@ -94,8 +96,17 @@ fn text<'a>(item: &'a Value, key: &str) -> Option<&'a str> {
     item.get(key).and_then(Value::as_str)
 }
 
+/// The item's URL and a space, ahead of its text so a long summary cannot cut
+/// it off; empty without a hub URL or an id.
+fn link(item: &Value, hub_url: Option<&str>) -> String {
+    match (hub_url, text(item, "id")) {
+        (Some(hub), Some(id)) => format!("{} ", resource_url(hub, id)),
+        _ => String::new(),
+    }
+}
+
 /// The brief as a few lines: a count line and the newest items.
-pub fn brief_lines(brief: Option<&Value>) -> Vec<String> {
+pub fn brief_lines(brief: Option<&Value>, hub_url: Option<&str>) -> Vec<String> {
     let Some(brief) = brief else {
         return Vec::new();
     };
@@ -124,7 +135,7 @@ pub fn brief_lines(brief: Option<&Value>) -> Vec<String> {
         let what = text(item, "summary")
             .or_else(|| text(item, "id"))
             .unwrap_or_default();
-        lines.push(format!("- {kind} {outcome}: {what}"));
+        lines.push(format!("- {kind} {outcome}: {}{what}", link(item, hub_url)));
     }
     for item in section_items(brief, "events", 6) {
         let kind = text(item, "kind").unwrap_or_default();
@@ -136,7 +147,7 @@ pub fn brief_lines(brief: Option<&Value>) -> Vec<String> {
         let what = text(item, "summary")
             .or_else(|| text(item, "id"))
             .unwrap_or_default();
-        lines.push(format!("- [{kind}]{open} {what}"));
+        lines.push(format!("- [{kind}]{open} {}{what}", link(item, hub_url)));
     }
     lines
 }
@@ -352,7 +363,7 @@ pub async fn start(request: &Request<'_>) -> Result<Bundle, Failure> {
             .cloned()
             .chain(resolved.context_lines())
             .collect(),
-        brief: brief_lines(gathered.brief.as_ref()),
+        brief: brief_lines(gathered.brief.as_ref(), Some(settings.url.as_str())),
         anchor: anchor_view(started.get("anchor"), request.now_secs),
         handoff,
         kb_index: gathered
@@ -360,7 +371,11 @@ pub async fn start(request: &Request<'_>) -> Result<Bundle, Failure> {
             .as_deref()
             .map(split_lines)
             .unwrap_or_default(),
-        pending: pending.iter().map(notice_line).collect(),
+        pending: pending
+            .iter()
+            .map(|item| notice_line_at(item, Some(settings.url.as_str())))
+            .collect(),
+        hub_url: Some(settings.url.clone()),
     });
     Ok(Bundle::Session(Started {
         block: block.text,

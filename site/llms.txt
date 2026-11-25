@@ -37,6 +37,7 @@ Agents: to set yourself up, first find the hub, then follow "Provision". Replace
 - [sessions](https://hub.agync.dev/skill/agent-hub/references/sessions.md)
 - [subscriptions](https://hub.agync.dev/skill/agent-hub/references/subscriptions.md)
 - [tools](https://hub.agync.dev/skill/agent-hub/references/tools.md)
+- [urls](https://hub.agync.dev/skill/agent-hub/references/urls.md)
 
 ## Docs
 - [Harness plugins](https://hub.agync.dev/docs/guides/agents/plugins.md)

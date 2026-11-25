@@ -119,6 +119,10 @@ const PLUGIN_FILES: &[Embedded] = &[
         "skills/agent-hub/references/tools.md",
         "../../../skills/agent-hub/references/tools.md"
     ),
+    embed!(
+        "skills/agent-hub/references/urls.md",
+        "../../../skills/agent-hub/references/urls.md"
+    ),
 ];
 
 /// Run `agent-hub setup` and return its exit code.

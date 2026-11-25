@@ -25,9 +25,13 @@ export function sanitize(text) {
   return flatten(text).replace(/<(\/?)agent-hub/gi, "<$1agent_hub");
 }
 
-export function noticeLine(item) {
+// The URL that opens a hub resource by id: <hub>/id/<id>.
+export const resourceUrl = (hubUrl, id) => `${sanitize(hubUrl).replace(/\/+$/, "")}/id/${sanitize(id)}`;
+
+export function noticeLine(item, hubUrl) {
   const title = clip(sanitize(item.title), TITLE_MAX);
-  return `- [${sanitize(item.kind)}] ${title} (${sanitize(item.project)}, ${sanitize(item.id)})`;
+  const ref = hubUrl ? resourceUrl(hubUrl, item.id) : sanitize(item.id);
+  return `- [${sanitize(item.kind)}] ${title} (${sanitize(item.project)}, ${ref})`;
 }
 
 // One line about the connection, such as a member waiting for approval.
@@ -40,18 +44,21 @@ export function wakeMode(value) {
 }
 
 // Whether an idle agent is woken by this batch, and what a wake would print.
-export function notices({ hub_wake, now, last_wake_at, items }) {
-  const lines = items.map(noticeLine);
+export function notices({ hub_wake, now, last_wake_at, items, hub_url }) {
+  const lines = items.map((item) => noticeLine(item, hub_url));
   const mode = wakeMode(hub_wake);
   const eligible =
     mode === "all" ? items.length > 0 : mode === "direct" ? items.some((item) => item.direct) : false;
   const cooled = last_wake_at == null || now - last_wake_at >= WAKE_COOLDOWN_SECONDS;
   const wake = eligible && cooled;
   const ordered = [...items.filter((i) => i.direct), ...items.filter((i) => !i.direct)];
-  return { lines, wake, watch_lines: wake ? ordered.map(noticeLine) : [] };
+  return { lines, wake, watch_lines: wake ? ordered.map((item) => noticeLine(item, hub_url)) : [] };
 }
 
 const cut = (lines, max) => lines.slice(0, max).map((line) => clip(sanitize(line), LINE_MAX));
+
+const urlLine = (hubUrl) =>
+  `Refer to hub resources by URL, ${sanitize(hubUrl).replace(/\/+$/, "")}/id/<id>, never a bare id.`;
 
 export function contextBlock(input) {
   const project_id = sanitize(input.project_id);
@@ -69,6 +76,7 @@ export function contextBlock(input) {
     ...contextLines,
     `Pass session: {"project_id": "${project_id}", "name": "${session_name}"} ${how}.`,
     "Do not call session_brief; this block is the brief.",
+    ...(input.hub_url ? [urlLine(input.hub_url)] : []),
   ];
   const groups = {
     brief: cut(input.brief ?? [], 12),
