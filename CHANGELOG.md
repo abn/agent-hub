@@ -4,6 +4,13 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.13.0...agent-hub-v1.14.0) (2026-11-25)
+
+
+### Features
+
+* give every hub resource a short URL and have agents use it ([08793df](https://github.com/agync/agent-hub/commit/08793df0501535df84d8892bbba5144befb4e9f7))
+
 ## [1.13.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.12.0...agent-hub-v1.13.0) (2026-11-24)
 
 
