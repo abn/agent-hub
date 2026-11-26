@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="app_name">Agent Hub</string>
+  <string name="share_label">Capture an idea in Agent Hub</string>
+  <string name="tile_label">Agent Hub</string>
+  <string name="channel_approvals">Approvals</string>
+  <string name="channel_questions">Questions</string>
+  <string name="channel_joining">Joining</string>
+  <string name="channel_finished">Finished work</string>
+  <string name="channel_connection">Connection</string>
+</resources>

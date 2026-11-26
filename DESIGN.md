@@ -1384,6 +1384,48 @@ tolerance of 0.2% of the clip's pixels. Made and checked on the same browser,
 it absorbs only nondeterministic sub-pixel noise: a band moved or resized by
 4px fails it.
 
+## Android
+
+The native app in `android/` follows this contract with the adaptations below.
+Where it is silent, the web app's rule holds.
+
+| Concern | Android rule |
+|---|---|
+| Type | One step up: 28 page, 22 section, 18 lede, 16 body, 14 meta, 13 mono, 12 floor. Sizes are `sp`: the app follows the system font to 200%, rows grow, the chip row scrolls and buttons wrap. Nothing truncates an ask's sentence. |
+| Targets | 48 dp. A control is drawn at 40 (36 compact, 52 for a thumb-bar verb) with a hit area that reaches 48. The tests fail a clickable thing with no name or a smaller target. |
+| Radii | Controls keep 4. Sheets take 16 and dialogs 12. Widgets and the launcher icon take the launcher's clip. |
+| Colour | Brand colour only, no dynamic colour. Copper means needs you, focus and the primary action. An active system tile, a silent channel and an error are neutral ink with words. `--danger` stays deletion. Only the state word and dot of a live thing are green. |
+| Frame | Material's: a bottom bar of Now, Projects, Artifacts, Hub, a large top bar whose title keeps its left edge when it collapses, sheets, predictive back, edge to edge. From 840 dp wide the bar becomes a 96 dp rail and Now becomes list and detail. |
+| Verbs | Shown on every row, not only the selected one. |
+| Snooze | Per device, and it says so: "Snooze 1h on this phone", "on this tablet". It is never sent to the hub. |
+| Focus | A 2 dp copper ring, 2 dp outside the control, for keyboard and D-pad focus only. |
+| Motion | Nothing moves that does not have to. The pairing wait is a static ring with words. |
+| Pairing | Tendril's: a picture code or a typed code, a check string compared on both screens, a device identity per phone that the hub can revoke. The app holds no key and picks no route. "via LAN" and its kin appear as information, and only when Tendril says how it connected. |
+| Alerts | A foreground service of type `specialUse` holds the Tendril session. On every tick and every reconnect the app refetches Now, posts a notification for each new ask and cancels the notification of each ask that no longer waits. One channel per kind. No push service. |
+| Lock screen | Names no agent, says nothing of the ask, and asks for an unlock before any verb. |
+| Fingerprint | An opt-in before approving, off by default, never drawn on Approve. It also releases a remembered project password. |
+| Protected artifacts | Decrypted on the phone with the web app's envelope. The password is remembered per project, behind the fingerprint, as the web app does. |
+| Artifact viewer | A web view that can load nothing from the network and exposes nothing of the app. The artifact keeps its own look. |
+| Bottom bar and rail at large text | Their labels and the count follow the system font to 130% and stop there, always above the 12sp floor: four labels share one row, and at 200% "Projects" and "Artifacts" cannot sit side by side. The bar grows to hold what it shows and nothing is clipped. The count sits beside the icon, never on it. The labels are kept, not dropped to icon-only, so a tab is still named by its words. |
+| Pull to refresh | The list moves down as it is pulled, so the indicator has its own room above the rows and never covers the chip row. |
+| Search | A screen over the hub's search, reached from the search glyph in every top-level header. A field, a chip per kind (All, Feed, Artifacts, Brain, Knowledge) and the results as flat rows under a section label per kind, the matched words in bold. It runs on the keyboard's search key, not on each letter, and says "No results" in words. A hit opens its ask, artifact, session or project. |
+| Ideas | An idea the person captured waits in Needs you as "You noted: ..." with Resolve and Clear, and a note field on its item. A note adds to the idea and leaves it open. An idea never raises an alert: the person wrote it. |
+| Joining | Approving a machine from the phone may grant some of the projects it asked for, each a "Grant <project>" checkbox that starts unticked, and nothing else: the phone cannot rename the machine or share. A hub that refuses the approval gets the item's notice, "Approve this one from the web app", and nothing waits to be sent. |
+| Prune | Pruning from Storage or from an ended session offers Undo for the 30 seconds the hub keeps it, in a snackbar that outlasts the usual five. |
+| Brain entry | An ask's brain receipt opens that one entry as text, with a copy glyph on the row that holds its path. Browsing a brain stays in the web app. |
+| Open web app | Listed on the Hub screen only when the hub told the phone its web address. A phone that was not told has no such row. |
+
+**Deviations.** A bottom sheet or dialog is drawn in the composition rather than
+in its own window, so it is one surface to test and to photograph. The pairing
+camera replaces the picture of a code on the scan screen. The artifact comment
+sheet lists the comments and leaves reply and resolve to the web app. The share
+sheet offers the first three projects as chips. The launcher widgets use the
+system font, since a widget cannot carry IBM Plex, and open the app instead of
+deciding: a decision stays where the blast radius is shown. A phone is refused
+the operator's controls, so the app shows no Add member, token, grant or new
+project control, and a web-app link only when the hub has told the phone its
+web address.
+
 ## Where the design source lives
 
 The designer's bundle is in the scratch area and is never committed. It holds
