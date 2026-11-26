@@ -8,4 +8,7 @@
   <string name="channel_joining">Joining</string>
   <string name="channel_finished">Finished work</string>
   <string name="channel_connection">Connection</string>
+  <string name="widget_list_description">What needs you, and what can wait</string>
+  <string name="widget_count_description">How many need you, and how many are live</string>
+  <string name="widget_live_description">The sessions that are running</string>
 </resources>
