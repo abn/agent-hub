@@ -10,4 +10,5 @@ something starts waiting on you.
 * [Back up and restore](/operate/backup-and-restore.md) - Back up, verify, and restore the hub store as one unit
 * [Upgrade and roll back](/operate/upgrade-and-rollback.md) - Migrate forward on upgrade, and roll back to an earlier store
 * [Monitoring](/operate/monitoring.md) - Watch health, metrics, integrity, and the limits that grow with use
+* [Phones](/operate/phones.md) - Pair the operator's phones through Tendril, confirm them, and unpair one
 * [Notifications](/operate/notifications.md) - Nudge a closed app through a notification target you run

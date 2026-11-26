@@ -26,6 +26,13 @@ GET    /id/:id
 
 GET    /api/v1/home
 GET    /api/v1/resolve/:id
+GET    /api/v1/devices
+POST   /api/v1/devices/pairing
+DELETE /api/v1/devices/pairing
+POST   /api/v1/devices/:id/confirm
+POST   /api/v1/devices/:id/refuse
+DELETE /api/v1/devices/:id
+GET    /api/v1/devices/me
 GET    /api/v1/me/pending?session=&limit=&wait=&after=
 GET    /api/v1/feed
 GET    /api/v1/projects
@@ -282,11 +289,13 @@ A machine joins by enrolling, with no token:
 ```
 POST /api/v1/enrol
   {"member":"laptop","display_name":"My laptop","why":"one line",
-   "agent":"cli","os":"linux","host":"laptop"}
+   "agent":"cli","os":"linux","host":"laptop","projects":["space-a"]}
 GET  /api/v1/enrol/status?wait=30          Authorization: Bearer <pending token>
 ```
 
-The first call returns a pending bearer. The status call returns `{status,
+`projects` names up to 16 projects the machine asks to be granted; asking
+grants nothing, and the approval request on the inbox carries them as
+`payload.projects`. The first call returns a pending bearer. The status call returns `{status,
 member, share}`, where `member` is the name the human approved, which may differ
 from the one requested. The human approves with `POST /api/v1/enrol/:id/approve`
 (body `{member}` to rename) or refuses. While pending, the token answers `401`
@@ -319,6 +328,59 @@ request names one.
 failed request. The `config` target can be tested but answers `409` to a change
 or a delete. A hub holds at most 16 targets.
 [Notifications](/operate/notifications.md) has the payloads.
+
+## Phones
+
+A phone pairs and connects through Tendril; see [Phones](/operate/phones.md)
+and [ADR 0041](/adr/0041-phones-pair-and-connect-through-tendril.md). Every
+route here but `me` takes the admin token and is refused to a phone.
+
+- `GET /api/v1/devices` returns `{enabled, relay, devices}`; `relay` says
+  whether phones away from home also reach the hub through Tendril's public
+  relay. Each device has `id`
+  (Tendril's device id), `name`, `kind`, `state` (`pending`, `active` or
+  `revoked`), `check_string` while pending, and `paired_at`, `confirmed_at`,
+  `revoked_at` and `last_seen_at`.
+- `POST /api/v1/devices/pairing` returns a fresh code: `{uri, code, address,
+  expires_at, qr}`. `uri` is the host-signed `tendril://pair` URI, `address`
+  the LAN or tailnet `host:port` to type beside the code (null when the hub
+  has none; never a loopback one), and `qr` is `{size, path}`, the URI's QR
+  modules as one SVG path over a `size` by `size` grid. A new code withdraws
+  the one before it. The first call starts the hub's Tendril host; with phones
+  off, or a build without them, it is `503`.
+- `DELETE /api/v1/devices/pairing` withdraws the live code (`204`).
+- `POST /api/v1/devices/:id/confirm` takes `{check_string}`, the string the
+  operator compared with the phone's. A string that does not match the
+  pairing, or a phone that is not pending, is `409`.
+- `POST /api/v1/devices/:id/refuse` forgets a pending phone (`204`).
+- `DELETE /api/v1/devices/:id` unpairs a phone and closes its live sessions.
+- `GET /api/v1/devices/me` answers only over a phone's session: `{device_id,
+  name, state, hub: {name, version, web_url}, phone_api}`. `web_url` is
+  `HUB_PUBLIC_URL`, present only when it is set and not a loopback address. `phone_api` is the contract
+  version, `1`.
+
+Every device route but `me` needs a `Host` the hub owns: an IP literal,
+`localhost` or a name under it, or the host of `HUB_PUBLIC_URL`; any other is
+`403` with the reason `host_not_allowed`, which is what a DNS rebinding sends.
+The device writes (`pairing`, `confirm`, `refuse`, `DELETE`) also take a
+request only from the hub's own web app: `Sec-Fetch-Site: same-origin`, or an
+`Origin` naming the host the request was made to or `HUB_PUBLIC_URL`. Any
+other is `403`. `check_string` is present on one device at most, the newest pending
+one, and only for such a request.
+
+Over a phone's session the REST API answers as it does for the admin token,
+with no token sent, for an allow-list of routes: Now, the inbox and its
+answers and decisions, enrolment approve and refuse, projects and their feeds
+and artifacts, ideas, sessions with their brains and end, artifacts (reads,
+`raw`, `live`, versions, comments, the frame page), members and grants (reads),
+storage and prune with its undo, search, resolve, the event stream and
+`devices/me`. The frame page of an artifact a share link hides answers the
+phone as it answers the operator's viewer. Every other route is `403` with the reason `operator_only`,
+among them members, tokens, grants, devices, notify targets, project changes
+and deletes, backups, share links and viewer passes. A phone's
+`enrol/:id/approve` is refused with `operator_only` when it renames the member,
+sets `share`, or lists a project the enrolment did not ask for. A request from a phone
+unpaired meanwhile is `401` with `device_unpaired`.
 
 ## Errors
 

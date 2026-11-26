@@ -47,6 +47,13 @@ pub enum CredentialReason {
     TokenUnknown,
     /// Self-enrolment is off on this hub.
     EnrolDisabled,
+    /// The phone this request came from was unpaired.
+    DeviceUnpaired,
+    /// The operator's own control, not open to a paired phone.
+    OperatorOnly,
+    /// The request named a host the hub does not own, as a DNS rebinding
+    /// would.
+    HostNotAllowed,
 }
 
 impl CredentialReason {
@@ -58,13 +65,16 @@ impl CredentialReason {
             Self::TokenRevoked => "token_revoked",
             Self::TokenUnknown => "token_unknown",
             Self::EnrolDisabled => "enrol_disabled",
+            Self::DeviceUnpaired => "device_unpaired",
+            Self::OperatorOnly => "operator_only",
+            Self::HostNotAllowed => "host_not_allowed",
         }
     }
 
     /// The code the reason travels under.
     pub fn code(self) -> ErrorCode {
         match self {
-            Self::EnrolDisabled => ErrorCode::Forbidden,
+            Self::EnrolDisabled | Self::OperatorOnly | Self::HostNotAllowed => ErrorCode::Forbidden,
             _ => ErrorCode::Unauthenticated,
         }
     }

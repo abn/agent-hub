@@ -224,6 +224,11 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/phones.mjs",
+        body: include_bytes!("../../web/phones.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/connect.mjs",
         body: include_bytes!("../../web/connect.mjs"),
         content_type: "text/javascript; charset=utf-8",

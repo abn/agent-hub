@@ -60,6 +60,8 @@ pub struct AppState {
     /// Token hashes revoked or replaced. Every open stream registered under a
     /// hash closes when it is sent.
     pub revocations: tokio::sync::broadcast::Sender<String>,
+    /// The operator's phones: the Tendril host, started on demand.
+    pub phones: Arc<crate::phones::Slot>,
 }
 
 /// Per-session gates, created on first use and dropped when unused.
@@ -526,6 +528,7 @@ impl AppState {
             config.notify_delivery.clone(),
             config.public_url.clone(),
         );
+        let phones = Arc::new(crate::phones::Slot::new(config.phones_from_env()));
         let state = Self {
             config: Arc::new(config),
             data_dir,
@@ -546,6 +549,7 @@ impl AppState {
             backup_running: Arc::new(tokio::sync::Mutex::new(())),
             session_gates: SessionGates::default(),
             revocations,
+            phones,
         };
         // A brain write that crashed between its file and its index left its
         // session marked; its search rows are rebuilt from the file.
@@ -832,6 +836,18 @@ pub async fn run_with(
     tracing::info!(bind = %address, schema_version, "hub listening");
     on_bound(address);
 
+    // A hub with a paired phone listens for it, started in the background
+    // once the HTTP surface is up, so a slow relay never delays the bind. A
+    // phone host that cannot start is logged, not fatal.
+    let phones_task = {
+        let state = state.clone();
+        tokio::spawn(async move {
+            if let Err(err) = state.phones.start_if_paired(&state).await {
+                tracing::error!(error = %err, "phones: could not start the Tendril host");
+            }
+        })
+    };
+
     // One line unconditionally, at whatever log level, so an operator who set
     // nothing still sees the hub start and can read the address a port-0 bind
     // was actually given.
@@ -878,6 +894,11 @@ pub async fn run_with(
     // Stop the background writers before checkpointing, so the fold sees a
     // store no one else is touching. An abort only takes effect at the task's
     // next await point, so each handle is awaited until the task is gone.
+    // Phone sessions write to the store, so they are closed and drained
+    // before it is checkpointed.
+    phones_task.abort();
+    let _ = phones_task.await;
+    state.phones.shutdown().await;
     sweeper_task.abort();
     deadline_task.abort();
     let _ = sweeper_task.await;

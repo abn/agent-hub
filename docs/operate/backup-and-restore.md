@@ -37,7 +37,9 @@ tailnet is in use, its key state, `tailnet/keys.json`, is part of the set, so a
 restore keeps the node's tailnet identity instead of re-registering. A project's
 files that a delete moved aside and could not remove are left out: they are no
 longer part of the store, and the next start removes them. `check` and
-`restore` read either kind the same way.
+`restore` read either kind the same way. Paired phones' Tendril state is not in
+the set; [Phones](/operate/phones.md#backups) says what a restore means for
+them.
 
 ## Offline backup
 

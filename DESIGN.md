@@ -102,6 +102,7 @@ paints it:
 | `--action-bg` | the copper wash | `#F1E4D8` | `#2E241C` |
 | `--ok` | active, published | `#2C6A3D` | `#7DC490` |
 | `--danger` | deletion only: never an error, a failure or an invalid field | `#A3154A` | `#FF7099` |
+| `--qr-ink`, `--qr-ground` | the pairing QR picture only: a camera needs dark on light | `#151A17`, `#FFFFFF` | the same |
 
 - `--accent` and `--action` are one colour. The old split between a blue for
   unread, links and selection and an amber for waiting is gone: copper marks
@@ -1112,7 +1113,7 @@ Projects register, Members and access, Connect, and the knowledge base.
 - **Settings.** Rows under three quiet group labels. THIS DEVICE: theme as a
   three-way segmented group, compact rows, waiting on you. KEYBOARD: single-key
   shortcuts, the group absent under a coarse pointer. THIS HUB: storage, members
-  and tokens, notifications (how many targets are on, or Off), Connect, and
+  and tokens, notifications (how many targets are on, or Off), Phones, Connect, and
   Version, a value row reading the version and short commit the binary was
   built from, with no destination, no chevron and no tab stop. One
   helper line in the whole screen. No paragraph explains a toggle.
@@ -1134,6 +1135,39 @@ Projects register, Members and access, Connect, and the knowledge base.
     notifications screen. It is built from the settings row, the dialog and the
     Now ask's secondary verb line, and the stage carries more than one helper
     line, since every line on a row is state the reader cannot see elsewhere.
+- **Phones.** Settings > Phones, pushed from Settings with "Settings /
+  Phones" as the control row's crumb on a desktop and a back chevron to
+  Settings on a phone; the rail keeps Settings marked. One column at the 640
+  prose width, two quiet group labels. ADD A PHONE holds one of three states.
+  With nothing pending, one sentence and **Add a phone**, the copper primary.
+  With a code, the QR picture of the hub-signed pairing URI at 256 (dark
+  modules on a light ground in both themes, `--qr-ink` on `--qr-ground`, since
+  a camera needs that contrast), and beside it, wrapping under it on a phone:
+  the lede, a definition list of Code (mono, 17), Address (mono, only when the
+  hub has a LAN or tailnet address, never a loopback one) and Works until (the
+  clock time and "once"), each copyable value with the copy glyph on its own
+  row, one prose line on what the code and address are for, then New code and
+  Close as outlines; both withdraw the code on screen. When the relay route is
+  on, one line in both of these states says a phone away from home goes
+  through a public relay that sees only encrypted traffic. With a phone
+  waiting, the group label turns copper over an ink rule, the phone's name
+  "wants to pair" with the "Waiting on you" pill on the copper wash, a visible
+  "Check string" label over the string in mono at 28 on the sunken ground, one
+  prose line on comparing it, then **They match, confirm** (copper, with the
+  check glyph) and They differ, refuse (outline). PHONES lists every phone the
+  hub knows, its count right-aligned in the label: a phone glyph in the glyph
+  column, the name, the state as a dot and a word (green active, a ring for
+  pending, the word alone for unpaired), and a mono meta line of when it
+  paired and was last seen. An active phone carries **Unpair…** as an ink
+  outline at `--ctl` (`--tap` under a coarse pointer): unpairing deletes
+  nothing, so it does not take `--danger`, and it asks in a dialog that
+  focuses Keep. One prose line closes the list.
+  - **Deviation: no "via LAN / Tailnet" on a row.** The handoff showed how each
+    phone last connected. Tendril chooses the route and the hub does not
+    record it yet, so the meta line says only when; the path is shown when
+    Tendril reports it.
+  - **Deviation: "Unpair" for "Revoke".** The phone's own refusal reads "This
+    phone was unpaired", so the verb that causes it uses the same word.
 - **Storage.** The summary and the by-project rows. Never touches feed events
   or artifacts. On a desktop the summary sits on the canvas between the control
   row's hairline and the table's, with no rules of its own: the total in mono,

@@ -169,7 +169,8 @@ describe("the scripts are parseable and served", () => {
       }
     }
     expect(failures).toEqual([]);
-  });
+    // One node process per script: past the default 5s on a loaded host.
+  }, 30000);
 
   it("serves every first-party script from the asset table", () => {
     const source = readFileSync(ASSET_TABLE, "utf8");

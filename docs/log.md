@@ -23,6 +23,22 @@ software release notes and the repository changelog.
 * **Update**: the wiki screens are recaptured for the Settings row and the new
   Notifications screen and its add dialog.
 
+### Phones pair through Tendril
+
+* **Add**: [Phones](/operate/phones.md), the guide to pairing, confirming and
+  unpairing the operator's phones, and
+  [ADR 0041](/adr/0041-phones-pair-and-connect-through-tendril.md), which
+  embeds a Tendril host, maps a confirmed phone to the operator and carries a
+  phone's requests as HTTP/2 over its Tendril session.
+* **Update**: [REST API](/reference/rest-api.md) documents the device routes
+  and what a phone may reach; [Configuration](/reference/configuration.md)
+  lists `HUB_PHONES`, `HUB_PHONES_LISTEN`, `HUB_PHONES_RELAY` and
+  `HUB_PHONES_WAKE_FILE`; the [operating model](/architecture/operating-model.md)
+  states the phone principal and the relay as the one exception to "no vendor
+  cloud"; [Back up and restore](/operate/backup-and-restore.md) says a backup
+  does not carry the Tendril state; [Screens](/screens.md) shows Settings >
+  Phones.
+
 ## 2026-11-25
 
 ### Resources have links

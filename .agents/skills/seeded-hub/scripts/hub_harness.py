@@ -1155,6 +1155,10 @@ def running_hub(name: str, override: str | None = None, cwd: str | None = None, 
         # A fixed node name, so no check ever photographs or reads the machine's
         # own hostname: the wiki bundle is public, and the header renders it.
         HUB_NODE_NAME="local",
+        # Phones pair on loopback only, with no public relay, so no check
+        # holds a fixed port or reaches the network.
+        HUB_PHONES_LISTEN="127.0.0.1:0",
+        HUB_PHONES_RELAY="off",
     )
     # An absolute binary, so a `cwd` does not rebase a relative HUB_BIN.
     if cwd:

@@ -16,6 +16,7 @@ import {
 } from "./members.mjs";
 import { api } from "./api.mjs";
 import { connectShow, connectSubmit, connectScreen } from "./connect.mjs";
+import { phonesScreen } from "./phones.mjs";
 import { artifactListScreen } from "./artifact-list.mjs";
 import { artifactRoute, pickVersion, squashArtifactVersions, toggleVersionMenu } from "./artifacts.mjs";
 import { main, stale } from "./dom.mjs";
@@ -97,6 +98,7 @@ setScreens({
   notifications: (params, gen) => notificationsScreen(gen),
   more: (params, gen) => moreScreen(gen),
   access: (params, gen) => accessScreen(gen),
+  phones: (params, gen) => phonesScreen(gen),
   connect: (params, gen) => connectScreen(params, gen),
   // `#/id/<id>` is the short address for any resource; the hub names its route.
   id: (params, gen, path) => resourceRoute(path, gen),

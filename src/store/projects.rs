@@ -806,7 +806,8 @@ fn validate_display_name(display_name: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_id(id: &str) -> Result<()> {
+/// Check a project id's shape, as creating a project does.
+pub(crate) fn validate_id(id: &str) -> Result<()> {
     let valid = !id.is_empty()
         && id
             .chars()

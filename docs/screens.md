@@ -277,6 +277,20 @@ The pages under [Guides](/guides/index.md) explain what each screen does.
   <img src="assets/screens/access-phone-light.png" alt="Access: the members, their tokens and their grants.">
 </picture>
 
+### Phones, desktop
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screens/phones-code-desktop-dark.png">
+  <img src="assets/screens/phones-code-desktop-light.png" alt="Settings > Phones with a pairing code: the QR picture, the code, the address and when it runs out.">
+</picture>
+
+### Phones, phone
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screens/phones-code-phone-dark.png">
+  <img src="assets/screens/phones-code-phone-light.png" alt="Settings > Phones with a pairing code, the QR picture above the code.">
+</picture>
+
 ### Connect an agent, desktop
 
 <picture>

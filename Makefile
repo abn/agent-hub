@@ -20,8 +20,8 @@ setup: ## Install git hooks, write local shims, create the scratch area
 
 ##@ Build & Quality
 
-build: ## Build the binary (debug)
-	cargo build
+build: ## Build the binary (debug), and the phone the browser checks pair
+	cargo build --bins --example tendril-phone
 
 test: ## Run the test suite (cargo-nextest when installed)
 	@if cargo nextest --version >/dev/null 2>&1; then \

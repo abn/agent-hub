@@ -414,9 +414,9 @@ pub async fn remove_grant(db: &Database, agent_id: &str, project_id: &str) -> Re
     Ok(())
 }
 
-/// What an MCP enrolment adds to the request: the asking agent, its OS and
-/// its host.
-type EnrolExtra<'a> = (&'a str, Option<&'a str>, Option<&'a str>);
+/// What an MCP enrolment adds to the request: the asking agent, its OS, its
+/// host and the projects it asks for.
+type EnrolExtra<'a> = (&'a str, Option<&'a str>, Option<&'a str>, &'a [String]);
 
 async fn enrol_inner(
     db: &Database,
@@ -427,6 +427,7 @@ async fn enrol_inner(
     pending_max: usize,
     extra: Option<EnrolExtra<'_>>,
 ) -> Result<IssuedToken> {
+    let projects: &[String] = extra.map_or(&[], |(_, _, _, projects)| projects);
     validate_display_name(display_name)?;
     let created_at = crate::store::now_rfc3339();
     let personal_project_id = format!("space-{}", crate::store::next_id());
@@ -508,9 +509,9 @@ async fn enrol_inner(
             Value::Text(created_at.clone()),
             Value::Text(why.to_string()),
             Value::Text(source.to_string()),
-            opt(extra.map(|(agent, _, _)| agent)),
-            opt(extra.and_then(|(_, os, _)| os)),
-            opt(extra.and_then(|(_, _, host)| host)),
+            opt(extra.map(|(agent, _, _, _)| agent)),
+            opt(extra.and_then(|(_, os, _, _)| os)),
+            opt(extra.and_then(|(_, _, host, _)| host)),
         ],
     )
     .await
@@ -542,7 +543,7 @@ async fn enrol_inner(
     let asker = crate::author::Writer::call(crate::author::Author::Participant {
         member: id.to_string(),
         agent: extra
-            .map_or(crate::agent_name::CLI, |(agent, _, _)| agent)
+            .map_or(crate::agent_name::CLI, |(agent, _, _, _)| agent)
             .to_string(),
         session: None,
     });
@@ -561,6 +562,7 @@ async fn enrol_inner(
                 "display_name": display_name,
                 "source": source,
                 "why": why,
+                "projects": projects,
             })),
             needs_action: true,
             thread_id: None,
@@ -1147,6 +1149,9 @@ pub struct Enrolment<'a> {
     pub agent: &'a str,
     pub os: Option<&'a str>,
     pub host: Option<&'a str>,
+    /// The projects the machine asks to be granted. The operator decides;
+    /// asking grants nothing.
+    pub projects: &'a [String],
 }
 
 /// Whether `id` is acceptable for a new member: `[a-z0-9][a-z0-9._-]{0,62}`
@@ -1330,10 +1335,53 @@ pub async fn enrol_member(
         enrolment.source,
         enrolment.why,
         pending_max,
-        Some((enrolment.agent, enrolment.os, enrolment.host)),
+        Some((
+            enrolment.agent,
+            enrolment.os,
+            enrolment.host,
+            enrolment.projects,
+        )),
     )
     .await?;
     Ok((member_or_missing(db, enrolment.member).await?, token))
+}
+
+/// The projects a pending member's enrolment asked to be granted, from its
+/// request. Empty when it asked for none or is not pending.
+pub async fn asked_projects(db: &Database, member: &str) -> Result<Vec<String>> {
+    let conn = crate::store::connect(db)?;
+    let mut rows = conn
+        .query(
+            "SELECT e.payload FROM events e JOIN members m ON e.project_id = m.personal_project_id \
+             WHERE m.id = ?1 AND m.state = 'pending' AND e.kind = 'approval' \
+             ORDER BY e.id DESC",
+            vec![Value::Text(member.to_string())],
+        )
+        .await
+        .map_err(engine)?;
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        let Some(payload) = text_at(&row, 0)? else {
+            continue;
+        };
+        let Ok(payload) = serde_json::from_str::<serde_json::Value>(&payload) else {
+            continue;
+        };
+        if payload.get("action").and_then(serde_json::Value::as_str) != Some("enrol_request") {
+            continue;
+        }
+        return Ok(payload
+            .get("projects")
+            .and_then(serde_json::Value::as_array)
+            .map(|projects| {
+                projects
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default());
+    }
+    Ok(Vec::new())
 }
 
 /// Approve a pending member, optionally renaming it. Participants, cursors and

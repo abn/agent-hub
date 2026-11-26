@@ -336,6 +336,7 @@ test.describe("races", () => {
       access: [["access", "#/access", "/api/v1/members"]],
       more: [["more", "#/more", "/api/v1/storage"]],
       connect: [["connect", "#/connect?next=%2Fstorage", "/api/v1/home"]],
+      phones: [["phones", "#/phones", "/api/v1/devices"]],
       id: [["short address", `#/id/${encodeURIComponent(artifact)}`, "/api/v1/resolve/"]],
     };
 

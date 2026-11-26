@@ -8,6 +8,11 @@
 //! transport accepts the admin token or a member token; the REST control
 //! surface is the human's, so it accepts only the admin token. Widening one to
 //! serve the other would hand members the control surface.
+//!
+//! A request that arrives over a paired phone's Tendril session carries no
+//! token: the session is the credential. The phone transport runs the request
+//! inside [`as_phone`], and every resolver here answers it as the operator on
+//! that phone. Nothing a network client sends can set that scope.
 
 use axum::http::HeaderMap;
 
@@ -60,6 +65,27 @@ pub fn declared_name(headers: &HeaderMap) -> Result<Option<&str>> {
     Ok((!name.is_empty()).then_some(name))
 }
 
+tokio::task_local! {
+    /// The paired phone the request in flight came from. Set only by the
+    /// phone transport, around one request.
+    static PHONE: String;
+}
+
+/// Run `request` as the operator on the phone `device_id`.
+pub async fn as_phone<F: std::future::Future>(device_id: String, request: F) -> F::Output {
+    PHONE.scope(device_id, request).await
+}
+
+/// The phone the request in flight came from, when it came from one.
+fn phone() -> Option<String> {
+    PHONE.try_with(Clone::clone).ok()
+}
+
+/// Whether the request in flight came over a paired phone's session.
+pub fn on_phone() -> bool {
+    PHONE.try_with(|_| ()).is_ok()
+}
+
 /// A resolved caller.
 #[derive(Debug, Clone)]
 pub struct Principal {
@@ -77,6 +103,8 @@ pub struct Principal {
     /// The hash of the bearer presented, for closing its streams on
     /// revocation.
     pub token_hash: Option<String>,
+    /// The paired phone the operator called from, when they did.
+    pub device: Option<String>,
 }
 
 /// Where a caller's credential stands.
@@ -104,6 +132,7 @@ impl Principal {
             kind: crate::author::AuthorKind::Participant,
             credential,
             token_hash: Some(token_hash.to_string()),
+            device: None,
         }
     }
 
@@ -125,6 +154,17 @@ impl Principal {
             kind: crate::author::AuthorKind::Human,
             credential: CredentialState::Active,
             token_hash: None,
+            device: None,
+        }
+    }
+
+    /// The operator on one of their paired phones: the human, as the PWA
+    /// is, with the phone named for the log. The phone transport keeps the
+    /// operator's own controls from it before a handler runs.
+    pub fn operator_phone(device_id: &str) -> Self {
+        Self {
+            device: Some(device_id.to_string()),
+            ..Self::human()
         }
     }
 
@@ -137,6 +177,7 @@ impl Principal {
             kind: crate::author::AuthorKind::Local,
             credential: CredentialState::Active,
             token_hash: None,
+            device: None,
         }
     }
 
@@ -149,6 +190,7 @@ impl Principal {
             kind: crate::author::AuthorKind::Human,
             credential: CredentialState::Anonymous,
             token_hash: None,
+            device: None,
         }
     }
 
@@ -188,6 +230,11 @@ impl Principal {
     /// Whether the caller is the operator.
     pub fn is_admin(&self) -> bool {
         self.is_admin
+    }
+
+    /// The paired phone the operator called from, when they did.
+    pub fn device(&self) -> Option<&str> {
+        self.device.as_deref()
     }
 
     /// Refuse a caller whose credential is not active: a pending member and a
@@ -272,8 +319,12 @@ impl Auth {
         Principal::local()
     }
 
-    /// The human admin for a matching admin token, if one is presented.
+    /// The human admin for a matching admin token, if one is presented, or
+    /// the operator on a paired phone for a request the phone transport runs.
     fn admin(&self, token: Option<&str>) -> Option<Principal> {
+        if let Some(device) = phone() {
+            return Some(Principal::operator_phone(&device));
+        }
         match (&self.admin_token, token) {
             (Some(expected), Some(presented)) if constant_time_eq(expected, presented) => {
                 Some(Principal::human())
@@ -469,6 +520,27 @@ mod tests {
         headers.append(AGENT_ID_HEADER, "a".parse().expect("value"));
         headers.append(AGENT_ID_HEADER, "b".parse().expect("value"));
         assert!(declared_name(&headers).is_err());
+    }
+
+    #[tokio::test]
+    async fn only_the_phone_transport_makes_a_caller_the_operator_on_a_phone() {
+        let auth = Auth {
+            admin_token: Some("secret".to_string()),
+            loopback: false,
+        };
+        assert!(auth.require_admin(None).is_err(), "no token, no phone");
+        let on_phone = as_phone("dev_0011223344556677".to_string(), async {
+            auth.require_admin(None).expect("the phone is the operator")
+        })
+        .await;
+        assert!(on_phone.is_admin());
+        assert_eq!(on_phone.device(), Some("dev_0011223344556677"));
+        let browser = auth.require_admin(Some("secret")).expect("admin token");
+        assert_eq!(browser.device(), None);
+        assert!(
+            auth.require_admin(None).is_err(),
+            "the scope ends with the request"
+        );
     }
 
     #[test]

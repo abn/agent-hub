@@ -88,6 +88,10 @@ took effect.
 | `tailnet` | `HUB_TAILNET` | unset | A Tailscale auth key; enables the optional embedded tailnet endpoint |
 | `tailnet_port` | `HUB_TAILNET_PORT` | `8080` | Port to serve on the tailnet address |
 | `tailnet_control_url` | `HUB_TAILNET_CONTROL_URL` | unset | Control server URL for a self-hosted control plane; the public one is the default |
+| `phones` | `HUB_PHONES` | `on` | Whether phones may pair through Tendril; `off` refuses Add a phone and starts no Tendril host. Phones are not available on Windows hubs yet |
+| `phones_listen` | `HUB_PHONES_LISTEN` | the bind address, port `47319` (`0.0.0.0:47319` in the container) | The direct TCP address phones dial on the LAN or a tailnet; the host starts on the first Add a phone, or at start once a phone is paired |
+| `phones_relay` | `HUB_PHONES_RELAY` | `n0` | `n0` also offers Tendril's public relay route, which carries ciphertext only; `off` keeps phones to the LAN and tailnet |
+| `phones_wake_file` | `HUB_PHONES_WAKE_FILE` | unset | A private (`0600`) JSON file of Tendril wake configuration keys, checked at start and kept for a later wake provider; nothing sends a wake yet |
 | `notify_url` | `HUB_NOTIFY_URL` | unset | An `http` or `https` URL the hub POSTs a fixed, contentless sentence to when something starts waiting on the human; unset sends none. Other targets are added in the app. It may not carry credentials, and any path or query is hidden when the configuration is printed |
 | `notify_token` | `HUB_NOTIFY_TOKEN` | unset | Sent to the notify target as `Authorization: Bearer`; masked wherever the configuration is printed |
 | `notify_interval_secs` | `HUB_NOTIFY_INTERVAL_SECS` | `60` | Least time between two sends to one notify target, for every target; items inside it become one trailing send; 1 to 86400 seconds |

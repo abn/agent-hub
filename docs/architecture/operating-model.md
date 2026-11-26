@@ -82,6 +82,25 @@ route being admin-only is about which surface owns it, not a claim that agents
 may not touch projects; agents reach projects over MCP, and they may create and
 list the ones they can see over REST as well.
 
+## The operator's phones
+
+A phone pairs through Tendril and the operator confirms it in the web app. A
+confirmed phone is the operator, as the PWA is: it reads, answers, approves,
+prunes and approves joining machines, and sees every project. It holds no
+token. It reaches an allow-list of what the app needs. Member tokens, grants,
+pairing phones, notify targets, making a project public, deleting a project,
+online backups, share links and viewer passes stay on the admin token.
+Approving a joining machine is open to the phone by the owner's choice, as the
+machine asked and granting at most the projects it asked for; the member token
+it issues outlives unpairing the phone. Unpairing a phone refuses
+it at once.
+
+Phones are the one exception to "nothing reaches a vendor cloud": once a phone
+is added, the hub also offers Tendril's public relay, so a phone reaches it
+away from home. The relay carries an end-to-end encrypted session and sees no
+content, and `HUB_PHONES_RELAY=off` turns it off. See
+[the decision](/adr/0041-phones-pair-and-connect-through-tendril.md).
+
 ## Members, agents and sessions
 
 A **member** is what holds a token and was approved to join, usually one
