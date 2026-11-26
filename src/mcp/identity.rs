@@ -194,6 +194,7 @@ impl HubServer {
                 agent: principal.agent(),
                 os,
                 host,
+                projects: &[],
             },
             self.state.config.enrol_pending_max,
         )

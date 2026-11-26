@@ -1,7 +1,7 @@
 //! HTTP API and static PWA surface.
 
 use axum::extract::{DefaultBodyLimit, State};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{MethodRouter, delete, get, patch, post};
 use axum::{Json, Router};
 use serde_json::{Value, json};
 
@@ -24,6 +24,7 @@ const READY_MIN_FREE_BYTES: i64 = 64 * 1024 * 1024;
 pub mod artifacts;
 pub mod auth;
 pub mod backup;
+pub mod devices;
 pub mod enrol;
 pub mod feed;
 pub mod filters;
@@ -65,175 +66,205 @@ pub fn router(state: AppState) -> Router {
         }
         assets = assets.route(path, get(web::asset));
     }
-    assets
-        .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
-        .route(web::MANIFEST_PATH, get(web::manifest))
-        .route("/sw.js", get(web::service_worker))
-        .route("/bootstrap/SKILL.md", get(skill::skill))
-        .route("/metrics", get(metrics::metrics))
-        .route("/api/v1/members", get(members::list).post(members::create))
-        .route(
+    let mut router = assets;
+    for (path, handlers) in routes() {
+        router = router.route(path, handlers);
+    }
+    router
+        .fallback(not_found)
+        .method_not_allowed_fallback(method_not_allowed)
+        .layer(DefaultBodyLimit::max(limits::REQUEST_BODY_BYTES_MAX))
+        .with_state(state)
+}
+
+/// Every route but the embedded assets: its path and its handlers.
+///
+/// A table rather than a chain, so what a route is reached by can be read
+/// back: a paired phone's guard decides every path here
+/// ([`crate::phones::guard`]), and its test walks this list.
+fn routes() -> Vec<(&'static str, MethodRouter<AppState>)> {
+    vec![
+        ("/healthz", get(healthz)),
+        ("/readyz", get(readyz)),
+        (web::MANIFEST_PATH, get(web::manifest)),
+        ("/sw.js", get(web::service_worker)),
+        ("/bootstrap/SKILL.md", get(skill::skill)),
+        ("/metrics", get(metrics::metrics)),
+        ("/api/v1/members", get(members::list).post(members::create)),
+        (
             "/api/v1/members/{id}/token",
             post(members::issue).delete(members::revoke),
-        )
-        .route(
+        ),
+        (
             "/api/v1/members/{id}/grants",
             get(members::grants).post(members::grant),
-        )
-        .route(
+        ),
+        (
             "/api/v1/members/{id}/grants/{project_id}",
             delete(members::ungrant),
-        )
-        .route("/api/v1/enrol", post(enrol::enrol))
-        .route("/api/v1/enrol/status", get(enrol::status))
-        .route("/api/v1/enrol/{id}/approve", post(enrol::approve))
-        .route("/api/v1/enrol/{id}/refuse", post(enrol::refuse))
-        .route("/api/v1/artifacts", get(artifacts::list_session))
-        .route(
+        ),
+        ("/api/v1/devices", get(devices::list)),
+        ("/api/v1/devices/me", get(devices::me)),
+        (
+            "/api/v1/devices/pairing",
+            post(devices::pairing).delete(devices::withdraw),
+        ),
+        ("/api/v1/devices/{id}", delete(devices::revoke)),
+        ("/api/v1/devices/{id}/confirm", post(devices::confirm)),
+        ("/api/v1/devices/{id}/refuse", post(devices::refuse)),
+        ("/api/v1/enrol", post(enrol::enrol)),
+        ("/api/v1/enrol/status", get(enrol::status)),
+        ("/api/v1/enrol/{id}/approve", post(enrol::approve)),
+        ("/api/v1/enrol/{id}/refuse", post(enrol::refuse)),
+        ("/api/v1/artifacts", get(artifacts::list_session)),
+        (
             "/api/v1/artifacts/{id}",
             get(artifacts::content).delete(artifacts::destroy),
-        )
-        .route(
+        ),
+        (
             "/api/v1/artifacts/{id}/share",
             post(artifacts::share_create)
                 .delete(artifacts::share_revoke)
                 .get(artifacts::share_get),
-        )
-        .route(
+        ),
+        (
             "/api/v1/artifacts/{id}/versions",
             get(artifacts::versions).delete(artifacts::squash_versions_delete),
-        )
-        .route(
+        ),
+        (
             "/api/v1/artifacts/{id}/versions/{version}",
             delete(artifacts::squash_versions_path),
-        )
-        .route(
+        ),
+        (
             "/api/v1/artifacts/{id}/squash",
             post(artifacts::squash_versions_post),
-        )
-        .route(
+        ),
+        (
             "/api/v1/artifacts/{id}/versions/squash",
             post(artifacts::squash_versions_post),
-        )
-        .route("/api/v1/artifacts/{id}/live", get(artifacts::live))
-        .route(
+        ),
+        ("/api/v1/artifacts/{id}/live", get(artifacts::live)),
+        (
             "/api/v1/artifacts/{id}/viewer-pass",
             get(artifacts::viewer_pass),
-        )
-        .route("/api/v1/artifacts/{id}/raw", get(artifacts::raw))
-        .route(
+        ),
+        ("/api/v1/artifacts/{id}/raw", get(artifacts::raw)),
+        (
             "/api/v1/artifacts/{id}/comments",
             get(artifacts::comment_list).post(artifacts::comment_post),
-        )
-        .route(
+        ),
+        (
             "/api/v1/artifacts/{id}/comments/{comment_id}",
             patch(artifacts::comment_resolve).delete(artifacts::comment_remove),
-        )
-        .route("/api/v1/me/pending", get(me::pending))
-        .route("/api/v1/feed", get(feed::read_global))
-        .route("/api/v1/home", get(inbox::home))
-        .route("/api/v1/inbox", get(inbox::list))
-        .route("/api/v1/inbox/read-all", post(inbox::read_all))
-        .route("/api/v1/inbox/{event_id}/read", post(inbox::read))
-        .route("/api/v1/inbox/{event_id}/unread", post(inbox::unread))
-        .route("/api/v1/stream", get(stream::stream))
-        .route("/api/v1/questions/{id}/answer", post(inbox::answer))
-        .route("/api/v1/approvals/{id}/decision", post(inbox::decide))
-        .route(
+        ),
+        ("/api/v1/me/pending", get(me::pending)),
+        ("/api/v1/feed", get(feed::read_global)),
+        ("/api/v1/home", get(inbox::home)),
+        ("/api/v1/inbox", get(inbox::list)),
+        ("/api/v1/inbox/read-all", post(inbox::read_all)),
+        ("/api/v1/inbox/{event_id}/read", post(inbox::read)),
+        ("/api/v1/inbox/{event_id}/unread", post(inbox::unread)),
+        ("/api/v1/stream", get(stream::stream)),
+        ("/api/v1/questions/{id}/answer", post(inbox::answer)),
+        ("/api/v1/approvals/{id}/decision", post(inbox::decide)),
+        (
             "/api/v1/projects",
             get(projects::list).post(projects::create),
-        )
-        .route(
+        ),
+        (
             "/api/v1/projects/{id}",
             get(projects::get)
                 .patch(projects::update)
                 .delete(projects::delete),
-        )
-        .route("/api/v1/projects/{id}/stats", get(projects::stats))
-        .route("/api/v1/projects/{id}/ideas", post(ideas::create))
-        .route("/api/v1/ideas/{id}/resolve", post(ideas::resolve))
-        .route("/api/v1/ideas/{id}/clear", post(ideas::clear))
-        .route("/api/v1/ideas/{id}/reply", post(ideas::reply))
-        .route("/api/v1/projects/{id}/feed", get(feed::read))
-        .route("/api/v1/projects/{id}/feed/seen", post(feed::seen))
-        .route("/api/v1/projects/{id}/feed/dismiss", post(feed::dismiss))
-        .route(
+        ),
+        ("/api/v1/projects/{id}/stats", get(projects::stats)),
+        ("/api/v1/projects/{id}/ideas", post(ideas::create)),
+        ("/api/v1/ideas/{id}/resolve", post(ideas::resolve)),
+        ("/api/v1/ideas/{id}/clear", post(ideas::clear)),
+        ("/api/v1/ideas/{id}/reply", post(ideas::reply)),
+        ("/api/v1/projects/{id}/feed", get(feed::read)),
+        ("/api/v1/projects/{id}/feed/seen", post(feed::seen)),
+        ("/api/v1/projects/{id}/feed/dismiss", post(feed::dismiss)),
+        (
             "/api/v1/projects/{id}/feed/dismiss-read",
             post(feed::dismiss_read),
-        )
-        .route("/api/v1/projects/{id}/artifacts", get(artifacts::list))
-        .route("/api/v1/projects/{id}/kb/pages", get(kb::pages))
-        .route(
+        ),
+        ("/api/v1/projects/{id}/artifacts", get(artifacts::list)),
+        ("/api/v1/projects/{id}/kb/pages", get(kb::pages)),
+        (
             "/api/v1/projects/{id}/kb/pages/{*path}",
             get(kb::page_get)
                 .put(kb::page_put)
                 .delete(kb::page_delete)
                 .post(kb::page_post),
-        )
-        .route("/api/v1/projects/{id}/kb/promote", post(kb::promote))
-        .route(
+        ),
+        ("/api/v1/projects/{id}/kb/promote", post(kb::promote)),
+        (
             "/api/v1/projects/{id}/kb/comments",
             get(kb_comments::list).post(kb_comments::create),
-        )
-        .route(
+        ),
+        (
             "/api/v1/projects/{id}/kb/comments/{comment_id}",
             delete(kb_comments::remove),
-        )
-        .route(
+        ),
+        (
             "/api/v1/projects/{id}/kb/comments/{comment_id}/done",
             post(kb_comments::set_done),
-        )
-        .route("/api/v1/projects/{id}/kb/history", get(kb::history))
-        .route(
+        ),
+        ("/api/v1/projects/{id}/kb/history", get(kb::history)),
+        (
             "/api/v1/projects/{id}/kb/versions",
             get(kb::versions).delete(kb::forget_versions),
-        )
-        .route("/api/v1/projects/{id}/kb/backlinks", get(kb::backlinks))
-        .route("/api/v1/projects/{id}/kb/lint", get(kb::lint))
-        .route("/api/v1/projects/{id}/kb/stats", get(kb::stats))
-        .route("/api/v1/sessions", get(sessions::list))
-        .route("/api/v1/sessions/{id}", get(sessions::detail))
-        .route("/api/v1/sessions/{id}/end", post(sessions::end))
-        .route("/api/v1/sessions/{id}/brain", get(sessions::brain))
-        .route("/api/v1/sessions/{id}/replay", get(sessions::replay))
-        .route("/api/v1/sessions/{id}/resume", get(sessions::resume))
-        .route("/api/v1/sessions/{id}/scores", post(sessions::score))
-        .route(
+        ),
+        ("/api/v1/projects/{id}/kb/backlinks", get(kb::backlinks)),
+        ("/api/v1/projects/{id}/kb/lint", get(kb::lint)),
+        ("/api/v1/projects/{id}/kb/stats", get(kb::stats)),
+        ("/api/v1/sessions", get(sessions::list)),
+        ("/api/v1/sessions/{id}", get(sessions::detail)),
+        ("/api/v1/sessions/{id}/end", post(sessions::end)),
+        ("/api/v1/sessions/{id}/brain", get(sessions::brain)),
+        ("/api/v1/sessions/{id}/replay", get(sessions::replay)),
+        ("/api/v1/sessions/{id}/resume", get(sessions::resume)),
+        ("/api/v1/sessions/{id}/scores", post(sessions::score)),
+        (
             "/api/v1/sessions/{id}/brain/entry",
             get(sessions::brain_entry),
-        )
-        .route("/api/v1/storage", get(storage::usage))
-        .route("/api/v1/storage/sessions", delete(storage::prune_all))
-        .route("/api/v1/storage/sessions/{id}", delete(storage::prune))
-        .route(
+        ),
+        ("/api/v1/storage", get(storage::usage)),
+        ("/api/v1/storage/sessions", delete(storage::prune_all)),
+        ("/api/v1/storage/sessions/{id}", delete(storage::prune)),
+        (
             "/api/v1/storage/projects/{id}/sessions",
             delete(storage::prune_project),
-        )
-        .route("/api/v1/prune/undo/{token}", post(storage::undo))
-        .route("/api/v1/backups", post(backup::create))
-        .route(
+        ),
+        ("/api/v1/prune/undo/{token}", post(storage::undo)),
+        ("/api/v1/backups", post(backup::create)),
+        (
             "/api/v1/notify/targets",
             get(notify::list).post(notify::create),
-        )
-        .route(
+        ),
+        (
             "/api/v1/notify/targets/{id}",
             patch(notify::change).delete(notify::delete),
-        )
-        .route("/api/v1/notify/targets/{id}/test", post(notify::test))
-        .route("/api/v1/search", get(search::search))
-        .route("/id/{id}", get(resolve::redirect))
-        .route("/api/v1/resolve/{id}", get(resolve::resolve))
-        .route("/artifacts/{id}", get(artifacts::host))
-        .route("/artifacts/{id}/frame", get(artifacts::frame))
-        .route("/artifacts/{id}/og.svg", get(artifacts::og_svg))
-        .route("/s/{token}", get(artifacts::share_host))
-        .route("/s/{token}/frame", get(artifacts::share_frame))
-        .route("/s/{token}/og.svg", get(artifacts::share_og_svg))
-        .fallback(not_found)
-        .method_not_allowed_fallback(method_not_allowed)
-        .layer(DefaultBodyLimit::max(limits::REQUEST_BODY_BYTES_MAX))
-        .with_state(state)
+        ),
+        ("/api/v1/notify/targets/{id}/test", post(notify::test)),
+        ("/api/v1/search", get(search::search)),
+        ("/id/{id}", get(resolve::redirect)),
+        ("/api/v1/resolve/{id}", get(resolve::resolve)),
+        ("/artifacts/{id}", get(artifacts::host)),
+        ("/artifacts/{id}/frame", get(artifacts::frame)),
+        ("/artifacts/{id}/og.svg", get(artifacts::og_svg)),
+        ("/s/{token}", get(artifacts::share_host)),
+        ("/s/{token}/frame", get(artifacts::share_frame)),
+        ("/s/{token}/og.svg", get(artifacts::share_og_svg)),
+    ]
+}
+
+/// The path of every route the router serves, assets included.
+pub fn route_paths() -> Vec<&'static str> {
+    web::asset_paths()
+        .chain(routes().into_iter().map(|(path, _)| path))
+        .collect()
 }
 
 /// Liveness: the process is running and serving. It touches nothing else.

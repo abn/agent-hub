@@ -914,3 +914,38 @@ async fn the_pending_enrolment_cap_bounds_across_sources() {
         "the third pending enrolment is refused at the cap"
     );
 }
+
+/// The enrol route takes no credential, so a list of asked projects past the
+/// cap is refused before any of it is read: a body of 200,000 distinct ids
+/// answers at once, and nothing is enrolled.
+#[tokio::test]
+async fn an_oversized_list_of_asked_projects_is_refused_at_once() {
+    let state = state().await;
+    let projects: Vec<String> = (0..200_000).map(|n| format!("p{n}")).collect();
+    let body = json!({
+        "member": "flood",
+        "display_name": "Flood",
+        "why": "asks for everything",
+        "projects": projects,
+    })
+    .to_string();
+    let started = Instant::now();
+    let response = router(state.clone())
+        .oneshot(json_request("POST", "/api/v1/enrol", None, &body))
+        .await
+        .expect("router");
+    let took = started.elapsed();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert!(
+        took < Duration::from_secs(2),
+        "an oversized list took {took:?} to refuse"
+    );
+    assert!(
+        identity::list_members(&state.db)
+            .await
+            .expect("members")
+            .iter()
+            .all(|m| m.id != "flood"),
+        "nothing was enrolled"
+    );
+}

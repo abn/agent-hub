@@ -328,6 +328,12 @@ export async function settingsScreen(gen) {
             <span class="form-row-value">${esc(notifyText)}</span>
             ${NAV_CHEVRON}
           </a>
+          <a class="form-row" href="#/phones">
+            <div class="form-row-main">
+              <span class="form-row-title">Phones</span>
+            </div>
+            ${NAV_CHEVRON}
+          </a>
           <a class="form-row" href="#/connect">
             <div class="form-row-main">
               <span class="form-row-title">Connect</span>
@@ -404,6 +410,10 @@ export async function settingsScreen(gen) {
         <a href="#/notifications" class="settings-flat-row row settings-nav-row">
           <span class="title settings-row-label">Notifications</span>
           <span class="meta settings-row-count">${esc(notifyText)}</span>
+          <span class="settings-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
+        </a>
+        <a href="#/phones" class="settings-flat-row row settings-nav-row">
+          <span class="title settings-row-label">Phones</span>
           <span class="settings-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
         <a href="#/connect" class="settings-flat-row row settings-nav-row">

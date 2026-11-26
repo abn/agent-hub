@@ -29,6 +29,7 @@ const screens = (hub, member) => [
   ["access", "#/access", "main .access-screen, main .form-row-title"],
   ["a member", `#/access?member=${encodeURIComponent(member)}`, "main .member-detail-body, main .access-screen"],
   ["connect", "#/connect", "main .connect .connect-field"],
+  ["phones", "#/phones", "main .phones .phones-add"],
   ["more", "#/more", "main .more-screen .more-row"],
   ["notifications", "#/notifications", "main .notify-column"],
 ];

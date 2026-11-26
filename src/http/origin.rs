@@ -30,6 +30,43 @@ pub fn request_origin(config: &Config, headers: &HeaderMap) -> String {
     format!("{scheme}://{host}")
 }
 
+/// Whether the `Host` a request was made to is one this hub owns, in a way a
+/// DNS rebinding cannot forge: an IP literal, a loopback name (`localhost` or a
+/// name under it), or the host of `HUB_PUBLIC_URL`. The configured bind is an
+/// address, so it is covered by the IP rule. Any other name could have been
+/// pointed at the hub by a stranger's DNS, with the browser sending that
+/// stranger's name as both `Host` and `Origin`.
+pub fn host_is_owned(config: &Config, host: &str) -> bool {
+    let Some(name) = host_name(host) else {
+        return false;
+    };
+    match name {
+        url::Host::Ipv4(_) | url::Host::Ipv6(_) => true,
+        url::Host::Domain(domain) => {
+            let domain = domain.trim_end_matches('.').to_ascii_lowercase();
+            domain == "localhost"
+                || domain.ends_with(".localhost")
+                || config
+                    .public_url
+                    .as_deref()
+                    .and_then(|public| url::Url::parse(public).ok())
+                    .and_then(|public| public.host_str().map(str::to_ascii_lowercase))
+                    .is_some_and(|public| public.trim_end_matches('.') == domain)
+        }
+    }
+}
+
+/// The host part of a `Host` header value, which may carry a port.
+fn host_name(host: &str) -> Option<url::Host<String>> {
+    if !is_safe_host(host) {
+        return None;
+    }
+    url::Url::parse(&format!("http://{host}/"))
+        .ok()?
+        .host()
+        .map(|host| host.to_owned())
+}
+
 /// The short URL of a hub resource: `{origin}/id/{id}`.
 ///
 /// The one place a resource URL is built. Ids are ULIDs, so there is nothing

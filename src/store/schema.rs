@@ -179,6 +179,11 @@ pub const MIGRATIONS: &[Migration] = &[
         ddl: V29,
         data: None,
     },
+    Migration {
+        version: 30,
+        ddl: V30,
+        data: None,
+    },
 ];
 
 /// The highest migration version this binary knows how to produce.
@@ -1034,4 +1039,25 @@ CREATE TABLE notify_targets(
   updated_at TEXT NOT NULL
 );
 ALTER TABLE inbox ADD COLUMN warned_at TEXT;
+"#;
+
+/// Version 30: the operator's phones, one row per Tendril peer the hub paired.
+///
+/// Tendril's own roster holds the keys, the pairing state and the routes; this
+/// row maps a peer to the operator-device principal and is what a request over
+/// a phone's session is checked against. `check_string` is the short
+/// authentication string the phone shows while the row is pending.
+const V30: &str = r#"
+CREATE TABLE devices(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  state TEXT NOT NULL CHECK (state IN ('pending', 'active', 'revoked')),
+  check_string TEXT,
+  paired_at TEXT NOT NULL,
+  confirmed_at TEXT,
+  revoked_at TEXT,
+  last_seen_at TEXT
+);
+CREATE INDEX devices_state ON devices(state);
 "#;

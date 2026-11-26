@@ -20,10 +20,14 @@ Wants=network-online.target
 Image=ghcr.io/agync/agent-hub:1.0.0
 ContainerName=agent-hub
 PublishPort=127.0.0.1:8080:8080
+# Phones dial this directly on the LAN or a tailnet. Their traffic is
+# end-to-end encrypted by Tendril; publish it to the interfaces phones use.
+PublishPort=47319:47319
 Volume=agent-hub-data:/data
 EnvironmentFile=%h/.config/agent-hub/hub.env
 Environment=HUB_DATA_DIR=/data
 Environment=HUB_BIND=0.0.0.0:8080
+Environment=HUB_PHONES_LISTEN=0.0.0.0:47319
 ReadOnly=true
 Tmpfs=/tmp
 HealthCmd=/usr/local/bin/agent-hub health --url http://127.0.0.1:8080

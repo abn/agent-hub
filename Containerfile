@@ -15,6 +15,9 @@ COPY Cargo.toml Cargo.lock ./
 COPY build.rs ./
 COPY vendor ./vendor
 COPY src ./src
+# Cargo.toml declares the browser checks' phone example, so the manifest does
+# not parse without it, though the release build never compiles it.
+COPY examples ./examples
 COPY web ./web
 # The served bootstrap and the installable skill are embedded into the binary
 # at build time.
@@ -26,8 +29,8 @@ ARG GIT_COMMIT=
 ENV GIT_COMMIT=${GIT_COMMIT}
 
 # The image only serves, so it leaves out the client: the stdio proxy and the
-# one-shot calls run on the agents' machines, not here.
-RUN cargo build --release --locked --no-default-features
+# one-shot calls run on the agents' machines, not here. It keeps phones.
+RUN cargo build --release --locked --no-default-features --features phones
 
 RUN mkdir -p /data && chown 65532:65532 /data
 
@@ -40,8 +43,10 @@ USER 65532:65532
 
 ENV HUB_DATA_DIR=/data
 ENV HUB_BIND=0.0.0.0:8080
+ENV HUB_PHONES_LISTEN=0.0.0.0:47319
 
-EXPOSE 8080
+# The HTTP surface, and the direct TCP listener phones dial through Tendril.
+EXPOSE 8080 47319
 
 # The runtime is distroless: no shell and no curl, so the check is the binary's
 # own `health` subcommand, which GETs /readyz. Exec form, because there is no

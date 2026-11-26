@@ -714,7 +714,12 @@ async fn concealed(
     artifact: &Artifact,
     pass: Option<&str>,
 ) -> std::result::Result<bool, Problem> {
-    if artifact.protected || viewer_pass_holds(state, &artifact.id, pass) {
+    // A paired phone is the operator, who could mint a viewer pass; the phone
+    // is not allowed to mint one, so it reads the page without.
+    if artifact.protected
+        || viewer_pass_holds(state, &artifact.id, pass)
+        || crate::principal::on_phone()
+    {
         return Ok(false);
     }
     artifact_store::has_active_share(&state.db, &artifact.id)

@@ -251,6 +251,7 @@ async fn renaming_a_pending_agent_moves_its_grants() {
             agent: "cli",
             os: None,
             host: None,
+            projects: &[],
         },
         20,
     )
@@ -319,6 +320,7 @@ async fn expiring_a_pending_enrolment_removes_its_event_and_search_row() {
             agent: "cli",
             os: None,
             host: None,
+            projects: &[],
         },
         20,
     )
@@ -386,6 +388,7 @@ async fn refusing_an_enrolment_sweeps_its_space_dismissals() {
             agent: "cli",
             os: None,
             host: None,
+            projects: &[],
         },
         20,
     )

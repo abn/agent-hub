@@ -39,7 +39,14 @@ pub struct EnrolRequest {
     pub os: Option<String>,
     #[serde(default)]
     pub host: Option<String>,
+    /// The projects the machine asks to be granted, by id. The operator
+    /// decides; asking grants nothing.
+    #[serde(default)]
+    pub projects: Vec<String>,
 }
+
+/// The most projects one enrolment may ask for.
+const ASKED_PROJECTS_MAX: usize = 16;
 
 /// Query parameters for enrolment status polling.
 #[derive(Debug, Deserialize)]
@@ -149,6 +156,22 @@ pub async fn enrol(
         )));
     }
 
+    // Refused before any of it is read: the route takes no credential, so a
+    // long list must cost nothing.
+    if request.projects.len() > ASKED_PROJECTS_MAX {
+        return Err(Problem::from_error(&Error::InvalidArgument(format!(
+            "an enrolment may ask for at most {ASKED_PROJECTS_MAX} projects"
+        ))));
+    }
+    let mut projects: Vec<String> = Vec::with_capacity(request.projects.len());
+    for project in &request.projects {
+        let project = project.trim();
+        crate::store::projects::validate_id(project).map_err(|err| Problem::from_error(&err))?;
+        if !projects.iter().any(|asked| asked == project) {
+            projects.push(project.to_string());
+        }
+    }
+
     let source = enrolment_source(&state.config, peer, &headers);
 
     let id = match request
@@ -182,6 +205,7 @@ pub async fn enrol(
             agent: &agent,
             os: os.as_deref(),
             host: host.as_deref(),
+            projects: &projects,
         },
         state.config.enrol_pending_max,
     )
@@ -349,6 +373,12 @@ pub async fn approve(
     admin(&state, &headers)?;
 
     let req = body.map(|Json(b)| b).unwrap_or_default();
+    if crate::principal::on_phone() {
+        let asked = identity::asked_projects(&state.db, &id)
+            .await
+            .map_err(|err| Problem::from_error(&err))?;
+        phone_may_approve(&id, &req, &asked)?;
+    }
 
     if let Some(renamed) = req
         .member
@@ -391,6 +421,50 @@ pub async fn approve(
     state.notify();
 
     Ok(Json(member))
+}
+
+/// What a paired phone may approve: the machine as it asked, granting only
+/// projects its enrolment asked for (`payload.projects` on the request).
+/// Renaming the member, sharing, or granting any other project stay with the
+/// web app, where `/members/{id}/grants` is.
+fn phone_may_approve(
+    id: &str,
+    req: &ApproveRequest,
+    asked: &[String],
+) -> std::result::Result<(), Problem> {
+    let renamed = req
+        .member
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|member| !member.is_empty() && member != id);
+    let shared = req.share == Some(true);
+    let unasked: Vec<&str> = req
+        .projects
+        .iter()
+        .flatten()
+        .filter(|project| !asked.contains(project))
+        .map(String::as_str)
+        .collect();
+    if renamed || shared || !unasked.is_empty() {
+        let mut what = Vec::new();
+        if renamed {
+            what.push("rename the member".to_string());
+        }
+        if shared {
+            what.push("share".to_string());
+        }
+        if !unasked.is_empty() {
+            what.push(format!("grant {} it did not ask for", unasked.join(", ")));
+        }
+        return Err(Problem::from_error(&Error::Credential(
+            CredentialReason::OperatorOnly,
+            format!(
+                "a phone approves a machine as it asked; use the web app to {}",
+                what.join(" or ")
+            ),
+        )));
+    }
+    Ok(())
 }
 
 /// `POST /api/v1/enrol/{id}/refuse`

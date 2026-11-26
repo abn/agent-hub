@@ -7,6 +7,9 @@ services:
     environment:
       HUB_DATA_DIR: /data
       HUB_BIND: 0.0.0.0:8080
+      # The direct listener phones dial through Tendril. A phone that pairs
+      # through a code and an address types this port.
+      HUB_PHONES_LISTEN: 0.0.0.0:47319
       HUB_ADMIN_TOKEN: ${HUB_ADMIN_TOKEN:?set HUB_ADMIN_TOKEN in the environment or a .env file}
       # Behind a reverse proxy that rewrites the host, name the address callers
       # use, so the artifact frame policy, the link previews, and the served
@@ -18,6 +21,8 @@ services:
     # front and HUB_PUBLIC_URL set, or reach the hub over a tailnet.
     ports:
       - "8080:8080"
+      # Phones: end-to-end encrypted by Tendril, so plain TCP is fine here.
+      - "47319:47319"
     volumes:
       - hub-data:/data
     read_only: true

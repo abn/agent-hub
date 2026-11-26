@@ -8,6 +8,7 @@ use crate::error::{Error, Result};
 pub mod anchors;
 pub mod artifacts;
 pub mod comments;
+pub mod devices;
 pub mod events;
 pub mod home;
 pub mod ideas;

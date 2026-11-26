@@ -38,6 +38,10 @@ pub const HUB_KEYS: &[&str] = &[
     "tailnet",
     "tailnet_port",
     "tailnet_control_url",
+    "phones",
+    "phones_listen",
+    "phones_relay",
+    "phones_wake_file",
     "notify_url",
     "notify_token",
     "notify_interval_secs",
@@ -336,6 +340,34 @@ pub struct Tailnet {
     pub state_dir: PathBuf,
     /// Optional control server URL, for a self-hosted control plane.
     pub control_url: Option<url::Url>,
+}
+
+/// The port the hub listens for phones on by default, beside the HTTP bind.
+pub const PHONES_PORT: u16 = 47319;
+
+/// How the hub reaches the operator's phones through Tendril.
+#[derive(Debug, Clone)]
+pub struct Phones {
+    /// Whether phones may pair at all.
+    pub enabled: bool,
+    /// The direct TCP listener phones dial on the LAN or a tailnet.
+    pub listen: SocketAddr,
+    /// Whether the hub also offers Tendril's public relay route.
+    pub relay: PhoneRelay,
+    /// A Tendril wake configuration, for a later iOS wake provider. Read and
+    /// checked at start; nothing sends a wake yet.
+    pub wake_file: Option<PathBuf>,
+    /// Tendril's own state: the hub's key and its roster of phones.
+    pub state_dir: PathBuf,
+}
+
+/// The relay route the hub offers phones beside its direct listener.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PhoneRelay {
+    /// Tendril's default public relays. They carry ciphertext only.
+    N0,
+    /// No relay: phones reach the hub on the LAN or a tailnet only.
+    Off,
 }
 
 impl Tailnet {
@@ -744,6 +776,56 @@ impl Config {
         }
 
         Ok(tailnet)
+    }
+
+    /// Read how the hub reaches the operator's phones.
+    pub fn phones_from_env(&self) -> Result<Phones> {
+        self.phones_resolve(&|key| std::env::var(key).ok())
+    }
+
+    pub fn phones_resolve(&self, env: &dyn Fn(&str) -> Option<String>) -> Result<Phones> {
+        let loaded = load_layered_configs(env)?;
+        let files: Vec<&ParsedConfigFile> = loaded.iter().collect();
+        let value = |key: &str, default: Option<&str>| {
+            Setting::resolved(env, "hub", key, &files, default)
+                .value
+                .filter(|value| !value.is_empty())
+        };
+
+        let enabled = match value("phones", Some("on")).as_deref() {
+            None | Some("on") => true,
+            Some("off") => false,
+            Some(other) => {
+                return Err(Error::Config(format!(
+                    "HUB_PHONES must be on or off, not {other:?}"
+                )));
+            }
+        };
+        let listen = match value("phones_listen", None) {
+            Some(addr) => addr.parse().map_err(|_| {
+                Error::Config(format!(
+                    "HUB_PHONES_LISTEN is not an address and port: {addr}"
+                ))
+            })?,
+            None => SocketAddr::new(self.bind.ip(), PHONES_PORT),
+        };
+        let relay = match value("phones_relay", Some("n0")).as_deref() {
+            None | Some("n0") => PhoneRelay::N0,
+            Some("off") => PhoneRelay::Off,
+            Some(other) => {
+                return Err(Error::Config(format!(
+                    "HUB_PHONES_RELAY must be n0 or off, not {other:?}"
+                )));
+            }
+        };
+        let wake_file = value("phones_wake_file", None).map(PathBuf::from);
+        Ok(Phones {
+            enabled,
+            listen,
+            relay,
+            wake_file,
+            state_dir: self.data_dir.join("tendril"),
+        })
     }
 
     /// Path to the hub store.
@@ -1463,6 +1545,16 @@ pub fn generate_config_rows(env: &dyn Fn(&str) -> Option<String>) -> Result<Vec<
             "hub",
             "tailnet_control_url",
             "HUB_TAILNET_CONTROL_URL",
+            None,
+            false,
+        ),
+        ("hub", "phones", "HUB_PHONES", Some("on"), false),
+        ("hub", "phones_listen", "HUB_PHONES_LISTEN", None, false),
+        ("hub", "phones_relay", "HUB_PHONES_RELAY", Some("n0"), false),
+        (
+            "hub",
+            "phones_wake_file",
+            "HUB_PHONES_WAKE_FILE",
             None,
             false,
         ),

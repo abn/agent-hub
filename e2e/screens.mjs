@@ -77,6 +77,7 @@ export function screenRoutes(hub, wiki) {
     more: [["More", "#/more", "main .more-screen .more-row"]],
     access: [["Members and tokens", "#/access", "main .member-index-row, main .member-row, main .access-row"]],
     connect: [["Connect", "#/connect?next=%2Fstorage", "main .connect .connect-field"]],
+    phones: [["Phones", "#/phones", "main .phones .phones-add"]],
     // The short address replaces itself with the artifact's own, so the
     // artifact's selected stage is what says it has painted.
     id: [

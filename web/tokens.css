@@ -62,6 +62,9 @@
   --action-bg: #F1E4D8;
   --ok: #2C6A3D;
   --ok-bg: #DFEBE1;
+  /* A QR reader needs dark modules on a light ground, so the pairing picture
+     keeps these in both themes. */
+  --qr-ink: #151A17; --qr-ground: #FFFFFF;
   /* Deletion only. */
   --danger: #A3154A;
   --danger-bg: #F7E3EA;

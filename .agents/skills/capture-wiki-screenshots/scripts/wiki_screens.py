@@ -218,6 +218,7 @@ def captures(seeded: dict, older_version: int) -> list[tuple[str, str, str]]:
         ("notifications", "main .notify-row", "notifications"),
         ("access", "main .access-screen, main .form-row-title", "access"),
         ("connect", "main .connect .connect-field", "connect"),
+        ("phones", "main .phones .phones-add", "phones"),
         ("more", "main .more-screen .more-row", "more"),
         # The member's own stage: its token, its live sessions and the agents it
         # has run, over the two members the identity seed adds.
@@ -360,6 +361,32 @@ def capture_who(page, project: str, width: str, theme: str) -> Path:
         "() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
     )
     return shot(page, "who-menu", width, theme)
+
+
+def capture_phone_code(page, width: str, theme: str) -> Path:
+    """Press Add a phone on Settings > Phones and photograph the code it makes.
+
+    The code, the QR picture and the address are the hub's and differ on every
+    run, so this image is never a byte-level match of the last one.
+    """
+    page.evaluate("location.hash = '#/settings'")
+    page.wait_for_selector("main .form-row-title, main .row .title", timeout=10000)
+    page.evaluate("location.hash = '#/phones'")
+    page.wait_for_selector("main .phones .phones-add", timeout=15000)
+    page.evaluate(
+        """() => [...document.querySelectorAll('[data-action="phones-issue"]')]
+             .filter((control) => control.offsetParent !== null)
+             .pop()
+             ?.click()"""
+    )
+    page.wait_for_selector("main .phones .phones-qr", timeout=15000)
+    page.evaluate(
+        "() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))"
+    )
+    path = shot(page, "phones-code", width, theme)
+    # Close the code, so the next width starts from the same screen.
+    page.evaluate("""() => document.querySelector('[data-action="phones-close"]')?.click()""")
+    return path
 
 
 def open_dialog(page, opener: str) -> None:
@@ -515,6 +542,10 @@ def run() -> int:
                         written.append(capture_who(page, seeded["project_id"], width, theme))
                     except Exception as problem:  # playwright timeout, etc.
                         failures.append(f"{width} {theme} #who-menu: {type(problem).__name__}: {problem}")
+                    try:
+                        written.append(capture_phone_code(page, width, theme))
+                    except Exception as problem:  # playwright timeout, etc.
+                        failures.append(f"{width} {theme} #phones-code: {type(problem).__name__}: {problem}")
                     for stem, route, ready, opener, widths in dialogs(seeded, older_version):
                         if width not in widths:
                             continue
