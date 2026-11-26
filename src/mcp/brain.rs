@@ -315,6 +315,17 @@ impl HubServer {
         }
 
         self.state.notify();
+        if ended.iter().any(|id| id == &session.id) {
+            self.state.notifier.notice(crate::notify::Notice {
+                event: crate::notify::Event::Ended,
+                kind: "session".to_string(),
+                id: Some(session.id.clone()),
+                project_id: Some(session.project_id.clone()),
+                session_id: Some(session.id.clone()),
+                summary: None,
+                due_in_mins: None,
+            });
+        }
         Ok(CallToolResult::structured(
             json!({ "ok": true, "ended": ended }),
         ))

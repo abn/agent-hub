@@ -91,6 +91,11 @@ impl HubServer {
             )
             .await
             .map_err(to_error_data)?;
+        let (kind, project_id, summary) = (
+            params.kind.clone(),
+            params.project_id.clone(),
+            params.summary.clone(),
+        );
         let event = NewEvent {
             project_id: params.project_id,
             kind: params.kind,
@@ -129,7 +134,13 @@ impl HubServer {
 
         // A replayed approval waits on nothing new, so it does not nudge.
         if needs_action && !appended.replayed {
-            self.state.notify_waiting();
+            self.state.notify_waiting(crate::notify::Notice::ask(
+                &kind,
+                &appended.id,
+                Some(&project_id),
+                resolved.session_id(),
+                Some(&summary),
+            ));
         } else {
             self.state.notify();
         }

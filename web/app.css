@@ -9473,6 +9473,30 @@ button.storage-prune-all {
   color: var(--ink-3);
 }
 .settings-row-count { font-size: var(--t-13); color: var(--ink-2); }
+/* Notifications. A target is a settings row whose label carries two lines of
+   copy and a line of verbs, so it grows to hold them and never because of its
+   switch, which stays at the row's control size beside the name. */
+.notify-row { align-items: flex-start; }
+.notify-status { color: var(--ink-2); overflow-wrap: anywhere; }
+.notify-raw { font-size: var(--t-12); color: var(--ink-2); }
+.notify-raw summary { cursor: pointer; min-height: 24px; line-height: 24px; width: max-content; }
+.notify-raw code { display: block; overflow-wrap: anywhere; padding-top: var(--s-1); }
+.notify-row-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); padding-top: var(--s-1); }
+.notify-row-actions button { min-height: var(--ctl); padding: 0 var(--s-3); font-size: var(--t-13); }
+.notify-empty { margin: 0; padding-top: var(--s-5); max-width: 640px; font-size: var(--t-15); line-height: 1.5; color: var(--ink-2); }
+.notify-column > .notify-add { align-self: flex-start; margin-top: var(--s-4); }
+.notify-dialog { max-height: calc(100dvh - 2 * var(--s-4)); overflow-y: auto; }
+.notify-url { font-family: var(--font-mono); font-size: var(--t-13); }
+.notify-events { display: flex; flex-direction: column; margin: 0; padding: 0; border: 0; }
+.notify-events legend { padding: 0; margin-bottom: var(--s-1); }
+.notify-check {
+  display: flex; align-items: center; gap: var(--s-2); min-height: var(--ctl);
+  margin: 0; font-size: var(--t-15); color: var(--ink); cursor: pointer;
+}
+.notify-check input { width: 18px; height: 18px; min-height: 0; margin: 0; padding: 0; accent-color: var(--accent); }
+@media (pointer: coarse) {
+  .notify-row-actions button, .notify-check { min-height: var(--tap); }
+}
 .settings-data-path {
   flex: 1;
   min-width: 0;

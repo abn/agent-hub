@@ -71,6 +71,12 @@ GET    /api/v1/enrol/status?wait=30
 POST   /api/v1/enrol/:id/approve
 POST   /api/v1/enrol/:id/refuse
 
+GET    /api/v1/notify/targets
+POST   /api/v1/notify/targets
+PATCH  /api/v1/notify/targets/:id
+DELETE /api/v1/notify/targets/:id
+POST   /api/v1/notify/targets/:id/test
+
 GET    /api/v1/artifacts
 GET    /api/v1/artifacts/:id
 GET    /api/v1/artifacts/:id/versions
@@ -286,6 +292,33 @@ from the one requested. The human approves with `POST /api/v1/enrol/:id/approve`
 (body `{member}` to rename) or refuses. While pending, the token answers `401`
 with `token_pending` on every other route. Switching enrolment off answers `403`
 with `enrol_disabled`.
+
+## Notify targets
+
+The routes are admin only. `GET /api/v1/notify/targets` returns `targets` and
+`presets`. A target carries `id`, `name`, `preset`, `url` (the origin, with
+`/...` when there is more), `token_set`, `content` (`none`, `title` or `full`),
+`events` (any of `ask`, `deadline`, `ended`), `enabled`, `source` (`config` for
+`notify_url`, otherwise `hub`) and `status` with `last_attempt_at`,
+`last_delivered_at`, `last_error` and `failures`. A preset carries `preset`,
+`label`, `url_hint`, `takes_token`, `default_content` and `vendor_cloud`.
+
+```
+POST /api/v1/notify/targets
+  {"name":"Phone","preset":"ntfy","url":"https://ntfy.lan/agent-hub",
+   "token":"tk_...","content":"title","events":["ask","deadline"],"enabled":true}
+```
+
+`preset`, `name` and `url` are required; `content` defaults to the preset's,
+`events` to `ask` and `deadline`. `PATCH` takes the same fields, each optional:
+an absent `url` or `token` keeps the stored one, and an empty `token` clears it.
+A `url` on another scheme, host or port drops the stored token unless the same
+request names one.
+`POST /api/v1/notify/targets/:id/test` sends one test notice now and answers
+`{delivered, error, target}`; a target that refuses is `delivered: false`, not a
+failed request. The `config` target can be tested but answers `409` to a change
+or a delete. A hub holds at most 16 targets.
+[Notifications](/operate/notifications.md) has the payloads.
 
 ## Errors
 

@@ -174,6 +174,11 @@ static SHELL_ASSETS: &[Asset] = &[
         content_type: "text/javascript; charset=utf-8",
     },
     Asset {
+        path: "/notifications.mjs",
+        body: include_bytes!("../../web/notifications.mjs"),
+        content_type: "text/javascript; charset=utf-8",
+    },
+    Asset {
         path: "/more.mjs",
         body: include_bytes!("../../web/more.mjs"),
         content_type: "text/javascript; charset=utf-8",

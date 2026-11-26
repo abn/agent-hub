@@ -171,6 +171,7 @@ fn hub_entries(dir: &Path) -> Vec<PathBuf> {
         enrol_pending_ttl: Duration::ZERO,
         trusted_proxies: Vec::new(),
         notify: None,
+        notify_delivery: Default::default(),
         backup_dir: None,
     };
     let store = config.hub_db_path();

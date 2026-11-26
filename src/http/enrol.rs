@@ -188,7 +188,13 @@ pub async fn enrol(
     .await
     .map_err(|err| Problem::from_error(&err))?;
 
-    state.notify_waiting();
+    state.notify_waiting(crate::notify::Notice::ask(
+        "enrolment",
+        &member.id,
+        None,
+        None,
+        None,
+    ));
 
     Ok((
         StatusCode::ACCEPTED,

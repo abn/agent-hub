@@ -1,4 +1,4 @@
-// Settings: Appearance, Alerts, Access, and This browser.
+// Settings: Appearance, Alerts, Access, Notifications, and This browser.
 // Seven controls total.
 
 import { api } from "./api.mjs";
@@ -182,10 +182,14 @@ function desktopAlertsRow() {
 }
 
 export async function settingsScreen(gen) {
-  const [membersRes, storage] = await Promise.all([
+  const [membersRes, storage, notify] = await Promise.all([
     api("/api/v1/members").catch(() => ({ members: [] })),
     api("/api/v1/storage").catch(() => null),
+    api("/api/v1/notify/targets").catch(() => null),
   ]);
+  // The row reads the targets that are on; with none the hub sends nothing.
+  const targetsOn = (notify?.targets || []).filter((target) => target.enabled).length;
+  const notifyText = notify ? (targetsOn ? `${targetsOn} on` : "Off") : "";
   const members = membersRes.members || [];
   let latestSeen = null;
   for (const a of members) {
@@ -317,6 +321,13 @@ export async function settingsScreen(gen) {
             <span class="form-row-value">${esc(memberCountText)}</span>
             ${NAV_CHEVRON}
           </a>
+          <a class="form-row" href="#/notifications">
+            <div class="form-row-main">
+              <span class="form-row-title">Notifications</span>
+            </div>
+            <span class="form-row-value">${esc(notifyText)}</span>
+            ${NAV_CHEVRON}
+          </a>
           <a class="form-row" href="#/connect">
             <div class="form-row-main">
               <span class="form-row-title">Connect</span>
@@ -388,6 +399,11 @@ export async function settingsScreen(gen) {
         <a href="#/access" class="settings-flat-row row settings-nav-row">
           <span class="title settings-row-label">Members and tokens</span>
           <span class="meta settings-row-count">${esc(memberCountText)}</span>
+          <span class="settings-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
+        </a>
+        <a href="#/notifications" class="settings-flat-row row settings-nav-row">
+          <span class="title settings-row-label">Notifications</span>
+          <span class="meta settings-row-count">${esc(notifyText)}</span>
           <span class="settings-row-chevron">${glyphSvg("chevronRight", { size: 18 })}</span>
         </a>
         <a href="#/connect" class="settings-flat-row row settings-nav-row">

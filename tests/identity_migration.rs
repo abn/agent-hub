@@ -212,10 +212,13 @@ fn key(member: &str, agent: &str) -> ParticipantKey {
 }
 
 #[tokio::test]
-async fn a_fresh_directory_opens_at_28_with_no_backup() {
+async fn a_fresh_directory_opens_at_the_latest_with_no_backup() {
     let dir = TempDir::new("idm-fresh");
     let state = open(&dir).await;
-    assert_eq!(state.schema_version, 28);
+    assert_eq!(
+        state.schema_version,
+        agent_hub::store::schema::SUPPORTED_MAX
+    );
     assert!(
         !dir.join("backups").exists(),
         "a fresh store has nothing to copy aside"
@@ -695,7 +698,11 @@ async fn an_unplaced_owner_stops_the_start_and_changes_nothing() {
     )
     .expect("map");
     let state = open(&dir).await;
-    assert_eq!(state.schema_version, 28, "a mapped owner opens");
+    assert_eq!(
+        state.schema_version,
+        agent_hub::store::schema::SUPPORTED_MAX,
+        "a mapped owner opens"
+    );
 }
 
 #[tokio::test]
@@ -750,9 +757,12 @@ async fn a_v20_store_is_planned_on_a_staged_copy() {
     )
     .expect("map");
     let state = open(&dir).await;
-    assert_eq!(state.schema_version, 28);
+    assert_eq!(
+        state.schema_version,
+        agent_hub::store::schema::SUPPORTED_MAX
+    );
     let stopped = schema_version(&state.db).await.expect("version");
-    assert_eq!(stopped, 28);
+    assert_eq!(stopped, agent_hub::store::schema::SUPPORTED_MAX);
 }
 
 #[tokio::test]

@@ -283,25 +283,11 @@ async fn a_second_start_writes_no_pre_migration_backup() {
         let db = agent_hub::store::open_engine(&older.path().join("hub.db"))
             .await
             .expect("open engine");
-        let conn = db.connect().expect("connect");
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL)",
-            (),
-        )
-        .await
-        .expect("schema_version table");
+        // The real migrations, data steps included, stopped one short.
         let newest = schema::MIGRATIONS.last().expect("migrations").version;
-        for migration in schema::MIGRATIONS.iter().filter(|m| m.version < newest) {
-            conn.execute_batch(migration.ddl)
-                .await
-                .expect("apply migration");
-            conn.execute(
-                "INSERT INTO schema_version(version) VALUES (?1)",
-                [migration.version],
-            )
+        agent_hub::store::migrate_to(&db, newest - 1)
             .await
-            .expect("record version");
-        }
+            .expect("migrate to the version before the newest");
     }
     let config = common::state::config(&older);
     let state = AppState::open(config.clone()).await.expect("upgrade");

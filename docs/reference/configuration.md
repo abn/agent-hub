@@ -88,9 +88,9 @@ took effect.
 | `tailnet` | `HUB_TAILNET` | unset | A Tailscale auth key; enables the optional embedded tailnet endpoint |
 | `tailnet_port` | `HUB_TAILNET_PORT` | `8080` | Port to serve on the tailnet address |
 | `tailnet_control_url` | `HUB_TAILNET_CONTROL_URL` | unset | Control server URL for a self-hosted control plane; the public one is the default |
-| `notify_url` | `HUB_NOTIFY_URL` | unset | An `http` or `https` URL the hub POSTs a fixed, contentless sentence to when something starts waiting on the human; unset sends nothing. It may not carry credentials, and any path or query is hidden when the configuration is printed |
+| `notify_url` | `HUB_NOTIFY_URL` | unset | An `http` or `https` URL the hub POSTs a fixed, contentless sentence to when something starts waiting on the human; unset sends none. Other targets are added in the app. It may not carry credentials, and any path or query is hidden when the configuration is printed |
 | `notify_token` | `HUB_NOTIFY_TOKEN` | unset | Sent to the notify target as `Authorization: Bearer`; masked wherever the configuration is printed |
-| `notify_interval_secs` | `HUB_NOTIFY_INTERVAL_SECS` | `60` | Least time between two notify sends; items inside it become one trailing send; 1 to 86400 seconds |
+| `notify_interval_secs` | `HUB_NOTIFY_INTERVAL_SECS` | `60` | Least time between two sends to one notify target, for every target; items inside it become one trailing send; 1 to 86400 seconds |
 | `backup_dir` | `HUB_BACKUP_DIR` | unset | Existing directory, outside the data directory, where the serving hub writes an online backup; unset turns online backup off |
 
 ### `public_url`
@@ -120,8 +120,10 @@ reverse proxy.
 Set `HUB_NOTIFY_URL` to have the hub POST a fixed, contentless sentence to a
 target you run when something starts waiting. It may not carry credentials (set
 `HUB_NOTIFY_TOKEN` instead), and the token is sent only in the `Authorization`
-header and never logged. [Notifications](/operate/notifications.md) covers the
-coalescing and the failure behaviour.
+header and never logged. Targets for other services, with more content, are
+added in **Settings > Notifications** and kept in the store, not here.
+[Notifications](/operate/notifications.md) covers both, the rate limit and the
+failure behaviour.
 
 ### Online backup
 

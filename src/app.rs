@@ -515,13 +515,17 @@ impl AppState {
         let integrity_sample = Config::integrity_sample_from_env()?;
         let (ticker, _) = tokio::sync::broadcast::channel(16);
         let (revocations, _) = tokio::sync::broadcast::channel(64);
-        let notifier = match &config.notify {
-            Some(target) => {
-                tracing::info!(target = %target.redacted(), interval_secs = target.interval.as_secs(), "notify target configured");
-                crate::notify::Notifier::start(target.clone())
-            }
-            None => crate::notify::Notifier::off(),
-        };
+        if let Some(target) = &config.notify {
+            tracing::info!(target = %target.redacted(), interval_secs = target.interval.as_secs(), "notify target configured");
+        }
+        let stored_targets = store::notify_targets::list(&db).await?;
+        let notifier = crate::notify::Notifier::start(
+            db.clone(),
+            config.notify.clone(),
+            &stored_targets,
+            config.notify_delivery.clone(),
+            config.public_url.clone(),
+        );
         let state = Self {
             config: Arc::new(config),
             data_dir,
@@ -593,11 +597,11 @@ impl AppState {
     }
 
     /// Nudge stream subscribers after a write that left something waiting on
-    /// the human: a question, an approval, or an enrolment request. The
-    /// operator's notify target, when one is configured, is told too.
-    pub fn notify_waiting(&self) {
+    /// the human: a question, an approval, an idea, or an enrolment request.
+    /// The operator's notify targets are told too.
+    pub fn notify_waiting(&self, notice: crate::notify::Notice) {
         self.notify();
-        self.notifier.waiting();
+        self.notifier.notice(notice);
     }
 
     /// Nudge subscribers that one artifact's live version moved.
@@ -687,6 +691,20 @@ impl AppState {
         let settled = store::questions::expire_due(&self.db, now).await?;
         if settled > 0 {
             self.notify();
+        }
+        // A warning is only worth its write while some target may send it.
+        if self.notifier.takes(crate::notify::Event::Deadline) {
+            for item in store::inbox::warn_near_deadline(&self.db, now).await? {
+                self.notifier.notice(crate::notify::Notice {
+                    event: crate::notify::Event::Deadline,
+                    kind: item.kind,
+                    id: Some(item.event_id),
+                    project_id: Some(item.project_id),
+                    session_id: item.session_id,
+                    summary: Some(item.summary),
+                    due_in_mins: Some(item.due_in_mins),
+                });
+            }
         }
         Ok(settled)
     }

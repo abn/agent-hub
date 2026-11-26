@@ -242,6 +242,27 @@ The pages under [Guides](/guides/index.md) explain what each screen does.
   <img src="assets/screens/settings-phone-light.png" alt="Settings, its rows under quiet group labels.">
 </picture>
 
+### Notifications, desktop
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screens/notifications-desktop-dark.png">
+  <img src="assets/screens/notifications-desktop-light.png" alt="Notifications: each target with its switch, the outcome of its last send, and its verbs.">
+</picture>
+
+### Notifications, phone
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screens/notifications-phone-dark.png">
+  <img src="assets/screens/notifications-phone-light.png" alt="Notifications: each target with its switch, the outcome of its last send, and its verbs.">
+</picture>
+
+### Add a notification target
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screens/notify-add-desktop-dark.png">
+  <img src="assets/screens/notify-add-desktop-light.png" alt="The add target dialog: service, name, URL, what it sends and when.">
+</picture>
+
 ### Access and tokens, desktop
 
 <picture>

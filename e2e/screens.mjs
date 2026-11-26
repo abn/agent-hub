@@ -73,6 +73,7 @@ export function screenRoutes(hub, wiki) {
     search: [["Search", `#/search?q=${encodeURIComponent(hub.fixture.searchTerm)}`, "main .search-row"]],
     storage: [["Storage", "#/storage", "main .storage .storage-row"]],
     settings: [["Settings", "#/settings", "main .row .title, main .form-row-title"]],
+    notifications: [["Notifications", "#/notifications", "main .notify-column"]],
     more: [["More", "#/more", "main .more-screen .more-row"]],
     access: [["Members and tokens", "#/access", "main .member-index-row, main .member-row, main .access-row"]],
     connect: [["Connect", "#/connect?next=%2Fstorage", "main .connect .connect-field"]],
