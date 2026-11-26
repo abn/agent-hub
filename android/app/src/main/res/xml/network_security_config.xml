@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cleartext is refused everywhere, except for "hub": the placeholder host of the hub's REST, which
+     is carried inside Tendril's encrypted session and never dials a network (see HubTransport). -->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="false" />
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">hub</domain>
+  </domain-config>
+</network-security-config>
