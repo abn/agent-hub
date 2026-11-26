@@ -53,3 +53,13 @@ __pycache__/
 /site/.toolchain-work/
 /site/node_modules/
 /site/.wrangler/
+
+# Android app build output and local config
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/local.properties
+/android/captures/
+*.keystore
+*.p12
+keystore.properties
