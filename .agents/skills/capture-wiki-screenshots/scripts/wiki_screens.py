@@ -20,10 +20,12 @@ registers but the set does not carry is named at the end of the run.
 
 from __future__ import annotations
 
+import http.server
 import json
 import os
 import shutil
 import sys
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -213,6 +215,7 @@ def captures(seeded: dict, older_version: int) -> list[tuple[str, str, str]]:
         ("search?q=nightly", "main .search-results .search-row", "search"),
         ("storage", "main .storage .storage-row", "storage"),
         ("settings", "main .form-row-title, main .row .title", "settings"),
+        ("notifications", "main .notify-row", "notifications"),
         ("access", "main .access-screen, main .form-row-title", "access"),
         ("connect", "main .connect .connect-field", "connect"),
         ("more", "main .more-screen .more-row", "more"),
@@ -244,6 +247,7 @@ def dialogs(seeded: dict, older: int) -> list[tuple[str, str, str, str, tuple[st
         ("prune", "storage", "main .storage", "[data-action='storage-prune-all'], .storage-prune-all-btn", both),
         ("issue-token", f"access?member={harness.AGENT_ID}", "main .member-detail-controls", '[data-action="member-token"], [data-action="member-issue"]', ("desktop",)),
         ("revert", diff, "main .wiki-diff", '[data-action="wiki-revert"]', both),
+        ("notify-add", "notifications", "main .notify-row", '[data-action="notify-add"]', both),
     ]
 
 
@@ -257,6 +261,42 @@ def artifact_gate_ready(page) -> None:
 
 # The routes whose frame carries the document, and the extra wait each needs.
 READY = {"artifact-viewer": artifact_gate_ready}
+
+
+class _Accepting(http.server.BaseHTTPRequestHandler):
+    """A notify target that takes every send, so a test send reads delivered."""
+
+    def do_POST(self) -> None:  # noqa: N802 - the handler's own name
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        self.send_response(204)
+        self.end_headers()
+
+    def log_message(self, *_args) -> None:
+        pass
+
+
+def seed_notify_targets(port: int) -> None:
+    """Three notify targets: one delivered, one failing, one switched off.
+
+    The delivered one sends to a receiver on loopback and the failing one to a
+    port nothing holds, so the rows show both outcomes from a real test send.
+    No row shows a URL, so neither address reaches an image.
+    """
+    receiver = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Accepting)
+    threading.Thread(target=receiver.serve_forever, daemon=True).start()
+    closed = harness.free_port()
+    targets = [
+        {"name": "Phone", "preset": "ntfy", "content": "title",
+         "url": f"http://127.0.0.1:{receiver.server_address[1]}/agent-hub"},
+        {"name": "Team chat", "preset": "slack", "events": ["ask"],
+         "url": f"http://127.0.0.1:{closed}/services/T0/B0/X0"},
+        {"name": "Home automation", "preset": "webhook", "events": ["ended"], "enabled": False,
+         "url": f"http://127.0.0.1:{closed}/hooks/agent-hub"},
+    ]
+    for target in targets:
+        created = json.loads(harness.request(port, "POST", "/api/v1/notify/targets", target))
+        if target.get("enabled", True):
+            harness.request(port, "POST", f"/api/v1/notify/targets/{created['id']}/test")
 
 
 def shot(page, stem: str, width: str, theme: str) -> Path:
@@ -391,6 +431,7 @@ def run() -> int:
         # The seeded member holds a live token, so Members shows Reissue and
         # the token dialog is the same state at every width and theme.
         harness.request(port, "POST", f"/api/v1/members/{harness.AGENT_ID}/token")
+        seed_notify_targets(port)
         # The page is written twice, so its history holds an older version. The
         # version numbers are the hub's, read back rather than assumed, so the
         # diff and the revert dialog are photographed against a version that

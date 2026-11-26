@@ -30,6 +30,7 @@ const screens = (hub, member) => [
   ["a member", `#/access?member=${encodeURIComponent(member)}`, "main .member-detail-body, main .access-screen"],
   ["connect", "#/connect", "main .connect .connect-field"],
   ["more", "#/more", "main .more-screen .more-row"],
+  ["notifications", "#/notifications", "main .notify-column"],
 ];
 
 // The first member that has joined, so the screen that reads one is audited

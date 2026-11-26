@@ -720,6 +720,7 @@ mod tests {
             enrol_pending_ttl: std::time::Duration::from_secs(24 * 60 * 60),
             trusted_proxies: Vec::new(),
             notify: None,
+            notify_delivery: Default::default(),
             backup_dir: None,
         })
         .await

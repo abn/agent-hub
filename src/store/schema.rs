@@ -174,6 +174,11 @@ pub const MIGRATIONS: &[Migration] = &[
         ddl: V28,
         data: Some(DataStep::Members),
     },
+    Migration {
+        version: 29,
+        ddl: V29,
+        data: None,
+    },
 ];
 
 /// The highest migration version this binary knows how to produce.
@@ -1006,4 +1011,27 @@ DROP TABLE agents;
 CREATE UNIQUE INDEX members_personal_project ON members(personal_project_id);
 CREATE INDEX members_pending_source ON members(enrol_source) WHERE state = 'pending';
 CREATE INDEX member_tokens_member ON member_tokens(member_id);
+"#;
+
+/// Version 29: the operator's notify targets, and the deadline warning mark.
+///
+/// A target is where the hub sends a notice: a preset that fixes the payload
+/// shape, the URL (which may carry the service's secret, so it is never read
+/// back out), an optional token, how much the notice may say, which events it
+/// takes, and whether it is on. `inbox.warned_at` records that an open item's
+/// near-deadline notice went out, so a restart does not send it twice.
+const V29: &str = r#"
+CREATE TABLE notify_targets(
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  preset TEXT NOT NULL,
+  url TEXT NOT NULL,
+  token TEXT,
+  content TEXT NOT NULL DEFAULT 'none',
+  events TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+ALTER TABLE inbox ADD COLUMN warned_at TEXT;
 "#;

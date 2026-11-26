@@ -44,6 +44,7 @@ import { projectSettingsScreen } from "./project-settings.mjs";
 import { render, resourceRoute, setScreens } from "./router.mjs";
 import { searchScreen } from "./search.mjs";
 import { endSession, pruneSession, sessionInProject } from "./sessions.mjs";
+import { notificationsScreen } from "./notifications.mjs";
 import { deleteProject, enableNotifications, settingsScreen, signOut } from "./settings.mjs";
 import { installShell } from "./shell.mjs";
 import { pruneProject, storageScreen } from "./storage.mjs";
@@ -93,6 +94,7 @@ setScreens({
   search: (params, gen) => searchScreen(params.get("q"), gen),
   storage: (params, gen) => storageScreen(gen),
   settings: (params, gen) => settingsScreen(gen),
+  notifications: (params, gen) => notificationsScreen(gen),
   more: (params, gen) => moreScreen(gen),
   access: (params, gen) => accessScreen(gen),
   connect: (params, gen) => connectScreen(params, gen),

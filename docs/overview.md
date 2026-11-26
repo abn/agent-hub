@@ -95,9 +95,10 @@ Two things are intended design rather than shipped behaviour, and every page
 says which it is. Background push notifications are deferred: an installed app
 that is fully closed raises nothing, and the hub keeps an in-app notification
 and a freshness stream instead ([ADR 0016](/adr/0016-push-notifications-deferred.md)).
-The one exception is opt-in: point the hub at a notify target you run, such as
-a self-hosted ntfy topic, and it sends a contentless nudge when something starts
-waiting ([ADR 0026](/adr/0026-contentless-notify-target.md)). The embedded
+The one exception is opt-in: add a notify target, such as a self-hosted ntfy
+topic or a chat webhook, and the hub sends a notice when something starts
+waiting, a ping by default
+([ADR 0040](/adr/0040-notify-targets-with-content-levels.md)). The embedded
 tailnet endpoint is experimental
 ([ADR 0014](/adr/0014-optional-embedded-tailnet.md)).
 

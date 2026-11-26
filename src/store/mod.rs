@@ -16,6 +16,7 @@ pub mod identity;
 pub mod inbox;
 pub mod migrate;
 pub mod notifications;
+pub mod notify_targets;
 pub mod page_comments;
 pub mod projects;
 pub mod prune;

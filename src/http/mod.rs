@@ -34,6 +34,7 @@ pub mod kb_comments;
 pub mod me;
 pub mod members;
 pub mod metrics;
+pub mod notify;
 pub mod origin;
 pub mod problem;
 pub mod projects;
@@ -211,6 +212,15 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/prune/undo/{token}", post(storage::undo))
         .route("/api/v1/backups", post(backup::create))
+        .route(
+            "/api/v1/notify/targets",
+            get(notify::list).post(notify::create),
+        )
+        .route(
+            "/api/v1/notify/targets/{id}",
+            patch(notify::change).delete(notify::delete),
+        )
+        .route("/api/v1/notify/targets/{id}/test", post(notify::test))
         .route("/api/v1/search", get(search::search))
         .route("/id/{id}", get(resolve::redirect))
         .route("/api/v1/resolve/{id}", get(resolve::resolve))

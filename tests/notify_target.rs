@@ -1,9 +1,11 @@
-//! The contentless nudge to an operator-configured target.
+//! Notices to the operator's targets.
 //!
-//! A receiver bound on a loopback port stands in for the operator's ntfy or
-//! webhook endpoint. The hub is driven through its real router, the way an
-//! agent reaches it, and the receiver records every POST it is sent.
+//! A receiver bound on a loopback port stands in for the operator's ntfy,
+//! webhook or chat endpoint. The hub is driven through its real router, the
+//! way an agent and the operator reach it, and the receiver records every
+//! request it is sent, answering with the statuses a check scripts.
 
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -13,7 +15,7 @@ use agent_hub::store::projects;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderMap, Request, StatusCode, header};
+use axum::http::{HeaderMap, Method, Request, StatusCode, Uri, header};
 use axum::routing::post;
 use serde_json::{Value, json};
 use tokio_stream::StreamExt;
@@ -21,27 +23,45 @@ use tower::ServiceExt;
 
 mod common;
 
-use common::state::TestState;
+use common::state::{ADMIN_TOKEN, TestState};
 
 const PROTOCOL_VERSION: &str = "2025-06-18";
 const PROJECT: &str = "zebra-launch";
 const AGENT: &str = "agent-quokka";
 const SUBJECT: &str = "Ship the nightly build to production?";
 const TOKEN: &str = "tk_notify_bearer";
+const PUBLIC_URL: &str = "https://hub.example";
 
-/// One POST the receiver was sent.
+/// One request the receiver was sent.
 #[derive(Clone, Debug)]
 struct Hit {
     at: Instant,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
     authorization: Option<String>,
     content_type: Option<String>,
     body: String,
 }
 
-/// A stand-in for the operator's target on a loopback port.
-struct Receiver {
-    url: String,
+impl Hit {
+    fn json(&self) -> Value {
+        serde_json::from_str(&self.body).unwrap_or_else(|_| panic!("a JSON body: {}", self.body))
+    }
+}
+
+#[derive(Clone, Default)]
+struct Shared {
     hits: Arc<Mutex<Vec<Hit>>>,
+    replies: Arc<Mutex<VecDeque<StatusCode>>>,
+}
+
+/// A stand-in for the operator's target on a loopback port. It takes any
+/// method on any path.
+struct Receiver {
+    base: String,
+    url: String,
+    shared: Shared,
 }
 
 impl Receiver {
@@ -50,19 +70,23 @@ impl Receiver {
             .await
             .expect("bind receiver");
         let addr = listener.local_addr().expect("receiver address");
-        let hits = Arc::new(Mutex::new(Vec::new()));
-        let app = Router::new()
-            .route("/agent-hub", post(record))
-            .with_state(hits.clone());
+        let shared = Shared::default();
+        let app = Router::new().fallback(record).with_state(shared.clone());
         tokio::spawn(async move { axum::serve(listener, app).await });
         Self {
+            base: format!("http://{addr}"),
             url: format!("http://{addr}/agent-hub"),
-            hits,
+            shared,
         }
     }
 
+    /// Answer the next requests with these statuses, then 200.
+    fn reply(&self, statuses: &[StatusCode]) {
+        self.shared.replies.lock().unwrap().extend(statuses);
+    }
+
     fn hits(&self) -> Vec<Hit> {
-        self.hits.lock().unwrap().clone()
+        self.shared.hits.lock().unwrap().clone()
     }
 
     /// Wait until the receiver holds `count` hits, or fail after `limit`.
@@ -83,19 +107,39 @@ impl Receiver {
     }
 }
 
-async fn record(State(hits): State<Arc<Mutex<Vec<Hit>>>>, headers: HeaderMap, body: String) {
+async fn record(
+    State(shared): State<Shared>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: String,
+) -> StatusCode {
+    // The hub only ever POSTs or PUTs. A loopback port can be probed by other
+    // software on the machine, and its GET is not a send.
+    if method == Method::GET {
+        return StatusCode::NOT_FOUND;
+    }
     let header = |name: header::HeaderName| {
         headers
             .get(name)
             .and_then(|value| value.to_str().ok())
             .map(str::to_string)
     };
-    hits.lock().unwrap().push(Hit {
+    shared.hits.lock().unwrap().push(Hit {
         at: Instant::now(),
+        method,
+        uri,
         authorization: header(header::AUTHORIZATION),
         content_type: header(header::CONTENT_TYPE),
+        headers,
         body,
     });
+    shared
+        .replies
+        .lock()
+        .unwrap()
+        .pop_front()
+        .unwrap_or(StatusCode::OK)
 }
 
 /// A hub with one project and one agent, mounted the way it is served.
@@ -107,7 +151,13 @@ struct Hub {
 
 impl Hub {
     async fn start(tag: &str, adjust: impl FnOnce(&mut Config)) -> Self {
-        let state = common::state::open_with(tag, adjust).await;
+        let state = common::state::open_with(tag, |config| {
+            // A refused send is retried; the checks wait on the outcome, not
+            // on the production backoff.
+            config.notify_delivery.backoff = vec![Duration::from_millis(20)];
+            adjust(config);
+        })
+        .await;
         projects::create(&state.db, PROJECT, "Zebra launch")
             .await
             .expect("create project");
@@ -397,7 +447,7 @@ async fn a_replayed_question_or_approval_sends_nothing() {
 async fn nothing_is_sent_when_no_target_is_configured() {
     let receiver = Receiver::start().await;
     let hub = Hub::start("notify-off", |_| {}).await;
-    assert!(!hub.state.notifier.enabled());
+    assert!(hub.state.notifier.targets().is_empty());
     let session = hub.session().await;
 
     hub.ask(&session, SUBJECT).await;
@@ -515,4 +565,569 @@ async fn an_enrolment_request_sends_the_same_contentless_post() {
     let hits = receiver.wait_for(1, Duration::from_secs(5)).await;
     assert_eq!(hits[0].body, BODY);
     assert!(!hits[0].body.contains("Wombat"), "{:?}", hits[0]);
+}
+
+impl Hub {
+    /// One call on the operator's control surface, with the admin token.
+    async fn admin(&self, method: &str, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
+        let response = self
+            .app
+            .clone()
+            .oneshot(common::http::request(
+                method,
+                uri,
+                Some(&format!("Bearer {ADMIN_TOKEN}")),
+                body,
+            ))
+            .await
+            .expect("response");
+        let status = response.status();
+        let bytes = common::http::body_bytes(response).await;
+        (
+            status,
+            serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+        )
+    }
+
+    /// Add a target and return its id.
+    async fn add_target(&self, body: Value) -> String {
+        let (status, created) = self
+            .admin("POST", "/api/v1/notify/targets", Some(body))
+            .await;
+        assert_eq!(status, StatusCode::CREATED, "{created}");
+        created["id"].as_str().expect("an id").to_string()
+    }
+
+    async fn send_test(&self, id: &str) -> Value {
+        let (status, outcome) = self
+            .admin("POST", &format!("/api/v1/notify/targets/{id}/test"), None)
+            .await;
+        assert_eq!(status, StatusCode::OK, "{outcome}");
+        outcome
+    }
+}
+
+/// A hub that knows its public address and makes three quick attempts.
+async fn targets_hub(tag: &str) -> Hub {
+    Hub::start(tag, |config| {
+        config.public_url = Some(PUBLIC_URL.to_string());
+        config.notify_delivery.interval = Duration::from_millis(100);
+        config.notify_delivery.backoff = vec![Duration::from_millis(20); 2];
+    })
+    .await
+}
+
+#[tokio::test]
+async fn each_preset_sends_its_own_shape() {
+    let receiver = Receiver::start().await;
+    let hub = targets_hub("notify-presets").await;
+    let base = &receiver.base;
+    let cases = [
+        ("webhook", format!("{base}/hook"), Some(TOKEN)),
+        ("ntfy", format!("{base}/ntfy/topic"), Some(TOKEN)),
+        ("gotify", format!("{base}/message"), Some(TOKEN)),
+        (
+            "matrix",
+            format!("{base}/_matrix/client/v3/rooms/!r:m/send/m.room.message"),
+            Some(TOKEN),
+        ),
+        ("slack", format!("{base}/services/T/B/X"), None),
+        ("discord", format!("{base}/api/webhooks/1/x"), None),
+        (
+            "telegram",
+            format!("{base}/bot1:abc/sendMessage?chat_id=42"),
+            None,
+        ),
+        (
+            "pushover",
+            format!("{base}/1/messages.json?token=app&user=me"),
+            None,
+        ),
+    ];
+    for (index, (preset, url, token)) in cases.iter().enumerate() {
+        let id = hub
+            .add_target(json!({
+                "name": preset, "preset": preset, "url": url, "token": token, "content": "title",
+            }))
+            .await;
+        let outcome = hub.send_test(&id).await;
+        assert_eq!(outcome["delivered"], json!(true), "{preset}: {outcome}");
+        let hit = receiver.wait_for(index + 1, Duration::from_secs(5)).await[index].clone();
+        let headline = "Test notification from Agent Hub";
+        let link = format!("{PUBLIC_URL}/");
+        let text = format!("{headline}\n{link}");
+        let bearer = Some(format!("Bearer {TOKEN}"));
+        match *preset {
+            "webhook" => {
+                assert_eq!(hit.method, Method::POST);
+                assert_eq!(hit.authorization, bearer);
+                let body = hit.json();
+                assert_eq!(body["version"], 1);
+                assert_eq!(body["event"], "test");
+                assert_eq!(body["text"], headline);
+                assert_eq!(body["url"], link.as_str());
+            }
+            "ntfy" => {
+                assert_eq!(hit.authorization, bearer);
+                assert!(
+                    hit.content_type
+                        .as_deref()
+                        .unwrap()
+                        .starts_with("text/plain")
+                );
+                assert_eq!(hit.body, headline);
+                let query = hit.uri.query().unwrap_or_default();
+                assert!(query.contains("click="), "{query}");
+            }
+            "gotify" => {
+                assert_eq!(hit.headers["x-gotify-key"], TOKEN);
+                let body = hit.json();
+                assert_eq!(body["message"], headline);
+                assert_eq!(
+                    body["extras"]["client::notification"]["click"]["url"],
+                    link.as_str()
+                );
+            }
+            "matrix" => {
+                assert_eq!(hit.method, Method::PUT);
+                assert_eq!(hit.authorization, bearer);
+                assert!(
+                    hit.uri.path().contains("/send/m.room.message/test-"),
+                    "{}",
+                    hit.uri
+                );
+                assert_eq!(
+                    hit.json(),
+                    json!({"msgtype": "m.text", "body": text, "m.mentions": {}})
+                );
+            }
+            "slack" => assert_eq!(hit.json(), json!({"text": text})),
+            "discord" => assert_eq!(
+                hit.json(),
+                json!({"content": text, "allowed_mentions": {"parse": []}})
+            ),
+            "telegram" => {
+                assert_eq!(hit.uri.query(), None, "the chat id moved into the body");
+                assert_eq!(hit.json()["chat_id"], "42");
+                assert_eq!(hit.json()["text"], text.as_str());
+            }
+            "pushover" => {
+                assert_eq!(hit.uri.query(), None, "the keys moved into the body");
+                let body = hit.json();
+                assert_eq!(
+                    (body["token"].as_str(), body["user"].as_str()),
+                    (Some("app"), Some("me"))
+                );
+                assert_eq!(body["message"], headline);
+                assert_eq!(body["url"], link.as_str());
+            }
+            other => panic!("no case for {other}"),
+        }
+        if token.is_none() {
+            assert_eq!(
+                hit.authorization, None,
+                "{preset} carries its secret in the URL"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_ask_says_what_the_level_allows_and_links_back() {
+    let receiver = Receiver::start().await;
+    let hub = targets_hub("notify-levels").await;
+    let mut ids = Vec::new();
+    for content in ["none", "title", "full"] {
+        ids.push(
+            hub.add_target(json!({
+                "name": content, "preset": "webhook",
+                "url": format!("{}/{content}", receiver.base), "content": content,
+            }))
+            .await,
+        );
+    }
+    let session = hub.session().await;
+    let question_id = hub.ask(&session, SUBJECT).await;
+    let hits = receiver.wait_for(3, Duration::from_secs(5)).await;
+    let by_path = |path: &str| {
+        hits.iter()
+            .find(|hit| hit.uri.path() == path)
+            .unwrap_or_else(|| panic!("nothing reached {path}"))
+            .json()
+    };
+
+    let none = by_path("/none");
+    assert_eq!(none["text"], BODY);
+    assert!(
+        none.get("project").is_none() && none.get("url").is_none(),
+        "{none}"
+    );
+
+    let title = by_path("/title");
+    assert_eq!(title["kind"], "question");
+    assert_eq!(title["project"], PROJECT);
+    assert_eq!(title["text"], "Question waiting in Zebra launch");
+    assert_eq!(title["url"], format!("{PUBLIC_URL}/id/{question_id}"));
+    assert!(title.get("summary").is_none(), "{title}");
+
+    let full = by_path("/full");
+    assert_eq!(full["summary"], SUBJECT);
+}
+
+#[tokio::test]
+async fn a_confidential_project_is_sent_with_no_content() {
+    let receiver = Receiver::start().await;
+    let hub = targets_hub("notify-confidential").await;
+    projects::set_confidential(&hub.state.db, PROJECT, true)
+        .await
+        .expect("make confidential");
+    agent_hub::store::identity::add_grant(&hub.state.db, AGENT, PROJECT)
+        .await
+        .expect("grant");
+    hub.add_target(json!({
+        "name": "full", "preset": "slack", "url": format!("{}/s", receiver.base), "content": "full",
+    }))
+    .await;
+    let session = hub.session().await;
+    hub.ask(&session, SUBJECT).await;
+    let hits = receiver.wait_for(1, Duration::from_secs(5)).await;
+    assert_eq!(hits[0].json(), json!({"text": BODY}));
+}
+
+#[tokio::test]
+async fn a_failing_send_is_retried_and_the_status_says_why() {
+    let receiver = Receiver::start().await;
+    let hub = targets_hub("notify-retry").await;
+    let retried = hub
+        .add_target(json!({"name": "flaky", "preset": "webhook", "url": format!("{}/flaky", receiver.base)}))
+        .await;
+    receiver.reply(&[
+        StatusCode::SERVICE_UNAVAILABLE,
+        StatusCode::SERVICE_UNAVAILABLE,
+    ]);
+    let session = hub.session().await;
+    hub.ask(&session, SUBJECT).await;
+    receiver.wait_for(3, Duration::from_secs(5)).await;
+
+    // A refusal is not retried, and the operator reads why.
+    hub.admin(
+        "PATCH",
+        &format!("/api/v1/notify/targets/{retried}"),
+        Some(json!({"url": format!("{}/gone", receiver.base)})),
+    )
+    .await;
+    receiver.reply(&[StatusCode::NOT_FOUND]);
+    let outcome = hub.send_test(&retried).await;
+    assert_eq!(outcome["delivered"], json!(false));
+    assert!(
+        outcome["error"].as_str().unwrap().contains("404"),
+        "{outcome}"
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let hits = receiver.hits();
+    assert_eq!(hits.len(), 4, "two retries and one test, no retry of a 404");
+    let status = &outcome["target"]["status"];
+    assert_eq!(status["failures"], 1);
+    assert!(status["last_delivered_at"].is_string(), "{status}");
+}
+
+#[tokio::test]
+async fn reads_show_the_origin_and_never_the_secret() {
+    let receiver = Receiver::start().await;
+    let hub = Hub::start("notify-redacted", |config| {
+        config.notify = Some(target(&receiver.url, Duration::from_millis(100)));
+    })
+    .await;
+    let id = hub
+        .add_target(json!({
+            "name": "chat", "preset": "slack", "url": format!("{}/services/T/B/secret-path", receiver.base),
+        }))
+        .await;
+    hub.add_target(json!({
+        "name": "own", "preset": "webhook", "url": format!("{}/hook", receiver.base), "token": TOKEN,
+    }))
+    .await;
+    let (status, listed) = hub.admin("GET", "/api/v1/notify/targets", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let text = listed.to_string();
+    assert!(
+        !text.contains("secret-path") && !text.contains(TOKEN),
+        "{text}"
+    );
+    let targets = listed["targets"].as_array().unwrap();
+    assert_eq!(
+        targets[0]["source"], "config",
+        "the configuration's target is first"
+    );
+    assert_eq!(targets[1]["url"], format!("{}/...", receiver.base));
+    assert_eq!(targets[2]["token_set"], true);
+    assert_eq!(listed["presets"].as_array().unwrap().len(), 8);
+
+    // A change that names no URL keeps the stored one.
+    let (status, _) = hub
+        .admin(
+            "PATCH",
+            &format!("/api/v1/notify/targets/{id}"),
+            Some(json!({"name": "renamed"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    hub.send_test(&id).await;
+    let hits = receiver.wait_for(1, Duration::from_secs(5)).await;
+    assert_eq!(hits[0].uri.path(), "/services/T/B/secret-path");
+
+    let (status, _) = hub
+        .admin("DELETE", "/api/v1/notify/targets/config", None)
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "the configuration's target is changed there"
+    );
+    let (status, _) = hub
+        .admin("DELETE", &format!("/api/v1/notify/targets/{id}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let response = hub
+        .app
+        .clone()
+        .oneshot(common::http::get("/api/v1/notify/targets", None))
+        .await
+        .expect("response");
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn a_bad_target_is_refused_before_it_is_stored() {
+    let hub = targets_hub("notify-refused-targets").await;
+    for body in [
+        json!({"name": "x", "preset": "pager", "url": "https://p.example/x"}),
+        json!({"name": "x", "preset": "webhook", "url": "https://me:pw@h.example/x"}),
+        json!({"name": "x", "preset": "telegram", "url": "https://api.telegram.org/bot1:a/sendMessage"}),
+        json!({"name": "x", "preset": "slack", "url": "https://hooks.slack.com/s", "token": "tk"}),
+        json!({"name": "x", "preset": "webhook", "url": "https://h.example/x", "content": "everything"}),
+        json!({"name": "x", "preset": "webhook", "url": "https://h.example/x", "events": ["failed"]}),
+        json!({"name": "", "preset": "webhook", "url": "https://h.example/x"}),
+    ] {
+        let (status, problem) = hub
+            .admin("POST", "/api/v1/notify/targets", Some(body.clone()))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body} -> {problem}");
+    }
+    let (_, listed) = hub.admin("GET", "/api/v1/notify/targets", None).await;
+    assert!(listed["targets"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_switched_off_target_sends_nothing() {
+    let receiver = Receiver::start().await;
+    let hub = targets_hub("notify-off-switch").await;
+    let id = hub
+        .add_target(
+            json!({"name": "hook", "preset": "webhook", "url": format!("{}/h", receiver.base)}),
+        )
+        .await;
+    let (_, changed) = hub
+        .admin(
+            "PATCH",
+            &format!("/api/v1/notify/targets/{id}"),
+            Some(json!({"enabled": false})),
+        )
+        .await;
+    assert_eq!(changed["enabled"], false);
+    let session = hub.session().await;
+    hub.ask(&session, SUBJECT).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(receiver.hits().is_empty());
+}
+
+#[tokio::test]
+async fn an_item_near_its_deadline_is_announced_once() {
+    let receiver = Receiver::start().await;
+    let hub = targets_hub("notify-deadline").await;
+    hub.add_target(json!({
+        "name": "hook", "preset": "webhook", "url": format!("{}/h", receiver.base),
+        "content": "title", "events": ["deadline"],
+    }))
+    .await;
+    let session = hub.session().await;
+    let posted = hub
+        .call(
+            &session,
+            "signal_append",
+            json!({"project_id": PROJECT, "kind": "approval", "summary": "Deploy?", "expires_in_seconds": 600}),
+        )
+        .await;
+    let now = time::OffsetDateTime::now_utc();
+    hub.state.settle_deadlines_at(now).await.expect("sweep");
+    hub.state
+        .settle_deadlines_at(now + time::Duration::seconds(301))
+        .await
+        .expect("sweep");
+    hub.state
+        .settle_deadlines_at(now + time::Duration::seconds(400))
+        .await
+        .expect("sweep");
+    let hits = receiver.wait_for(1, Duration::from_secs(5)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(receiver.hits().len(), 1, "warned once, not per sweep");
+    let body = hits[0].json();
+    assert_eq!(body["event"], "deadline");
+    assert_eq!(body["id"], posted["event_id"]);
+    assert_eq!(body["text"], "Approval in Zebra launch is due in 5 min");
+}
+
+#[tokio::test]
+async fn an_agent_ending_its_session_is_announced() {
+    let receiver = Receiver::start().await;
+    let hub = targets_hub("notify-ended").await;
+    hub.add_target(json!({
+        "name": "hook", "preset": "webhook", "url": format!("{}/h", receiver.base),
+        "content": "title", "events": ["ended"],
+    }))
+    .await;
+    let session = hub.session().await;
+    let started = hub
+        .call(
+            &session,
+            "session_start",
+            json!({"project_id": PROJECT, "session_name": "nightly"}),
+        )
+        .await;
+    let session_id = started["session_id"]
+        .as_str()
+        .expect("a session id")
+        .to_string();
+    hub.call(&session, "session_end", json!({"session_id": session_id}))
+        .await;
+    let hits = receiver.wait_for(1, Duration::from_secs(5)).await;
+    let body = hits[0].json();
+    assert_eq!(body["event"], "ended");
+    assert_eq!(body["session"], "nightly");
+    assert_eq!(body["text"], "Session nightly ended in Zebra launch");
+    assert_eq!(body["url"], format!("{PUBLIC_URL}/id/{session_id}"));
+}
+
+#[tokio::test]
+async fn raising_a_level_while_a_notice_waits_does_not_widen_it() {
+    let receiver = Receiver::start().await;
+    let hub = Hub::start("notify-fail-closed", |config| {
+        config.public_url = Some(PUBLIC_URL.to_string());
+        config.notify_delivery.interval = Duration::from_secs(1);
+    })
+    .await;
+    projects::set_confidential(&hub.state.db, PROJECT, true)
+        .await
+        .expect("make confidential");
+    agent_hub::store::identity::add_grant(&hub.state.db, AGENT, PROJECT)
+        .await
+        .expect("grant");
+    let id = hub
+        .add_target(json!({
+            "name": "chat", "preset": "slack", "url": format!("{}/s", receiver.base), "content": "none",
+        }))
+        .await;
+    let session = hub.session().await;
+    hub.ask(&session, "First ask").await;
+    receiver.wait_for(1, Duration::from_secs(5)).await;
+    // The second notice waits out the quiet period while the level is raised.
+    hub.ask(&session, SUBJECT).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let (status, _) = hub
+        .admin(
+            "PATCH",
+            &format!("/api/v1/notify/targets/{id}"),
+            Some(json!({"content": "full"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let hits = receiver.wait_for(2, Duration::from_secs(5)).await;
+    assert_eq!(
+        hits[1].json(),
+        json!({"text": BODY}),
+        "the queued notice was widened"
+    );
+}
+
+#[tokio::test]
+async fn a_url_moved_to_another_origin_drops_the_token() {
+    let first = Receiver::start().await;
+    let second = Receiver::start().await;
+    let hub = targets_hub("notify-token-origin").await;
+    let id = hub
+        .add_target(json!({
+            "name": "hook", "preset": "webhook", "url": format!("{}/a", first.base), "token": TOKEN,
+        }))
+        .await;
+
+    // A new path on the same origin keeps the token.
+    let (_, kept) = hub
+        .admin(
+            "PATCH",
+            &format!("/api/v1/notify/targets/{id}"),
+            Some(json!({"url": format!("{}/b", first.base)})),
+        )
+        .await;
+    assert_eq!(kept["token_set"], true);
+
+    let (status, moved) = hub
+        .admin(
+            "PATCH",
+            &format!("/api/v1/notify/targets/{id}"),
+            Some(json!({"url": format!("{}/a", second.base)})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(moved["token_set"], false, "{moved}");
+    hub.send_test(&id).await;
+    let hits = second.wait_for(1, Duration::from_secs(5)).await;
+    assert_eq!(
+        hits[0].authorization, None,
+        "the old token went to the new host"
+    );
+
+    // Naming a token with the move keeps that one.
+    let (_, renamed) = hub
+        .admin(
+            "PATCH",
+            &format!("/api/v1/notify/targets/{id}"),
+            Some(json!({"url": format!("{}/a", first.base), "token": "tk_new"})),
+        )
+        .await;
+    assert_eq!(renamed["token_set"], true);
+}
+
+#[tokio::test]
+async fn a_project_made_confidential_while_a_notice_waits_is_sent_as_a_ping() {
+    let receiver = Receiver::start().await;
+    let hub = Hub::start("notify-late-confidential", |config| {
+        config.public_url = Some(PUBLIC_URL.to_string());
+        config.notify_delivery.interval = Duration::from_secs(1);
+    })
+    .await;
+    hub.add_target(json!({
+        "name": "chat", "preset": "slack", "url": format!("{}/s", receiver.base), "content": "full",
+    }))
+    .await;
+    let session = hub.session().await;
+    hub.ask(&session, "First ask").await;
+    let first = receiver.wait_for(1, Duration::from_secs(5)).await;
+    assert_ne!(
+        first[0].json(),
+        json!({"text": BODY}),
+        "an open project is named"
+    );
+    // The second notice waits out the quiet period while the project closes.
+    hub.ask(&session, SUBJECT).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    projects::set_confidential(&hub.state.db, PROJECT, true)
+        .await
+        .expect("make confidential");
+    let hits = receiver.wait_for(2, Duration::from_secs(5)).await;
+    assert_eq!(
+        hits[1].json(),
+        json!({"text": BODY}),
+        "the queued notice named a confidential project"
+    );
 }

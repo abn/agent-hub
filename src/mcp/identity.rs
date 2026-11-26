@@ -199,7 +199,13 @@ impl HubServer {
         )
         .await
         .map_err(to_error_data)?;
-        self.state.notify_waiting();
+        self.state.notify_waiting(crate::notify::Notice::ask(
+            "enrolment",
+            &enrolled.id,
+            None,
+            None,
+            None,
+        ));
         Ok(CallToolResult::structured(json!({
             "status": "pending",
             "member": enrolled.id,

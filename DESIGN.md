@@ -1112,10 +1112,28 @@ Projects register, Members and access, Connect, and the knowledge base.
 - **Settings.** Rows under three quiet group labels. THIS DEVICE: theme as a
   three-way segmented group, compact rows, waiting on you. KEYBOARD: single-key
   shortcuts, the group absent under a coarse pointer. THIS HUB: storage, members
-  and tokens, Connect, and Version, a value row reading the version and short
-  commit the binary was built from, with no destination, no chevron and no tab
-  stop. One
+  and tokens, notifications (how many targets are on, or Off), Connect, and
+  Version, a value row reading the version and short commit the binary was
+  built from, with no destination, no chevron and no tab stop. One
   helper line in the whole screen. No paragraph explains a toggle.
+- **Notifications.** Pushed from Settings, with no index, in the 640 form
+  column at both widths. Rows under one TARGETS label: the name and its switch,
+  then the service with what it sends and when, then the last send's outcome in
+  words, then **Send test** and **Delete** as small outlines at `--ctl` (`--tap`
+  under a coarse pointer). The row grows to hold those lines, never because of
+  its switch. A failed send is `--ink-2` words; Delete is the only `--danger`
+  and confirms in a dialog. The configured target has no switch and no Delete.
+  **Add target** is in the 40px control row on a desktop and an outline at its
+  label's width at the foot of the list on a phone, where Settings has no tools
+  row.
+  It opens one dialog: service, name, URL in mono, a token only for a service
+  that takes one, what it sends, and three checkboxes for when. The URL is never
+  painted again. A vendor cloud raised above a ping gains one note line saying
+  the details leave the network. The rail keeps Settings marked.
+  - **Deviation: no handoff for this screen.** The designer's bundle has no
+    notifications screen. It is built from the settings row, the dialog and the
+    Now ask's secondary verb line, and the stage carries more than one helper
+    line, since every line on a row is state the reader cannot see elsewhere.
 - **Storage.** The summary and the by-project rows. Never touches feed events
   or artifacts. On a desktop the summary sits on the canvas between the control
   row's hairline and the table's, with no rules of its own: the total in mono,

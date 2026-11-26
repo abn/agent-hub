@@ -93,7 +93,13 @@ impl HubServer {
         if posted.replayed {
             self.state.notify();
         } else {
-            self.state.notify_waiting();
+            self.state.notify_waiting(crate::notify::Notice::ask(
+                "question",
+                &posted.id,
+                Some(&params.project_id),
+                resolved.session_id(),
+                Some(&params.subject),
+            ));
         }
         let event_id = posted.id;
         // The question roots its own thread and is its own event, so the

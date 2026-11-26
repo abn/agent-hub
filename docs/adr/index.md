@@ -63,3 +63,5 @@ consequences, and is not edited after the fact except to mark it superseded.
 * [0038](0038-native-per-user-service.md) - A native per-user service with a
   binary-owned lifecycle
 * [0039](0039-members-agents-and-sessions.md) - Members, agents and sessions
+* [0040](0040-notify-targets-with-content-levels.md) - Notify targets with
+  presets and content levels (extends 0026)

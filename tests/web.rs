@@ -495,7 +495,7 @@ async fn manifest_lists_png_icons_and_serves_them() {
 /// Every static path the PWA serves, in the order `src/http/web.rs` tables
 /// them. The service worker precaches exactly this list and names its cache
 /// after a digest of the bodies behind it.
-const SHELL_PATHS: [&str; 59] = [
+const SHELL_PATHS: [&str; 60] = [
     "/",
     "/app.js",
     "/api.mjs",
@@ -526,6 +526,7 @@ const SHELL_PATHS: [&str; 59] = [
     "/storage.mjs",
     "/search.mjs",
     "/settings.mjs",
+    "/notifications.mjs",
     "/more.mjs",
     "/project-settings.mjs",
     "/members.mjs",

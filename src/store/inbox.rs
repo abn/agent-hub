@@ -1086,6 +1086,106 @@ pub(crate) async fn due_items(
     Ok(due)
 }
 
+/// The most notice an open item gets before its deadline.
+pub const DEADLINE_WARNING_MAX: time::Duration = time::Duration::minutes(10);
+
+/// An open item close to its deadline, marked as warned.
+#[derive(Debug, Clone)]
+pub struct NearDeadline {
+    pub event_id: String,
+    pub project_id: String,
+    pub kind: String,
+    pub summary: String,
+    pub session_id: Option<String>,
+    /// Whole minutes until the deadline, at least one.
+    pub due_in_mins: i64,
+}
+
+/// Mark and return every open item whose deadline is close and that has not
+/// been warned about.
+///
+/// An item is close when what is left of its window is at most the lesser of
+/// [`DEADLINE_WARNING_MAX`] and half the window, so an item given a minute is
+/// warned at thirty seconds rather than as it is asked. The read is a plain
+/// read, so a sweep that finds nothing takes no write turn; the mark is set
+/// only where it is still unset, so each item is warned about once, across
+/// restarts too.
+pub async fn warn_near_deadline(
+    db: &Database,
+    now: time::OffsetDateTime,
+) -> Result<Vec<NearDeadline>> {
+    let near = {
+        let conn = super::connect(db)?;
+        near_deadline(&conn, now).await?
+    };
+    if near.is_empty() {
+        return Ok(near);
+    }
+    let stamp = deadline_stamp(now);
+    let tx = super::begin_write(db).await?;
+    let mut marked = Vec::new();
+    for item in near {
+        let changed = tx
+            .execute(
+                "UPDATE inbox SET warned_at = ?2 WHERE event_id = ?1 AND warned_at IS NULL",
+                vec![
+                    Value::Text(item.event_id.clone()),
+                    Value::Text(stamp.clone()),
+                ],
+            )
+            .await
+            .map_err(engine)?;
+        if changed > 0 {
+            marked.push(item);
+        }
+    }
+    tx.commit().await.map_err(engine)?;
+    Ok(marked)
+}
+
+async fn near_deadline(conn: &Connection, now: time::OffsetDateTime) -> Result<Vec<NearDeadline>> {
+    let mut rows = conn
+        .query(
+            "SELECT i.event_id, e.project_id, e.kind, e.summary, e.session_id, e.created_at, i.expires_at
+               FROM inbox i JOIN events e ON e.id = i.event_id
+              WHERE i.expires_at IS NOT NULL AND i.expires_at <= ?1 AND i.expires_at > ?2
+                AND i.warned_at IS NULL AND i.status IN ('action', 'waiting')
+              ORDER BY i.expires_at ASC LIMIT 100",
+            vec![
+                Value::Text(deadline_stamp(now + DEADLINE_WARNING_MAX)),
+                Value::Text(deadline_stamp(now)),
+            ],
+        )
+        .await
+        .map_err(engine)?;
+    let parse = |stamp: &str| {
+        time::OffsetDateTime::parse(stamp, &time::format_description::well_known::Rfc3339).ok()
+    };
+    let mut near = Vec::new();
+    while let Some(row) = rows.next().await.map_err(engine)? {
+        let (Some(created), Some(expires)) = (
+            parse(&required_text(&row, 5)?),
+            parse(&required_text(&row, 6)?),
+        ) else {
+            continue;
+        };
+        let lead = DEADLINE_WARNING_MAX.min((expires - created) / 2);
+        let left = expires - now;
+        if left > lead {
+            continue;
+        }
+        near.push(NearDeadline {
+            event_id: required_text(&row, 0)?,
+            project_id: required_text(&row, 1)?,
+            kind: required_text(&row, 2)?,
+            summary: required_text(&row, 3)?,
+            session_id: text_at(&row, 4)?,
+            due_in_mins: ((left.whole_seconds() + 59) / 60).max(1),
+        });
+    }
+    Ok(near)
+}
+
 fn item_from_row(row: &Row) -> Result<InboxItem> {
     let payload = match text_at(row, 5)? {
         Some(json) => Some(

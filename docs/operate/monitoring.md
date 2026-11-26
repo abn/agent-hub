@@ -47,7 +47,7 @@ is distroless and has no shell or `curl`.
 - events appended, by kind: `agenthub_events_total`, whose `kind` label carries
   `anchor` and `score` beside the other kinds;
 - MCP tool calls, by tool;
-- sends to the notify target, by result
+- sends to the notify targets, all targets together, by result
   (`agenthub_notify_sends_total`, `delivered` or `failed`).
 
 It also carries storage gauges, read fresh for each scrape: free bytes on the

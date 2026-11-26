@@ -58,12 +58,14 @@ function setCurrent(screen, path = "") {
   // are open.
   const isPushedFromMore =
     screen === "settings" ||
+    screen === "notifications" ||
     screen === "storage" ||
     screen === "access" ||
     screen === "artifacts";
   // The Inbox's address is Now showing what needs the reader, so it marks Now.
   const own = screen === "inbox" ? "home" : screen;
-  const railNav = own;
+  // Notifications is pushed from Settings, so the rail keeps Settings marked.
+  const railNav = screen === "notifications" ? "settings" : own;
   const tabNav = isPushedFromMore ? "more" : own;
 
   document.querySelectorAll(".tabbar a, .rail a").forEach((anchor) => {
@@ -110,6 +112,7 @@ const TITLES = {
   search: "Search",
   storage: "Storage",
   settings: "Settings",
+  notifications: "Notifications",
   more: "More",
   access: "Access",
   connect: "Connect",

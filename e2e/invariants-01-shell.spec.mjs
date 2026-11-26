@@ -332,6 +332,7 @@ test.describe("races", () => {
       search: [["search", `#/search?q=${encodeURIComponent(hub.fixture.searchTerm)}`, "/api/v1/search?"]],
       storage: [["storage", "#/storage", "/api/v1/storage"]],
       settings: [["settings", "#/settings", "/api/v1/members"]],
+      notifications: [["notifications", "#/notifications", "/api/v1/notify/targets"]],
       access: [["access", "#/access", "/api/v1/members"]],
       more: [["more", "#/more", "/api/v1/storage"]],
       connect: [["connect", "#/connect?next=%2Fstorage", "/api/v1/home"]],

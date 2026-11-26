@@ -4,6 +4,25 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-11-26
+
+### Notify targets
+
+* **Change**: [Notifications](/operate/notifications.md) covers notify targets
+  added in **Settings > Notifications**: a webhook with a stable JSON body, and
+  presets for ntfy, Gotify, Matrix, Slack, Discord, Telegram and Pushover. Each
+  target has a content level (a ping by default), the events it takes (asks,
+  deadlines, ended sessions), a switch and a test send, and shows the outcome of
+  its last send. `notify_url` remains, listed as a read-only target.
+* **Update**: [REST API](/reference/rest-api.md#notify-targets) documents the
+  admin routes under `/api/v1/notify/targets`.
+  [Configuration](/reference/configuration.md) says `notify_interval_secs` sets
+  every target's quiet period.
+* **Decision**: [ADR 0040](/adr/0040-notify-targets-with-content-levels.md)
+  extends ADR 0026 with presets, content levels and bounded retries.
+* **Update**: the wiki screens are recaptured for the Settings row and the new
+  Notifications screen and its add dialog.
+
 ## 2026-11-25
 
 ### Resources have links

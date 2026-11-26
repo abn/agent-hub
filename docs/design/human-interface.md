@@ -535,7 +535,8 @@ reader.
 Settings is a 640px column of 48px rows under three quiet group labels: THIS
 DEVICE (theme as a three-way segmented group, compact rows, waiting on you),
 KEYBOARD (single-key shortcuts, the group absent under a coarse pointer), and
-THIS HUB (storage, members and tokens, Connect, and Version). Version is a value
+THIS HUB (storage, members and tokens, notifications, Connect, and Version).
+The notifications row reads how many targets are on, or Off. Version is a value
 row reading the version and short commit the binary was built from, with no
 destination, no chevron and no tab stop. One helper line in the whole screen,
 and no paragraph explains a toggle. Theme shows a three-way group (System,
@@ -550,6 +551,32 @@ destinations live under the More tab root.
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/more-phone-dark.png">
   <img src="../assets/screens/more-phone-light.png" alt="The phone's More sheet, holding the destinations the tab bar does not.">
+</picture>
+
+### Notifications
+
+Notifications is pushed from Settings: one row per notify target under a
+TARGETS label, in the same 640 column. A row is the target's name with its
+switch, then two lines of copy, the service, what it sends and when, and the
+outcome of its last send in words, with the hub's exact reason for a failure
+behind a **Details** disclosure, then **Send test** and **Delete** as small
+outlines. A failure is ink, not the danger tone; Delete is the one danger
+control and asks first. The configured `notify_url` target is listed first, with
+no switch and no Delete. **Add target** sits in the control row on a desktop and
+at the foot of the list on a phone, and opens one dialog: service, name, URL,
+token for the services that take one, what it sends, and when. The URL is never
+shown again. Choosing more than a ping for a vendor cloud adds one line saying
+the details leave the network. The guide is
+[Notifications](/operate/notifications.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/notifications-desktop-dark.png">
+  <img src="../assets/screens/notifications-desktop-light.png" alt="Notifications at desktop width, three targets with their switches, outcomes and verbs.">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../assets/screens/notify-add-phone-dark.png">
+  <img src="../assets/screens/notify-add-phone-light.png" alt="The add target dialog on a phone: service, name, URL, what it sends and when.">
 </picture>
 
 ### Members and access

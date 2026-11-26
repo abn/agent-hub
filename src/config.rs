@@ -312,8 +312,11 @@ pub struct Config {
     /// operator's own machine most often. Empty trusts none, and the socket
     /// peer is the identity.
     pub trusted_proxies: Vec<std::net::IpAddr>,
-    /// Where the contentless "something is waiting" nudge goes. None is off.
+    /// The `notify_url` target. None is off; targets added at runtime live in
+    /// the store.
     pub notify: Option<crate::notify::NotifyTarget>,
+    /// The quiet period and retry waits every notify target is sent with.
+    pub notify_delivery: crate::notify::Delivery,
     /// Where the serving hub writes an online backup, one new directory per
     /// backup. Unset turns online backup off.
     pub backup_dir: Option<PathBuf>,
@@ -489,6 +492,11 @@ impl Config {
                 .value
                 .as_deref(),
         )?;
+        let notify_delivery = crate::notify::Delivery::parse(
+            Setting::resolved(env, "hub", "notify_interval_secs", &files, Some("60"))
+                .value
+                .as_deref(),
+        )?;
 
         Ok(Self {
             data_dir,
@@ -504,6 +512,7 @@ impl Config {
             enrol_pending_ttl,
             trusted_proxies,
             notify,
+            notify_delivery,
             backup_dir,
         })
     }
