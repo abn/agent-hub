@@ -26,7 +26,7 @@ if [ -z "${ANDROID_HOME:-}" ] && [ -d "$HOME/Android/Sdk" ]; then
   ANDROID_HOME="$HOME/Android/Sdk"
 fi
 if [ -z "${ANDROID_HOME:-}" ] || [ ! -d "$ANDROID_HOME/platforms" ]; then
-  printf 'android: Android SDK not found. Set ANDROID_HOME (needs platforms;android-37, build-tools, and for the Tendril AAR ndk and cmake 3.22.1).\n' >&2
+  printf 'android: Android SDK not found. Set ANDROID_HOME (needs platforms;android-37.0, build-tools, and for the Tendril AAR ndk and cmake 3.22.1).\n' >&2
   exit 1
 fi
 export ANDROID_HOME

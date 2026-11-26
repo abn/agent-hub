@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test plugins/sync plugins/antigravity-dist test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e plugins/check install/test install/e2e net/check serve/check gate gate/quick gate/identity e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build
+.PHONY: help setup build test plugins/sync plugins/antigravity-dist test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e plugins/check install/test install/e2e net/check serve/check gate gate/quick gate/identity e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build android/tendril android/build android/test android/screenshots android/release android/lint android/devices android/device android/emu android/smoke android/test-hub
 
 ##@ Bootstrap
 
@@ -231,6 +231,57 @@ container/config: ## Validate the container compose file
 
 container/build: ## Build the container image
 	docker build -f Containerfile -t ghcr.io/agync/agent-hub:dev .
+
+##@ Android
+
+# The Android app lives in android/. It is not part of `check`: it needs the Android SDK and
+# a JDK, which the Rust and web gates do not. android/scripts/gradle.sh finds both, runs
+# Gradle under the host-friendly resource cap, and never installs anything.
+#
+# The app takes pairing, keys and transport from Tendril's Kotlin binding. `android/tendril`
+# builds it from a Tendril checkout (TENDRIL_DIR) at a pinned ref (TENDRIL_REF).
+android/tendril: ## Build the Tendril Kotlin binding AAR (TENDRIL_DIR=path to a Tendril checkout)
+	android/scripts/tendril-aar.sh
+
+android/build: ## Build the debug APK
+	android/scripts/gradle.sh :app:assembleDebug
+
+android/test: ## Run the Android unit and Compose UI tests
+	android/scripts/gradle.sh :app:testDebugUnitTest
+
+android/screenshots: ## Draw every board frame, light and dark, to android/app/build/screenshots
+	android/scripts/gradle.sh :app:testDebugUnitTest --tests '*BoardFramesTest*' -Proborazzi.test.record=true
+
+# The transport against a real hub and a real Tendril initiator. HUB_BIN is a built agent-hub binary
+# (the hub runs on a free port with a scratch data directory); the host build of Tendril's JNI library
+# comes from TENDRIL_DIR (android/scripts/tendril-host-lib.sh).
+android/test-hub: ## Run the real-hub transport test (HUB_BIN=path to agent-hub, TENDRIL_DIR=path to Tendril)
+	@test -x "$(HUB_BIN)" || { printf 'android/test-hub: set HUB_BIN to a built agent-hub binary\n' >&2; exit 1; }
+	android/scripts/tendril-host-lib.sh
+	AGENT_HUB_BIN="$(abspath $(HUB_BIN))" TENDRIL_HOST_LIB="$(abspath android/build/tendril-host)" android/scripts/gradle.sh :app:testDebugUnitTest --tests '*RealHubTest*'
+
+# On hardware. Only the debug package (dev.agync.agenthub.debug) is installed, never a release one,
+# and nothing else on the device is touched. HUB_TRANSPORT=tendril tries a real hub.
+android/devices: ## List the devices adb can see
+	android/scripts/device.sh devices
+
+android/device: ## Install the debug build on a device and launch it (DEVICE=serial)
+	android/scripts/device.sh install "$(DEVICE)"
+
+android/emu: ## Boot the existing emulator, install the debug build and launch it (arm64 images only)
+	android/scripts/device.sh emu
+
+android/smoke: ## Run the instrumented Tendril smoke test on a device (DEVICE=serial)
+	android/scripts/device.sh smoke "$(DEVICE)"
+
+android/lint: ## Run Android lint
+	android/scripts/gradle.sh :app:lintDebug
+
+# Signing reads the key from the file named by ANDROID_KEYSTORE_PROPERTIES (a keystore.properties
+# with storeFile, storePassword, keyAlias and keyPassword), at build time only.
+android/release: ## Build the signed release APK (ANDROID_KEYSTORE_PROPERTIES=path to keystore.properties)
+	@test -n "$$ANDROID_KEYSTORE_PROPERTIES" || { printf 'android/release: set ANDROID_KEYSTORE_PROPERTIES to a keystore.properties file\n' >&2; exit 1; }
+	AGENT_HUB_KEYSTORE_PROPERTIES="$$ANDROID_KEYSTORE_PROPERTIES" android/scripts/gradle.sh :app:assembleRelease
 
 ##@ Utilities
 
