@@ -4,6 +4,13 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.17.0...agent-hub-v1.18.0) (2026-11-27)
+
+
+### Bug Fixes
+
+* **release:** pass the signing secrets to the Android job ([653a786](https://github.com/agync/agent-hub/commit/653a786507e8867302b6d887db9d62dd77e338b6))
+
 ## [1.17.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.16.0...agent-hub-v1.17.0) (2026-11-27)
 
 
