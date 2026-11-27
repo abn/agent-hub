@@ -95,6 +95,8 @@ jobs:
           KEY_PASSWORD: ${{ secrets.AGENT_HUB_ANDROID_KEY_PASSWORD }}
           CERT_SHA256: ${{ vars.ANDROID_CERT_SHA256 }}
         run: |
+          [ -n "$KEYSTORE" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ] ||
+            { printf 'the signing secrets are empty in this job\n' >&2; exit 1; }
           apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           keystore="$RUNNER_TEMP/release.p12"
           apk="agent-hub-android-$VERSION.apk"
