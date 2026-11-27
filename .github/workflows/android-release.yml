@@ -1,0 +1,113 @@
+name: android-release
+
+# Builds the Android APK for a release tag, signs it and attaches it to the
+# existing GitHub release. The release workflow calls it once release-please
+# has created the release; dispatch it by hand for a tag that already has a
+# release. A tag made before this workflow existed cannot be built by it.
+#
+# The build job holds no secret. The sign job runs in the release-signing
+# environment, which holds the key and its passwords, and it checks out no
+# code: it downloads the unsigned APK, signs it and uploads it. Signing is
+# switched on by the ANDROID_SIGNING repository variable, not by a secret being
+# present. When ANDROID_CERT_SHA256 is set, the signed APK must carry that
+# certificate.
+
+"on":
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to build and attach to.
+        type: string
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to build and attach to.
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build the APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      # Only a tag, and only one on main, is built for signing.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+          fetch-depth: 0
+      - name: Check the tag is on main
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor HEAD FETCH_HEAD || { printf 'the tag is not on main\n' >&2; exit 1; }
+          echo "Building $(git rev-parse HEAD)"
+      - uses: gradle/actions/wrapper-validation@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - uses: ./.github/actions/android-setup
+      - id: version
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          version="${TAG##*v}"
+          printf '%s\n' "$version" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || { printf 'no x.y.z version in tag %s\n' "$TAG" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          make android/apk VERSION="$VERSION"
+          mkdir -p target/android
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk target/android/unsigned.apk
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: android-unsigned
+          path: target/android/unsigned.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  sign:
+    name: Sign and attach the APK
+    needs: build
+    if: vars.ANDROID_SIGNING == 'true'
+    runs-on: ubuntu-24.04
+    environment: release-signing
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: android-unsigned
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+        with:
+          packages: "build-tools;36.0.0"
+      - name: Sign, verify and attach
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+          KEYSTORE: ${{ secrets.AGENT_HUB_ANDROID_KEYSTORE }}
+          KEYSTORE_PASSWORD: ${{ secrets.AGENT_HUB_ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.AGENT_HUB_ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.AGENT_HUB_ANDROID_KEY_PASSWORD }}
+          CERT_SHA256: ${{ vars.ANDROID_CERT_SHA256 }}
+        run: |
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          keystore="$RUNNER_TEMP/release.p12"
+          apk="agent-hub-android-$VERSION.apk"
+          trap 'shred -u "$keystore" 2>/dev/null || true' EXIT
+          printf '%s' "$KEYSTORE" | base64 -d > "$keystore"
+          "$apksigner" sign --ks "$keystore" --ks-type pkcs12 --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --out "$apk" unsigned.apk
+          certs=$("$apksigner" verify --print-certs "$apk")
+          printf '%s\n' "$certs"
+          if [ -n "$CERT_SHA256" ]; then
+            want=$(printf '%s' "$CERT_SHA256" | tr -d ': ' | tr 'A-F' 'a-f')
+            [ "${#want}" -eq 64 ] || { printf 'ANDROID_CERT_SHA256 is not a SHA-256 digest\n' >&2; exit 1; }
+            printf '%s\n' "$certs" | grep -qiE "certificate SHA-256 digest: ${want}$" || { printf 'the APK is not signed with the expected certificate\n' >&2; exit 1; }
+          fi
+          sha256sum "$apk" > "$apk.sha256"
+          gh release upload "$TAG" "$apk" "$apk.sha256" --clobber --repo "${{ github.repository }}"

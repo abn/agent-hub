@@ -17,6 +17,7 @@ Kotlin and Jetpack Compose app. `DESIGN.md` has the Android rules it is held to.
 | `make android/smoke DEVICE=serial` | Runs the instrumented test that loads Tendril's native library and creates an endpoint, on a device |
 | `make android/test-hub HUB_BIN=path TENDRIL_DIR=path` | Runs the transport against a real hub binary and a real Tendril initiator: pair, confirm, `/devices/me`, `/home`, approve, unpair |
 | `make android/release` | Signed release APK, with `ANDROID_KEYSTORE_PROPERTIES=path/to/keystore.properties` |
+| `make android/apk VERSION=x.y.z` | Unsigned release APK with that version, as the release workflow builds it before signing |
 
 Needs the Android SDK (`ANDROID_HOME`, default `~/Android/Sdk`, with platform 37 and build-tools),
 a JDK 17 or 21, and for the Tendril binding an NDK, CMake 3.22.1 and the Rust target
@@ -29,6 +30,9 @@ The release key never lives in this repository. `keystore.properties` holds `sto
 `storePassword`, `keyAlias` and `keyPassword`; a relative `storeFile` is read next to the
 properties file. Point `ANDROID_KEYSTORE_PROPERTIES` (or the Gradle property
 `agenthub.keystoreProperties`) at it. Without one, the release build is unsigned.
+
+Every GitHub release carries a signed APK: the release workflow builds it unsigned and signs it in
+a separate job with the key held in the `release-signing` environment (see `RELEASING.md`).
 
 ## Which hub the app talks to
 

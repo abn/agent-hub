@@ -149,6 +149,46 @@ publish and the plugins are listed nowhere but this repository.
    plugin to the Claude plugin directory, prepare the icon and a privacy policy
    URL the form asks for, then submit through its form.
 
+## The Android app
+
+The `android` job calls `android-release.yml`, which builds the release APK with
+no secret in reach and hands it to a sign job in the `release-signing`
+environment. That job checks out no code: it signs the APK with `apksigner`,
+checks the certificate when `ANDROID_CERT_SHA256` is set, and attaches
+`agent-hub-android-<version>.apk` and its `.sha256` to the release. The version
+code is derived from the version, so a rebuild of a tag never goes backwards.
+Nothing waits on it, and it does nothing until signing is set up.
+
+To sign and attach the APK for an existing tag:
+
+```sh
+gh workflow run android-release.yml -f tag="agent-hub-v<VERSION>"
+```
+
+### One-time setup
+
+1. Create the `release-signing` environment, limit it to `main`, and add
+   yourself as a required reviewer.
+2. Add the key to the environment, from the files, never pasted:
+
+   ```sh
+   env=(-R agync/agent-hub -e release-signing)
+   base64 -w0 release.p12 | gh secret set AGENT_HUB_ANDROID_KEYSTORE "${env[@]}"
+   gh secret set AGENT_HUB_ANDROID_KEYSTORE_PASSWORD "${env[@]}"
+   gh secret set AGENT_HUB_ANDROID_KEY_ALIAS "${env[@]}"
+   gh secret set AGENT_HUB_ANDROID_KEY_PASSWORD "${env[@]}"
+   ```
+
+3. Pin the certificate and switch signing on:
+
+   ```sh
+   gh variable set ANDROID_CERT_SHA256 -R agync/agent-hub \
+     --body "$(apksigner verify --print-certs app.apk | awk '/SHA-256 digest/ { print $NF; exit }')"
+   gh variable set ANDROID_SIGNING -R agync/agent-hub --body true
+   ```
+
+A signed APK installs over another build only when both carry the same key.
+
 ## Verify the release
 
 Nothing is done until the published artifact has answered. The workflow does
