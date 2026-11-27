@@ -4,6 +4,13 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.15.0...agent-hub-v1.16.0) (2026-11-27)
+
+
+### Bug Fixes
+
+* **android:** fetch Maven Central artifacts through Google's mirror ([92ec603](https://github.com/agync/agent-hub/commit/92ec603a88afa79dc2199cd58eb9534b75b820c3))
+
 ## [1.15.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.14.0...agent-hub-v1.15.0) (2026-11-27)
 
 

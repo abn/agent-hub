@@ -1,6 +1,6 @@
 {
   "name": "agent-hub",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "Connect Claude Code to an Agent Hub node: MCP tools, session lifecycle hooks, idle wake and the agent-hub skill.",
   "author": {
     "name": "agync",
