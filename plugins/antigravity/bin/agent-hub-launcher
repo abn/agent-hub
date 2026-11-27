@@ -11,7 +11,7 @@
 # hook: it starts the install detached, says so in the hook's output shape and
 # exits 0.
 
-VERSION=1.15.0 # x-release-please-version
+VERSION=1.16.0 # x-release-please-version
 
 # The release for this launcher's own version, over HTTPS only. Nothing in the
 # environment redirects the download.
