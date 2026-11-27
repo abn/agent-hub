@@ -94,9 +94,10 @@ repos:
       # Co-authored-by, Reviewed-by), so matching the hyphenated shape plus a
       # few common flat keys catches them without touching a subject line like
       # "chore: x" or the BREAKING CHANGE the commit convention requires.
+      # Release-As is allowed: it is how release-please is told the version.
       - id: no-trailers
         name: reject commit message trailers
-        entry: '^([A-Za-z]+(-[A-Za-z]+)+|Refs|Fixes|Closes|Cc|Link|Change-Id): '
+        entry: '^(?!Release-As: )([A-Za-z]+(-[A-Za-z]+)+|Refs|Fixes|Closes|Cc|Link|Change-Id): '
         language: pygrep
         args: [-i]
         stages: [commit-msg]

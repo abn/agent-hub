@@ -130,8 +130,9 @@ proves and how to write a check.
 
 ## Conventions
 
-- **Commits** follow Conventional Commits, summary first, no trailers. Stage
-  explicit paths, never `git add -A`. The commit-message hook enforces this.
+- **Commits** follow Conventional Commits, summary first, no trailers, except
+  `Release-As:` to set the next release version. Stage explicit paths, never
+  `git add -A`. The commit-message hook enforces this.
 - **Verification is automated.** `pre-commit` owns file hygiene, commit-message
   shape, and the editorial and privacy patterns, and `make check` runs the same
   hooks CI runs. Do not hand-polish what a tool enforces.

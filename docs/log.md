@@ -6,6 +6,12 @@ software release notes and the repository changelog.
 
 ## 2026-11-27
 
+### Release-As
+
+* **Change**: The [contributor guide](/contribute/guide.md) allows a
+  `Release-As:` line in a commit message, the one trailer release-please reads
+  to set the next version.
+
 ### Android APK on releases
 
 * **Change**: The [maintainer guide](/contribute/maintainers.md#releasing-the-android-app)
