@@ -4,6 +4,18 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.19.0...agent-hub-v1.20.0) (2026-11-27)
+
+
+### Features
+
+* show each pairing wait and move on when the other side acts ([2f29c87](https://github.com/agync/agent-hub/commit/2f29c87a76eeeaec09a6cfeebdba5c4f2385c06b))
+
+
+### Bug Fixes
+
+* **android:** release the camera when the scanner leaves ([9ae9514](https://github.com/agync/agent-hub/commit/9ae9514ee23e062b80f3ea1a00a3c534f65a8c77))
+
 ## [1.19.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.18.0...agent-hub-v1.19.0) (2026-11-27)
 
 

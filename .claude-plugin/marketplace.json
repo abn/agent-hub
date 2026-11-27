@@ -11,7 +11,7 @@
       "name": "agent-hub",
       "source": "./plugins/claude",
       "description": "Connect Claude Code to an Agent Hub node: MCP tools, session lifecycle hooks, idle wake and the agent-hub skill.",
-      "version": "1.19.0",
+      "version": "1.20.0",
       "homepage": "https://hub.agync.dev",
       "license": "MIT",
       "category": "productivity",
