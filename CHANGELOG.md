@@ -4,6 +4,13 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.18.0...agent-hub-v1.19.0) (2026-11-27)
+
+
+### Bug Fixes
+
+* **android:** keep the constructors R8 strips from WorkManager and ML Kit ([7f07574](https://github.com/agync/agent-hub/commit/7f075746e17e9c64302a09bffb45b00e0e6293fc))
+
 ## [1.18.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.17.0...agent-hub-v1.18.0) (2026-11-27)
 
 
