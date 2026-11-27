@@ -68,6 +68,9 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/android-release.yml
+    # A job in a called workflow sees its environment's secrets only when
+    # the caller passes secrets on.
+    secrets: inherit
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
 
