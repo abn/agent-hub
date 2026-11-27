@@ -156,7 +156,8 @@ any access rule.
 - **Makefile** is the single automation entrypoint. Bare `make` shows the
   targets. `make check` is the gate that hooks and CI both reuse.
 - **Commits** follow Conventional Commits, summary first, no trailers (no
-  Co-Authored-By, no Signed-off-by). Stage explicit paths, never `git add -A`.
+  Co-Authored-By, no Signed-off-by). The one exception is `Release-As:`, which
+  tells release-please the next version. Stage explicit paths, never `git add -A`.
 - **Changes** happen in a dedicated worktree with a conventional branch name
   (`feat/`, `fix/`, `docs/`, `chore/`, `refactor/`), rebased on latest `main`.
 - **Clean history.** Fix up or amend into the owning commit on active
