@@ -2,6 +2,8 @@ package dev.agync.agenthub.pairing
 
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
 
 /**
@@ -35,8 +37,9 @@ class SeededPairing(
 
   override suspend fun abort(handshake: Handshake) = Unit
 
-  override suspend fun awaitConfirmation(handshake: Handshake): Confirmation {
+  override suspend fun awaitConfirmation(handshake: Handshake, checkNow: ReceiveChannel<Unit>?, onChecked: (Instant) -> Unit): Confirmation {
     delay(confirmDelayMillis)
+    onChecked(clock.instant())
     return Confirmation.Confirmed
   }
 }

@@ -10031,6 +10031,15 @@ button:is(.member-grant-open, .member-revoke-btn):not([disabled]):not(.primary):
 .phones-state.is-active { color: var(--ok); }
 .phones-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
 .phones-ring { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--ink-3); box-sizing: border-box; }
+/* A live wait: the accent dot fades slowly while the hub has not answered yet.
+   Reduced motion stops it, which leaves the dot and the words. */
+.phones-status { margin: var(--s-4) 0 0; display: flex; align-items: center; gap: var(--s-2); font-size: var(--t-13); color: var(--ink); }
+.phones-status.is-ok, .phones-ok { color: var(--ok); font-weight: 600; }
+.phones-pulse { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: phones-pulse 1.6s ease-in-out infinite alternate; }
+@keyframes phones-pulse {
+  from { opacity: 1; }
+  to { opacity: .3; }
+}
 .phones-crumb { display: flex; align-items: center; gap: var(--s-2); font-size: var(--t-13); color: var(--ink-2); }
 .phones-crumb a { color: var(--ink); }
 @media (max-width: 480px) {

@@ -94,6 +94,8 @@ class FlowsTest {
     compose.onNodeWithText("Pair", useUnmergedTree = false).performClick()
     waitFor("Compare the check string")
     compose.onNodeWithText("They match").performClick()
+    waitFor("Paired. Next, choose how alerts reach you.")
+    compose.onNodeWithText("Continue").performClick()
     waitFor("How should alerts reach you?")
     compose.onNodeWithText("Not now").performClick()
     waitForDesc("Now, 4 need you")

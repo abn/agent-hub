@@ -73,6 +73,31 @@ function dispatchLive(payload) {
   }
 }
 
+// Screens that refetch on a plain tick while they are open.
+const tickWatchers = new Set();
+
+// How many plain ticks have arrived. A screen reads it before a fetch and
+// again after it, so a tick that landed while the fetch was out is not lost.
+let ticks = 0;
+
+/** The number of plain ticks so far. */
+export function tickCount() {
+  return ticks;
+}
+
+/** Run `watcher` on every plain tick. Returns an unsubscribe function. */
+export function onTick(watcher) {
+  tickWatchers.add(watcher);
+  return () => tickWatchers.delete(watcher);
+}
+
+let streamConnected = false;
+
+/** Whether the freshness stream is connected now, so a screen can poll when it is not. */
+export function streamOpen() {
+  return streamConnected;
+}
+
 export async function startStream() {
   if (streamRunning) return;
   if (!prefs.token) {
@@ -88,6 +113,7 @@ export async function startStream() {
       headers: { Authorization: "Bearer " + prefs.token, Accept: "text/event-stream" },
     });
     if (!response.ok || !response.body) throw new Error("stream unavailable");
+    streamConnected = true;
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -100,6 +126,7 @@ export async function startStream() {
       for (const frame of frames) handleFrame(frame);
     }
   } catch {}
+  streamConnected = false;
   streamRunning = false;
   setTimeout(startStream, 15000);
 }
@@ -114,5 +141,12 @@ function handleFrame(frame) {
     } catch {}
     return;
   }
-  if (frame.includes("event: tick")) refreshBadge();
+  if (!frame.includes("event: tick")) return;
+  ticks += 1;
+  refreshBadge();
+  for (const watcher of tickWatchers) {
+    try {
+      watcher();
+    } catch {}
+  }
 }

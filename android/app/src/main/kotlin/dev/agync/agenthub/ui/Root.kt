@@ -141,9 +141,10 @@ fun AppRoot(container: AppContainer, platform: Platform, navigator: Navigator = 
 
 @Composable
 fun PairHost(container: AppContainer, platform: Platform, prefs: DevicePrefs, onDone: () -> Unit, onClose: (() -> Unit)?) {
-  val vm: PairViewModel = viewModel(factory = viewModelFactory { initializer { PairViewModel(container.pairing, container.registry, container.prefs, container.deviceName) } })
+  val vm: PairViewModel = viewModel(factory = viewModelFactory { initializer { PairViewModel(container.pairing, container.registry, container.prefs, container.deviceName, container.clock) } })
   val step by vm.step.collectAsState()
   val notice by vm.notice.collectAsState()
+  OnAppForeground(onLeft = vm::appLeft, onReturned = vm::appReturned)
   LaunchedEffect(step) { if (step is PairStep.Done) { platform.setStayConnected(prefs.stayConnected); onDone() } }
   BackHandler(enabled = onClose != null || step !is PairStep.Welcome) {
     if (step is PairStep.Welcome) onClose?.invoke() else vm.back()
@@ -154,11 +155,41 @@ fun PairHost(container: AppContainer, platform: Platform, prefs: DevicePrefs, on
       onStartScan = vm::startScan, onStartManual = vm::startManual, onBack = vm::back, onEditManual = vm::editManual, onSubmitManual = vm::submitManual,
       onName = vm::setDeviceName, onPair = vm::pair, onCancelPairing = vm::cancelPairing, onCheckMatch = vm::checkStringsMatch, onCheckDiffer = vm::checkStringsDiffer, onStayConnected = vm::setStayConnected,
       onAllowNotifications = { platform.requestNotifications(vm::notificationsAnswered) }, onNotNow = vm::skipAlerts,
-      onOpenSettings = { if (step is PairStep.Scan) platform.openAppSettings() else platform.openNotificationSettings() },
-      onPrefs = container.prefs::update,
+      onOpenSettings = {
+        vm.leavingForSettings()
+        if (step is PairStep.Scan) platform.openAppSettings() else platform.openNotificationSettings()
+      },
+      onPrefs = container.prefs::update, onContinue = vm::continueToAlerts, onStartAgain = vm::startAgain,
     ),
+    clock = container.clock,
     scanner = { platform.Scanner(onScanned = vm::scanned, onDenied = vm::cameraDenied) },
   )
+}
+
+/**
+ * Tells the flow when the app leaves the front and when it comes back. The events replayed as the
+ * observer attaches are not a return, so they are skipped.
+ */
+@Composable
+private fun OnAppForeground(onLeft: () -> Unit, onReturned: () -> Unit) {
+  val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+  val left by androidx.compose.runtime.rememberUpdatedState(onLeft)
+  val returned by androidx.compose.runtime.rememberUpdatedState(onReturned)
+  androidx.compose.runtime.DisposableEffect(owner) {
+    var attaching = true
+    val observer =
+      androidx.lifecycle.LifecycleEventObserver { _, event ->
+        if (attaching) return@LifecycleEventObserver
+        when (event) {
+          androidx.lifecycle.Lifecycle.Event.ON_STOP -> left()
+          androidx.lifecycle.Lifecycle.Event.ON_START, androidx.lifecycle.Lifecycle.Event.ON_RESUME -> returned()
+          else -> Unit
+        }
+      }
+    owner.lifecycle.addObserver(observer)
+    attaching = false
+    onDispose { owner.lifecycle.removeObserver(observer) }
+  }
 }
 
 private class Snack(val message: String, val actionLabel: String? = null, val lastsMillis: Long = 5000, val onAction: (() -> Unit)? = null)

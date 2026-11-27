@@ -1,6 +1,9 @@
 package dev.agync.agenthub.tendril
 
 import dev.agync.agenthub.pairing.PairingException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -124,16 +127,53 @@ class TendrilPairingTest {
     override fun instant(): java.time.Instant = java.time.Instant.ofEpochMilli(testScheduler.currentTime)
   }
 
-  @Test fun `waiting for the operator backs off from two seconds to thirty, and ends when the hub confirms`() = runTest {
+  private fun kotlinx.coroutines.test.TestScope.io() = kotlinx.coroutines.test.StandardTestDispatcher(testScheduler)
+
+  @Test fun `the hub is asked every two seconds for five minutes, then every five, until the time is up`() = runTest {
     val ops = FakeOps()
     val asked = mutableListOf<Long>()
     ops.onStanding = { asked += testScheduler.currentTime }
-    repeat(7) { ops.standings.addLast(Standing.Pending) }
-    ops.standings.addLast(Standing.Active)
-    val p = TendrilPairing(ops, clock())
+    val p = TendrilPairing(ops, clock(), io = io())
     val h = p.pair(p.readTyped("TND-4F9K-22XQ-8N3P", "hub.example.ts.net")!!, "pixel-phone")
-    assertEquals(dev.agync.agenthub.pairing.Confirmation.Confirmed, p.awaitConfirmation(h))
-    assertEquals(listOf(0L, 2_000L, 6_000L, 14_000L, 30_000L, 60_000L, 90_000L, 120_000L), asked)
+    assertEquals(dev.agync.agenthub.pairing.Confirmation.TimedOut, p.awaitConfirmation(h))
+    val expected = (0L..300_000L step 2_000L) + (305_000L until 900_000L step 5_000L)
+    assertEquals(expected, asked)
+  }
+
+  @Test fun `the wait ends as soon as the hub confirms`() = runTest {
+    val ops = FakeOps()
+    ops.standings.addLast(Standing.Pending)
+    ops.standings.addLast(Standing.Pending)
+    ops.standings.addLast(Standing.Active)
+    val checked = mutableListOf<Long>()
+    val p = TendrilPairing(ops, clock(), io = io())
+    val h = p.pair(p.readTyped("TND-4F9K-22XQ-8N3P", "hub.example.ts.net")!!, "pixel-phone")
+    assertEquals(dev.agync.agenthub.pairing.Confirmation.Confirmed, p.awaitConfirmation(h, null) { checked += it.toEpochMilli() })
+    assertEquals(listOf(0L, 2_000L, 4_000L), checked)
+  }
+
+  @Test fun `a nudge asks the hub at once, then the schedule carries on from there`() = runTest {
+    val ops = FakeOps()
+    val asked = mutableListOf<Long>()
+    ops.onStanding = { asked += testScheduler.currentTime }
+    ops.standings.addLast(Standing.Pending)
+    ops.standings.addLast(Standing.Pending)
+    ops.standings.addLast(Standing.Active)
+    val p = TendrilPairing(ops, clock(), io = io())
+    val h = p.pair(p.readTyped("TND-4F9K-22XQ-8N3P", "hub.example.ts.net")!!, "pixel-phone")
+    val nudge = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    val result = async { p.awaitConfirmation(h, nudge) }
+    runCurrent()
+    advanceTimeBy(500)
+    nudge.trySend(Unit)
+    runCurrent()
+    assertEquals(listOf(0L, 500L), asked)
+    assertEquals(dev.agync.agenthub.pairing.Confirmation.Confirmed, result.await())
+    assertEquals(listOf(0L, 500L, 2_500L), asked)
+  }
+
+  @Test fun `the pairing stays open for fifteen minutes unless told otherwise`() {
+    assertEquals(java.time.Duration.ofMinutes(15), TendrilPairing(FakeOps()).confirmWindow)
   }
 
   @Test fun `a hub that turns the phone away ends the wait as refused, at once`() = runTest {

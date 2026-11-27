@@ -5,13 +5,19 @@ import androidx.lifecycle.viewModelScope
 import dev.agync.agenthub.data.HubRegistry
 import dev.agync.agenthub.data.PairedHub
 import dev.agync.agenthub.data.PrefsRepository
+import dev.agync.agenthub.model.PairWait
 import dev.agync.agenthub.pairing.Confirmation
 import dev.agync.agenthub.pairing.Handshake
 import dev.agync.agenthub.pairing.PairOffer
 import dev.agync.agenthub.pairing.Pairing
 import dev.agync.agenthub.pairing.PairingException
+import java.time.Clock
+import java.time.Duration
+import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -34,7 +40,13 @@ sealed interface PairStep {
    * this phone waits for the person to say the two strings match; otherwise it waits for the
    * operator to confirm on the hub.
    */
-  data class CheckString(val handshake: Handshake, val needsYou: Boolean = false) : PairStep
+  data class CheckString(val handshake: Handshake, val needsYou: Boolean = false, val wait: PairWait? = null) : PairStep
+
+  /** The hub confirmed. The phone is registered; the flow moves to [Alerts] after a short beat, or on Continue. */
+  data class Confirmed(val handshake: Handshake) : PairStep
+
+  /** The wait ended without a pairing: the hub said no, or the time ran out. */
+  data class Stopped(val reason: StopReason) : PairStep
 
   /** Paired. Choose how alerts reach you. */
   data class Alerts(val hubName: String, val stayConnected: Boolean = true, val notificationsDenied: Boolean = false) : PairStep
@@ -43,6 +55,12 @@ sealed interface PairStep {
 
   /** Everything is set up: leave the flow. */
   data object Done : PairStep
+}
+
+sealed interface StopReason {
+  data object Refused : StopReason
+
+  data class RanOut(val at: Instant) : StopReason
 }
 
 /**
@@ -54,6 +72,7 @@ class PairViewModel(
   private val registry: HubRegistry,
   private val prefs: PrefsRepository,
   defaultDeviceName: String,
+  private val clock: Clock = Clock.systemDefaultZone(),
 ) : ViewModel() {
   private val _step = MutableStateFlow<PairStep>(PairStep.Welcome)
   val step: StateFlow<PairStep> = _step
@@ -68,6 +87,9 @@ class PairViewModel(
   private var pairedHub: PairedHub? = null
   private var pending: Handshake? = null
   private var localAnswer: CompletableDeferred<Boolean>? = null
+  private val checkNow = Channel<Unit>(Channel.CONFLATED)
+  private var leftAt: Instant? = null
+  private var leftForSettings = false
 
   fun startScan() {
     _step.value = PairStep.Scan()
@@ -89,7 +111,7 @@ class PairViewModel(
     val s = _step.value
     _step.value =
       when (s) {
-        is PairStep.Scan, is PairStep.Manual, is PairStep.CodeFailed -> PairStep.Welcome
+        is PairStep.Scan, is PairStep.Manual, is PairStep.CodeFailed, is PairStep.Stopped -> PairStep.Welcome
         is PairStep.Confirm -> if (s.offer.typed) PairStep.Manual(s.offer.codeLabel.orEmpty(), s.offer.address.orEmpty()) else PairStep.Scan()
         else -> s
       }
@@ -152,26 +174,33 @@ class PairViewModel(
           _step.value = PairStep.CodeFailed(unreachable = e is PairingException.Unreachable)
           return@launch
         }
-        _step.value = PairStep.CheckString(handshake, needsYou = false)
-        when (pairing.awaitConfirmation(handshake)) {
+        val since = clock.instant()
+        val wait = PairWait(since, since.plus(pairing.confirmWindow))
+        checkNow.tryReceive()
+        _step.value = PairStep.CheckString(handshake, needsYou = false, wait = wait)
+        val outcome =
+          pairing.awaitConfirmation(handshake, checkNow) { at ->
+            _step.update { if (it is PairStep.CheckString && it.wait != null) it.copy(wait = it.wait.copy(checkedAt = at)) else it }
+          }
+        when (outcome) {
           Confirmation.Confirmed -> {
             pending = null
             pairedHub = PairedHub(handshake.hubId, handshake.hubName, name, handshake.stateDir)
             registry.add(pairedHub!!)
             pairing.adopt(handshake)
-            _step.value = PairStep.Alerts(handshake.hubName)
+            _step.value = PairStep.Confirmed(handshake)
+            delay(CONFIRMED_BEAT_MILLIS)
+            continueToAlerts()
           }
           Confirmation.Refused -> {
             pairing.abort(handshake)
             pending = null
-            _notice.value = "The hub refused this phone."
-            _step.value = PairStep.Welcome
+            _step.value = PairStep.Stopped(StopReason.Refused)
           }
           Confirmation.TimedOut -> {
             pairing.abort(handshake)
             pending = null
-            _notice.value = "The code ran out before it was confirmed on the hub."
-            _step.value = PairStep.Welcome
+            _step.value = PairStep.Stopped(StopReason.RanOut(wait.deadline))
           }
         }
       }
@@ -214,7 +243,50 @@ class PairViewModel(
     _step.value = PairStep.Done
   }
 
+  /** The app went to the background. */
+  fun appLeft() {
+    leftAt = clock.instant()
+  }
+
+  /** The person is leaving through the app's own open-settings action, so the scanner is not stale when they return. */
+  fun leavingForSettings() {
+    leftForSettings = true
+  }
+
+  /**
+   * The app is back in front. While the hub is being waited on, ask it now. A scanner left for
+   * longer than [SCANNER_STALE_SECONDS] goes back to the start, so the camera stays off until the
+   * person taps Scan again.
+   */
+  fun appReturned() {
+    val away = leftAt?.let { Duration.between(it, clock.instant()) }
+    val viaSettings = leftForSettings
+    leftAt = null
+    leftForSettings = false
+    when (val s = _step.value) {
+      is PairStep.Scan -> if (!viaSettings && away != null && away.seconds > SCANNER_STALE_SECONDS) _step.value = PairStep.Welcome
+      is PairStep.CheckString -> if (!s.needsYou && s.wait != null) checkNow.trySend(Unit)
+      else -> Unit
+    }
+  }
+
+  /** Leaves the confirmed screen for the alerts choice. Once only: the beat and the button both land here. */
+  fun continueToAlerts() {
+    val s = _step.value as? PairStep.Confirmed ?: return
+    _step.value = PairStep.Alerts(s.handshake.hubName)
+  }
+
+  /** From the stopped screen back to the start of pairing. */
+  fun startAgain() {
+    if (_step.value is PairStep.Stopped) _step.value = PairStep.Welcome
+  }
+
   fun clearNotice() {
     _notice.value = null
+  }
+
+  private companion object {
+    const val CONFIRMED_BEAT_MILLIS = 800L
+    const val SCANNER_STALE_SECONDS = 30L
   }
 }

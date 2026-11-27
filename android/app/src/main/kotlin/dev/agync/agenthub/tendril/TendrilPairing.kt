@@ -9,8 +9,12 @@ import dev.tendril.TendrilEndpoint
 import java.net.URLDecoder
 import java.time.Clock
 import java.time.Duration
+import java.time.Instant
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -175,8 +179,12 @@ class TendrilPairing(
   private val clock: Clock = Clock.systemDefaultZone(),
   private val confirmTimeout: Duration = Duration.ofMinutes(15),
   private val pollEvery: Duration = Duration.ofSeconds(2),
-  private val maxPollEvery: Duration = Duration.ofSeconds(30),
+  private val slowAfter: Duration = Duration.ofMinutes(5),
+  private val slowPollEvery: Duration = Duration.ofSeconds(5),
+  private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : Pairing {
+  override val confirmWindow: Duration get() = confirmTimeout
+
   override fun read(raw: String): PairOffer? {
     // The exact scanned string goes to Tendril: not trimmed, decoded or reordered, since the URI carries a signature.
     val s = raw
@@ -243,18 +251,23 @@ class TendrilPairing(
     }
   }
 
-  override suspend fun awaitConfirmation(handshake: Handshake): Confirmation {
-    val deadline = clock.instant().plus(confirmTimeout)
-    // Backs off from the first interval to the longest: the operator may take minutes, and each ask is a request to the hub.
-    var wait = pollEvery.toMillis()
+  override suspend fun awaitConfirmation(handshake: Handshake, checkNow: ReceiveChannel<Unit>?, onChecked: (Instant) -> Unit): Confirmation {
+    val start = clock.instant()
+    val deadline = start.plus(confirmTimeout)
+    // Steady and short: the operator is usually on the hub already, and each ask is a small request.
+    // After the first few minutes the person has likely gone away, so it eases to a longer interval.
     while (clock.instant().isBefore(deadline)) {
-      when (withContext(Dispatchers.IO) { ops.standing(handshake.hubId) }) {
+      val standing = withContext(io) { ops.standing(handshake.hubId) }
+      val now = clock.instant()
+      onChecked(now)
+      when (standing) {
         Standing.Active -> return Confirmation.Confirmed
         Standing.Refused -> return Confirmation.Refused
         Standing.Pending -> Unit
       }
-      delay(wait)
-      wait = minOf(wait * 2, maxPollEvery.toMillis())
+      val every = if (Duration.between(start, now) < slowAfter) pollEvery else slowPollEvery
+      // A nudge cuts the wait short: the app came back to the front.
+      withTimeoutOrNull(every.toMillis()) { checkNow?.receive() ?: awaitCancellation() }
     }
     return Confirmation.TimedOut
   }
