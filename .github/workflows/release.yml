@@ -59,6 +59,18 @@ jobs:
     with:
       tag: ${{ needs.release-please.outputs.tag_name }}
 
+  # The signed Android APK. Nothing waits on it: signing needs an approval in
+  # the release-signing environment and is off until ANDROID_SIGNING is true.
+  android:
+    name: Android APK
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/android-release.yml
+    with:
+      tag: ${{ needs.release-please.outputs.tag_name }}
+
   # A pinned copy of each script ships with every release, beside the copy the
   # site serves, so an install of an old version can use the script it shipped
   # with.

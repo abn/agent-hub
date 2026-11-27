@@ -2,7 +2,7 @@
 
 BIN := agent-hub
 
-.PHONY: help setup build test plugins/sync plugins/antigravity-dist test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e plugins/check install/test install/e2e net/check serve/check gate gate/quick gate/identity e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build android/tendril android/build android/test android/screenshots android/release android/lint android/devices android/device android/emu android/smoke android/test-hub
+.PHONY: help setup build test plugins/sync plugins/antigravity-dist test/shard clippy lint lint/staged lint/engine fmt fmt/check docs/check web/crypto web/units web/styles web/types web/e2e plugins/check install/test install/e2e net/check serve/check gate gate/quick gate/identity e2e e2e/shard e2e/baselines check clean hooks/require hooks/update container/config container/build android/tendril android/build android/test android/screenshots android/release android/apk android/lint android/devices android/device android/emu android/smoke android/test-hub
 
 ##@ Bootstrap
 
@@ -282,6 +282,13 @@ android/lint: ## Run Android lint
 android/release: ## Build the signed release APK (ANDROID_KEYSTORE_PROPERTIES=path to keystore.properties)
 	@test -n "$$ANDROID_KEYSTORE_PROPERTIES" || { printf 'android/release: set ANDROID_KEYSTORE_PROPERTIES to a keystore.properties file\n' >&2; exit 1; }
 	AGENT_HUB_KEYSTORE_PROPERTIES="$$ANDROID_KEYSTORE_PROPERTIES" android/scripts/gradle.sh :app:assembleRelease
+
+# The APK the release workflow signs. The version code is derived from the version, so a rebuild of
+# a tag never goes backwards. No keystore is read: signing is a separate step with its own key.
+android/apk: ## Build the unsigned release APK (VERSION=x.y.z)
+	@printf '%s\n' "$(VERSION)" | grep -qE '^[0-9]+\.[0-9]{1,3}\.[0-9]{1,3}$$' || { printf 'android/apk: set VERSION to x.y.z, minor and patch under 1000\n' >&2; exit 1; }
+	AGENT_HUB_KEYSTORE_PROPERTIES= android/scripts/gradle.sh :app:assembleRelease -PversionName=$(VERSION) \
+		-PversionCode=$$(printf '%s\n' "$(VERSION)" | awk -F. '{ print $$1 * 1000000 + $$2 * 1000 + $$3 }')
 
 ##@ Utilities
 

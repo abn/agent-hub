@@ -70,3 +70,13 @@ Three steps are the owner's, once: create the `@agync` npm organisation and set
 archive through the marketplace intake form, and, for a Claude directory
 listing, supply an icon and a privacy policy URL. The commands are in the
 repository's `RELEASING.md`.
+
+## Releasing the Android app
+
+The release workflow builds the Android APK from the release tag, signs it in a
+separate job that holds the key and checks out no code, and attaches
+`agent-hub-android-<version>.apk` and its checksum to the GitHub release.
+Signing waits for the owner's approval in the `release-signing` environment and
+stays off until the `ANDROID_SIGNING` repository variable is `true`. The
+one-time setup, and the command that signs an older tag, are in
+`RELEASING.md`.

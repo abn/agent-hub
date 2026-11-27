@@ -4,6 +4,14 @@ This log tracks the evolution of the knowledge base: page additions,
 deprecations, and structural refactors. It is deliberately decoupled from
 software release notes and the repository changelog.
 
+## 2026-11-27
+
+### Android APK on releases
+
+* **Change**: The [maintainer guide](/contribute/maintainers.md#releasing-the-android-app)
+  describes the signed Android APK that each GitHub release now carries, and
+  where its one-time setup lives.
+
 ## 2026-11-26
 
 ### Notify targets
