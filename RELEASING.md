@@ -43,6 +43,12 @@ HUB_REQUIRE_BROWSER=1 make check
 The workflow is `.github/workflows/release.yml`. The configuration is
 `release-please-config.json` and `.release-please-manifest.json`.
 
+## A chosen version
+
+release-please picks the version from the commits. To set it, add a
+`Release-As: <version>` line to a commit message. The commit must change a
+file: a rebase merge drops an empty commit, and the line with it.
+
 ## The image
 
 `redhat-actions/buildah-build` builds it and `redhat-actions/push-to-registry`
