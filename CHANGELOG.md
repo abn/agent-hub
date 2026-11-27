@@ -4,6 +4,17 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.14.0...agent-hub-v1.15.0) (2026-11-27)
+
+
+### Features
+
+* **android:** add the design system ([1d0afe9](https://github.com/agync/agent-hub/commit/1d0afe993fabefd7bdf76d2cb49d9ad13169df6f))
+* **android:** add the hub client, repository, pairing seam and view models ([3e518c6](https://github.com/agync/agent-hub/commit/3e518c675f8c79568c53fdad3cda3a4ba5c7608b))
+* **android:** add the screens, the shell and the system surfaces ([9c597ed](https://github.com/agync/agent-hub/commit/9c597ed134d2d6f666e30ef5c4fdbb664852e30e))
+* pair phones and connect them through Tendril ([ece8a9d](https://github.com/agync/agent-hub/commit/ece8a9d3409130cea7bbb2e84c1b96f87e0da743))
+* send notices to webhook and chat targets with content levels ([1724d14](https://github.com/agync/agent-hub/commit/1724d14cf0628feebdbc489ba36673fe1c3057e9))
+
 ## [1.14.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.13.0...agent-hub-v1.14.0) (2026-11-25)
 
 
