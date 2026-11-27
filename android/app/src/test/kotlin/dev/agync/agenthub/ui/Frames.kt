@@ -29,7 +29,9 @@ import dev.agync.agenthub.viewmodel.HubViewModel
 import dev.agync.agenthub.viewmodel.ItemViewModel
 import dev.agync.agenthub.viewmodel.MemberViewModel
 import dev.agync.agenthub.viewmodel.NowViewModel
+import dev.agync.agenthub.model.PairWait
 import dev.agync.agenthub.viewmodel.PairStep
+import dev.agync.agenthub.viewmodel.StopReason
 import dev.agync.agenthub.viewmodel.ProjectViewModel
 import dev.agync.agenthub.viewmodel.SearchViewModel
 import dev.agync.agenthub.viewmodel.ProjectsViewModel
@@ -40,14 +42,14 @@ import kotlinx.coroutines.runBlocking
 /** One board frame: how to draw it and the device it is drawn on. */
 class Frame(val name: String, val time: String = "14:32", val fontScale: Float = 1f, val tablet: Boolean = false, val nav: Int? = null, val badge: Int = 3, val content: @Composable () -> Unit)
 
-private val noPair = PairActions({}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+private val noPair = PairActions({}, {}, {}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
 private val noNow = NowActions({}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
 private val noItem = ItemActions({}, {}, {}, {}, {}, { _, _, _ -> }, {}, {}, {}, {}, {}, {}, {})
 
 object Frames {
   val names =
     listOf(
-      "pair-welcome", "pair-scan", "pair-confirm", "pair-sas", "pair-notify", "pair-manual", "pair-code-failed", "pair-camera-denied", "pair-notify-denied",
+      "pair-welcome", "pair-scan", "pair-confirm", "pair-sas", "pair-sas-slow", "pair-confirmed", "pair-refused", "pair-ran-out", "pair-notify", "pair-manual", "pair-code-failed", "pair-camera-denied", "pair-notify-denied",
       "pair-too-old", "home", "home-live", "home-empty", "home-offline", "unreachable", "unpaired", "home-200",
       "item-question", "item-approval", "item-enrol", "item-queued", "item-refused", "item-resolved",
       "projects", "project-feed", "project-sessions", "session", "artifacts", "artifact-viewer", "artifact-locked",
@@ -61,6 +63,13 @@ object Frames {
   private fun itemVm(rig: Fixtures.Rig, id: String) = ItemViewModel(rig.repo, id, Fixtures.fmt(), rig.clock)
 
   private val fmt: Fmt = Fixtures.fmt()
+  private val hs = Handshake("h", "home hub", "k7m2 qwxa 4fbn r3td", "LAN")
+
+  private fun waiting(seconds: Long, checkedAgo: Long? = null): PairWait {
+    val since = Fixtures.now.minusSeconds(seconds)
+    return PairWait(since, since.plusSeconds(15 * 60), checkedAgo?.let { Fixtures.now.minusSeconds(it) })
+  }
+
   private val offer = PairOffer("tendril://pair?v=1", "home hub", "TND-4F9K-22XQ-8N3P", Fixtures.now.plusSeconds(15 * 60))
 
   fun build(name: String): Frame {
@@ -71,7 +80,11 @@ object Frames {
       "pair-welcome" -> Frame(name) { PairScreen(PairStep.Welcome, DevicePrefs(), fmt, noPair) {} }
       "pair-scan" -> Frame(name) { PairScreen(PairStep.Scan(), DevicePrefs(), fmt, noPair, scanner = {}) }
       "pair-confirm" -> Frame(name) { PairScreen(PairStep.Confirm(offer, "pixel-phone"), DevicePrefs(), fmt, noPair) {} }
-      "pair-sas" -> Frame(name) { PairScreen(PairStep.CheckString(Handshake("h", "home hub", "k7m2 qwxa 4fbn r3td", "LAN")), DevicePrefs(), fmt, noPair) {} }
+      "pair-sas" -> Frame(name) { PairScreen(PairStep.CheckString(hs, wait = waiting(42)), DevicePrefs(), fmt, noPair, clock = Fixtures.clock()) {} }
+      "pair-sas-slow" -> Frame(name) { PairScreen(PairStep.CheckString(hs, wait = waiting(125, checkedAgo = 2)), DevicePrefs(), fmt, noPair, clock = Fixtures.clock()) {} }
+      "pair-confirmed" -> Frame(name) { PairScreen(PairStep.Confirmed(hs), DevicePrefs(), fmt, noPair) {} }
+      "pair-refused" -> Frame(name) { PairScreen(PairStep.Stopped(StopReason.Refused), DevicePrefs(), fmt, noPair) {} }
+      "pair-ran-out" -> Frame(name) { PairScreen(PairStep.Stopped(StopReason.RanOut(Fixtures.now)), DevicePrefs(), fmt, noPair) {} }
       "pair-notify" -> Frame(name) { PairScreen(PairStep.Alerts("home hub"), DevicePrefs(alertFinished = false), fmt, noPair) {} }
       "pair-manual" -> Frame(name) { PairScreen(PairStep.Manual("TND-4F9K-22XQ-8N3P", "192.168.1.10:48732"), DevicePrefs(), fmt, noPair) {} }
       "pair-code-failed" -> Frame(name) { PairScreen(PairStep.CodeFailed(), DevicePrefs(), fmt, noPair) {} }

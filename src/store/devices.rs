@@ -48,6 +48,9 @@ pub struct Device {
     pub confirmed_at: Option<String>,
     pub revoked_at: Option<String>,
     pub last_seen_at: Option<String>,
+    /// When the phone last connected since it was confirmed: none until its
+    /// first connection after the confirm, which the web app waits for.
+    pub checked_in_at: Option<String>,
 }
 
 const COLUMNS: &str =
@@ -162,20 +165,31 @@ pub async fn forget_pending(db: &Database, id: &str) -> Result<()> {
     Ok(())
 }
 
-/// Record that a phone opened a session now.
-pub async fn touch(db: &Database, id: &str) -> Result<()> {
+/// Record that a phone opened a session now. True when this is its first
+/// since the operator confirmed it.
+///
+/// The seen time is never recorded earlier than the confirm. A clock that
+/// stepped back after the confirm would otherwise leave every later session
+/// looking like the first, and each would tick the stream.
+pub async fn touch(db: &Database, id: &str) -> Result<bool> {
     let _turn = super::write_turn().await?;
+    let device = get(db, id).await?;
+    let first = device.as_ref().is_some_and(|device| {
+        device.state == DeviceState::Active && device.checked_in_at.is_none()
+    });
+    let now = super::now_rfc3339();
+    let seen = match device.and_then(|device| device.confirmed_at) {
+        Some(confirmed) if !since(Some(&now), Some(&confirmed)) => confirmed,
+        _ => now,
+    };
     let conn = super::connect(db)?;
     conn.execute(
         "UPDATE devices SET last_seen_at = ?2 WHERE id = ?1",
-        vec![
-            Value::Text(id.to_string()),
-            Value::Text(super::now_rfc3339()),
-        ],
+        vec![Value::Text(id.to_string()), Value::Text(seen)],
     )
     .await
     .map_err(super::engine)?;
-    Ok(())
+    Ok(first)
 }
 
 async fn set_state(db: &Database, id: &str, sql: &str, refused: &str) -> Result<()> {
@@ -203,6 +217,11 @@ async fn set_state(db: &Database, id: &str, sql: &str, refused: &str) -> Result<
 }
 
 fn device(row: &Row) -> Result<Device> {
+    let confirmed_at = text_at(row, 6)?;
+    let last_seen_at = text_at(row, 8)?;
+    let checked_in_at = since(last_seen_at.as_deref(), confirmed_at.as_deref())
+        .then(|| last_seen_at.clone())
+        .flatten();
     Ok(Device {
         id: text(row, 0)?,
         name: text(row, 1)?,
@@ -210,10 +229,20 @@ fn device(row: &Row) -> Result<Device> {
         state: DeviceState::parse(&text(row, 3)?)?,
         check_string: text_at(row, 4)?,
         paired_at: text(row, 5)?,
-        confirmed_at: text_at(row, 6)?,
+        confirmed_at,
         revoked_at: text_at(row, 7)?,
-        last_seen_at: text_at(row, 8)?,
+        last_seen_at,
+        checked_in_at,
     })
+}
+
+/// Whether `seen` is at or after `confirmed`. The stamps are compared as
+/// times: their fractional seconds vary in length, so the text does not sort.
+fn since(seen: Option<&str>, confirmed: Option<&str>) -> bool {
+    use time::format_description::well_known::Rfc3339;
+    let at =
+        |stamp: Option<&str>| stamp.and_then(|s| time::OffsetDateTime::parse(s, &Rfc3339).ok());
+    matches!((at(seen), at(confirmed)), (Some(seen), Some(confirmed)) if seen >= confirmed)
 }
 
 fn text(row: &Row, index: usize) -> Result<String> {

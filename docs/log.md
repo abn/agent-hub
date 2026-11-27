@@ -6,6 +6,16 @@ software release notes and the repository changelog.
 
 ## 2026-11-27
 
+### Phones screen follows the pairing
+
+* **Change**: [Phones](/operate/phones.md) describes the Settings > Phones
+  screen moving on by itself as a phone arrives and checks in, the title
+  count and desktop notification while a phone waits, and the message when a
+  code runs out.
+* **Update**: [REST API](/reference/rest-api.md#phones) documents
+  `checked_in_at` on `GET /api/v1/devices`, set by a confirmed phone's first
+  connection, which ticks the event stream.
+
 ### Release-As
 
 * **Change**: The [contributor guide](/contribute/guide.md) allows a

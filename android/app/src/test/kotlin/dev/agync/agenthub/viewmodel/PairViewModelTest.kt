@@ -11,7 +11,12 @@ import dev.agync.agenthub.pairing.PairOffer
 import dev.agync.agenthub.pairing.Pairing
 import dev.agync.agenthub.pairing.PairingException
 import dev.agync.agenthub.pairing.SeededPairing
+import dev.agync.agenthub.model.PairWait
+import java.time.Duration
+import java.time.Instant
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -45,17 +50,33 @@ private class ScriptedPairing(
     return Handshake("hub-1", "home hub", "k7m2 qwxa 4fbn r3td", "LAN", needsLocalConfirm)
   }
 
-  override suspend fun awaitConfirmation(handshake: Handshake): Confirmation = confirmation.await()
+  var nudge: ReceiveChannel<Unit>? = null
+  var onChecked: (Instant) -> Unit = {}
+
+  override suspend fun awaitConfirmation(handshake: Handshake, checkNow: ReceiveChannel<Unit>?, onChecked: (Instant) -> Unit): Confirmation {
+    nudge = checkNow
+    this.onChecked = onChecked
+    return confirmation.await()
+  }
 }
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class PairViewModelTest {
   @get:Rule val main = MainDispatcherRule()
+
+  private val clock = Fixtures.clock()
 
   private fun make(pairing: Pairing): Triple<PairViewModel, HubRegistry, PrefsRepository> {
     val store = MemoryStore()
     val reg = HubRegistry(store)
     val prefs = PrefsRepository(store)
-    return Triple(PairViewModel(pairing, reg, prefs, "pixel-phone"), reg, prefs)
+    return Triple(PairViewModel(pairing, reg, prefs, "pixel-phone", clock), reg, prefs)
+  }
+
+  private fun pairedScan(scripted: ScriptedPairing): PairViewModel {
+    val (vm, _, _) = make(scripted)
+    vm.startScan(); vm.scanned("tendril://pair?v=1&host=home-lab&id=hub-1"); vm.pair()
+    return vm
   }
 
   @Test fun `scanning something that is not a pairing code keeps the camera looking`() {
@@ -93,6 +114,7 @@ class PairViewModelTest {
     assertEquals("k7m2 qwxa 4fbn r3td", sas.handshake.checkString)
     assertTrue(reg.state.value.hubs.isEmpty())
     scripted.confirmation.complete(Confirmation.Confirmed)
+    vm.continueToAlerts()
     assertEquals(PairStep.Alerts("home hub"), vm.step.value)
     assertEquals("my-pixel", reg.state.value.current!!.deviceName)
   }
@@ -114,14 +136,176 @@ class PairViewModelTest {
     assertEquals(PairStep.CodeFailed(true), vm.step.value)
   }
 
-  @Test fun `a refusal on the hub sends the person back with a notice`() = runTest {
+  @Test fun `a refusal on the hub stops the pairing and registers nothing`() = runTest {
     val scripted = ScriptedPairing()
     val (vm, reg, _) = make(scripted)
     vm.startScan(); vm.scanned("tendril://pair?v=1"); vm.pair()
     scripted.confirmation.complete(Confirmation.Refused)
-    assertEquals(PairStep.Welcome, vm.step.value)
-    assertEquals("The hub refused this phone.", vm.notice.value)
+    assertEquals(PairStep.Stopped(StopReason.Refused), vm.step.value)
+    assertEquals(null, vm.notice.value)
+    assertEquals(listOf("hub-1"), scripted.aborted)
     assertTrue(reg.state.value.hubs.isEmpty())
+  }
+
+  @Test fun `a wait that runs out stops the pairing at the time the window closed`() = runTest {
+    val scripted = ScriptedPairing()
+    val (vm, reg, _) = make(scripted)
+    vm.startScan(); vm.scanned("tendril://pair?v=1"); vm.pair()
+    scripted.confirmation.complete(Confirmation.TimedOut)
+    assertEquals(PairStep.Stopped(StopReason.RanOut(Fixtures.now.plus(Duration.ofMinutes(15)))), vm.step.value)
+    assertEquals(null, vm.notice.value)
+    assertEquals(listOf("hub-1"), scripted.aborted)
+    assertTrue(reg.state.value.hubs.isEmpty())
+  }
+
+  @Test fun `start again from a stopped pairing returns to the start`() = runTest {
+    val scripted = ScriptedPairing()
+    val vm = pairedScan(scripted)
+    scripted.confirmation.complete(Confirmation.Refused)
+    vm.startAgain()
+    assertEquals(PairStep.Welcome, vm.step.value)
+  }
+
+  @Test fun `start again does nothing anywhere else`() = runTest {
+    val vm = pairedScan(ScriptedPairing())
+    vm.startAgain()
+    assertTrue(vm.step.value is PairStep.CheckString)
+  }
+
+  @Test fun `the wait begins when the hub is being waited on, and carries its deadline`() = runTest {
+    val vm = pairedScan(ScriptedPairing())
+    val s = vm.step.value as PairStep.CheckString
+    assertEquals(PairWait(Fixtures.now, Fixtures.now.plus(Duration.ofMinutes(15))), s.wait)
+  }
+
+  @Test fun `each completed check is recorded on the wait`() = runTest {
+    val scripted = ScriptedPairing()
+    val vm = pairedScan(scripted)
+    val at = Fixtures.now.plusSeconds(4)
+    scripted.onChecked(at)
+    assertEquals(at, (vm.step.value as PairStep.CheckString).wait!!.checkedAt)
+  }
+
+  @Test fun `coming back to the app while waiting asks the hub at once`() = runTest {
+    val scripted = ScriptedPairing()
+    val vm = pairedScan(scripted)
+    assertTrue(scripted.nudge!!.tryReceive().isFailure)
+    vm.appLeft()
+    clock.at = clock.at.plusSeconds(10)
+    vm.appReturned()
+    assertTrue(scripted.nudge!!.tryReceive().isSuccess)
+  }
+
+  @Test fun `a confirmed pairing shows the confirmation, then moves to alerts after a short beat`() = runTest {
+    val scripted = ScriptedPairing()
+    val vm = pairedScan(scripted)
+    val h = (vm.step.value as PairStep.CheckString).handshake
+    scripted.confirmation.complete(Confirmation.Confirmed)
+    assertEquals(PairStep.Confirmed(h), vm.step.value)
+    advanceTimeBy(799)
+    assertEquals(PairStep.Confirmed(h), vm.step.value)
+    advanceTimeBy(2)
+    assertEquals(PairStep.Alerts("home hub"), vm.step.value)
+  }
+
+  @Test fun `continue moves to alerts at once and the beat does not move it again`() = runTest {
+    val scripted = ScriptedPairing()
+    val vm = pairedScan(scripted)
+    scripted.confirmation.complete(Confirmation.Confirmed)
+    vm.continueToAlerts()
+    assertEquals(PairStep.Alerts("home hub"), vm.step.value)
+    vm.setStayConnected(false)
+    advanceTimeBy(2_000)
+    assertEquals(PairStep.Alerts("home hub", stayConnected = false), vm.step.value)
+    vm.skipAlerts()
+    advanceTimeBy(2_000)
+    assertEquals(PairStep.Done, vm.step.value)
+  }
+
+  @Test fun `continue before anything is confirmed does nothing`() = runTest {
+    val vm = pairedScan(ScriptedPairing())
+    vm.continueToAlerts()
+    assertTrue(vm.step.value is PairStep.CheckString)
+  }
+
+  @Test fun `the hub is registered when it confirms, not when the person moves on`() = runTest {
+    val scripted = ScriptedPairing()
+    val (vm, reg, _) = make(scripted)
+    vm.startScan(); vm.scanned("tendril://pair?v=1&host=home-lab&id=hub-1"); vm.pair()
+    scripted.confirmation.complete(Confirmation.Confirmed)
+    assertTrue(vm.step.value is PairStep.Confirmed)
+    assertEquals(1, reg.state.value.hubs.size)
+    assertEquals(listOf("hub-1"), scripted.adopted)
+  }
+
+  @Test fun `returning to the scanner within thirty seconds keeps the camera view`() = runTest {
+    val (vm, _, _) = make(ScriptedPairing())
+    vm.startScan()
+    vm.appLeft()
+    clock.at = clock.at.plusSeconds(30)
+    vm.appReturned()
+    assertEquals(PairStep.Scan(), vm.step.value)
+  }
+
+  @Test fun `returning to the scanner after more than thirty seconds goes back to the start`() = runTest {
+    val (vm, _, _) = make(ScriptedPairing())
+    vm.startScan()
+    vm.appLeft()
+    clock.at = clock.at.plusSeconds(31)
+    vm.appReturned()
+    assertEquals(PairStep.Welcome, vm.step.value)
+  }
+
+  @Test fun `leaving through open settings and coming back after forty seconds stays on the scanner`() = runTest {
+    val (vm, _, _) = make(ScriptedPairing())
+    vm.cameraDenied()
+    vm.leavingForSettings()
+    vm.appLeft()
+    clock.at = clock.at.plusSeconds(40)
+    vm.appReturned()
+    assertEquals(PairStep.Scan(cameraDenied = true), vm.step.value)
+  }
+
+  @Test fun `the settings exemption lasts for one return only`() = runTest {
+    val (vm, _, _) = make(ScriptedPairing())
+    vm.cameraDenied()
+    vm.leavingForSettings()
+    vm.appLeft()
+    clock.at = clock.at.plusSeconds(40)
+    vm.appReturned()
+    vm.appLeft()
+    clock.at = clock.at.plusSeconds(40)
+    vm.appReturned()
+    assertEquals(PairStep.Welcome, vm.step.value)
+  }
+
+  @Test fun `leaving any other way and coming back after forty seconds goes back to the start`() = runTest {
+    val (vm, _, _) = make(ScriptedPairing())
+    vm.cameraDenied()
+    vm.appLeft()
+    clock.at = clock.at.plusSeconds(40)
+    vm.appReturned()
+    assertEquals(PairStep.Welcome, vm.step.value)
+  }
+
+  @Test fun `a long absence away from the scanner leaves the step alone`() = runTest {
+    val (vm, _, _) = make(ScriptedPairing())
+    vm.startManual()
+    vm.appLeft()
+    clock.at = clock.at.plusSeconds(600)
+    vm.appReturned()
+    assertTrue(vm.step.value is PairStep.Manual)
+  }
+
+  @Test fun `the absence is counted from the last time the app left, not an old one`() = runTest {
+    val (vm, _, _) = make(ScriptedPairing())
+    vm.startScan()
+    vm.appLeft()
+    clock.at = clock.at.plusSeconds(10)
+    vm.appReturned()
+    clock.at = clock.at.plusSeconds(600)
+    vm.appReturned()
+    assertEquals(PairStep.Scan(), vm.step.value)
   }
 
   @Test fun `cancelling a pairing in flight goes back to the start and registers nothing`() = runTest {
@@ -139,6 +323,7 @@ class PairViewModelTest {
     val (vm, _, prefs) = make(scripted)
     vm.startScan(); vm.scanned("tendril://pair?v=1"); vm.pair()
     scripted.confirmation.complete(Confirmation.Confirmed)
+    vm.continueToAlerts()
     vm.skipAlerts()
     assertEquals(PairStep.Done, vm.step.value)
     assertFalse(prefs.state.value.stayConnected)
@@ -149,6 +334,7 @@ class PairViewModelTest {
     val (vm, _, prefs) = make(scripted)
     vm.startScan(); vm.scanned("tendril://pair?v=1"); vm.pair()
     scripted.confirmation.complete(Confirmation.Confirmed)
+    vm.continueToAlerts()
     vm.notificationsAnswered(false)
     assertTrue((vm.step.value as PairStep.Alerts).notificationsDenied)
     vm.notificationsAnswered(true)
@@ -161,6 +347,7 @@ class PairViewModelTest {
     val (vm, _, prefs) = make(scripted)
     vm.startScan(); vm.scanned("tendril://pair?v=1"); vm.pair()
     scripted.confirmation.complete(Confirmation.Confirmed)
+    vm.continueToAlerts()
     vm.setStayConnected(false)
     vm.notificationsAnswered(true)
     assertFalse(prefs.state.value.stayConnected)
@@ -170,7 +357,7 @@ class PairViewModelTest {
     val (vm, reg, _) = make(SeededPairing(Fixtures.clock(), 0, 0))
     vm.startScan(); vm.scanned("tendril://pair?v=1"); vm.pair()
     kotlinx.coroutines.yield()
-    assertTrue(vm.step.value is PairStep.Alerts || vm.step.value is PairStep.CheckString || vm.step.value is PairStep.Connecting)
+    assertTrue(vm.step.value is PairStep.Alerts || vm.step.value is PairStep.Confirmed || vm.step.value is PairStep.CheckString || vm.step.value is PairStep.Connecting)
     assertTrue(reg.state.value.hubs.size <= 1)
   }
 
@@ -183,8 +370,9 @@ class PairViewModelTest {
     assertTrue(scripted.confirmed.isEmpty())
     vm.checkStringsMatch()
     assertEquals(listOf("hub-1"), scripted.confirmed)
-    assertEquals(PairStep.CheckString(s.handshake, needsYou = false), vm.step.value)
+    assertEquals(PairStep.CheckString(s.handshake, needsYou = false, wait = PairWait(Fixtures.now, Fixtures.now.plus(Duration.ofMinutes(15)))), vm.step.value)
     scripted.confirmation.complete(Confirmation.Confirmed)
+    vm.continueToAlerts()
     assertEquals(PairStep.Alerts("home hub"), vm.step.value)
     assertEquals(1, reg.state.value.hubs.size)
   }

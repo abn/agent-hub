@@ -3,7 +3,7 @@
 // the tendril-phone example, which pairs the way the app does. Every state of
 // the screen passes the accessibility audit.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,6 +38,41 @@ async function pairPhone(page, name) {
   });
   const out = execFileSync(PHONE, [pairing.uri, name], { encoding: "utf8", timeout: 20_000 });
   return JSON.parse(out);
+}
+
+// A phone that stays after it pairs, dialling the hub as the app does while it
+// waits. It resolves with what it printed and is stopped by the caller.
+function stayingPhone(uri, name) {
+  const child = spawn(PHONE, [uri, name, "--stay"], { stdio: ["ignore", "pipe", "inherit"] });
+  const printed = new Promise((resolve, reject) => {
+    let out = "";
+    child.stdout.on("data", (chunk) => {
+      out += chunk;
+      const end = out.indexOf("\n");
+      if (end >= 0) resolve(JSON.parse(out.slice(0, end)));
+    });
+    child.once("exit", (code) => reject(new Error(`tendril-phone exited with ${code} before it paired`)));
+  });
+  return { child, printed };
+}
+
+// The desktop notifications the page raised, recorded rather than shown.
+async function recordNotifications(page) {
+  await page.addInitScript(() => {
+    const raised = [];
+    class Recorded {
+      static permission = "granted";
+      static requestPermission() {
+        return Promise.resolve("granted");
+      }
+      constructor(title, options = {}) {
+        raised.push({ title, body: options.body });
+      }
+      close() {}
+    }
+    Object.defineProperty(window, "Notification", { value: Recorded, configurable: true, writable: true });
+    Object.defineProperty(window, "__raised", { value: raised });
+  });
 }
 
 test.beforeEach(() => {
@@ -91,4 +126,62 @@ test("a refused phone is gone and pairing it again needs a new code", async ({ h
   await page.getByRole("button", { name: "They differ, refuse" }).click();
   await expect(page.getByText("Refused phone")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Add a phone" })).toBeVisible();
+});
+
+test("the screen moves on by itself as a phone pairs and then checks in", async ({ hub, page }) => {
+  await recordNotifications(page);
+  await openPhones(page, hub);
+  const add = page.locator("main .phones-add");
+  const issued = page.waitForResponse(
+    (response) => response.url().endsWith("/api/v1/devices/pairing") && response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Add a phone" }).click();
+  const pairing = await (await issued).json();
+  await expect(add.getByRole("status")).toHaveText("Waiting for the phone");
+  await audit(page, "a code waiting for the phone");
+
+  const { child, printed } = stayingPhone(pairing.uri, "Live phone");
+  try {
+    const phone = await printed;
+    await expect(add.getByRole("button", { name: "They match, confirm" })).toBeVisible({ timeout: 15_000 });
+    await expect(add.getByText(phone.check_string)).toBeVisible();
+    await expect(page).toHaveTitle(/^\(1\) Phones/);
+    await expect
+      .poll(() => page.evaluate(() => window.__raised))
+      .toEqual([{ title: "Live phone wants to pair", body: "Compare the check string on Settings, Phones." }]);
+
+    await add.getByRole("button", { name: "They match, confirm" }).click();
+    await expect(add.getByText("Confirmed", { exact: true })).toBeVisible();
+    await expect(add.getByRole("status")).toHaveText("Live phone is paired", { timeout: 15_000 });
+    await expect(page).toHaveTitle(/^Phones/);
+    await audit(page, "a phone confirmed and paired");
+    await add.getByRole("button", { name: "Close" }).click();
+    await expect(add.getByRole("button", { name: "Add a phone" })).toBeVisible();
+  } finally {
+    child.kill();
+  }
+});
+
+test("a code that runs out on screen says when, and offers a new one", async ({ hub, page }) => {
+  await page.clock.install();
+  await openPhones(page, hub);
+  const issued = page.waitForResponse(
+    (response) => response.url().endsWith("/api/v1/devices/pairing") && response.request().method() === "POST",
+  );
+  await page.getByRole("button", { name: "Add a phone" }).click();
+  const pairing = await (await issued).json();
+  const add = page.locator("main .phones-add");
+  await expect(add.getByRole("status")).toHaveText("Waiting for the phone");
+
+  await page.clock.runFor(Date.parse(pairing.expires_at) - (await page.evaluate(() => Date.now())) + 1_000);
+  const until = await page.evaluate((at) => {
+    const date = new Date(at);
+    return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }, pairing.expires_at);
+  await expect(add.getByText(`The code ran out at ${until} before a phone used it.`)).toBeVisible();
+  await expect(add.getByRole("img", { name: "Pairing code as a QR picture" })).toHaveCount(0);
+  await audit(page, "a code that ran out");
+  await expect(add.getByRole("button", { name: "Close" })).toBeVisible();
+  await add.getByRole("button", { name: "New code" }).click();
+  await expect(add.getByRole("status")).toHaveText("Waiting for the phone");
 });

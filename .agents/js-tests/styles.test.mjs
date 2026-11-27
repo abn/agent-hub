@@ -18,6 +18,8 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { basename, dirname, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import * as csstree from "css-tree";
+
 import {
   COLOUR_PROPERTIES,
   colourFunctions,
@@ -302,11 +304,37 @@ describe("targets follow the pointer", () => {
 
 describe("motion is bounded and optional", () => {
   // DESIGN.md: "Motion is never decorative. Reveals and underlines take at most
-  // 150ms, ease-out. `prefers-reduced-motion` is honoured."
-  it("bans a decorative animation outright", () => {
-    const animated = rulesDeclaring(APP, "animation")
-      .map((rule) => `${rule.selectorText} (line ${rule.line})`);
-    expect(animated).toEqual([]);
+  // 150ms, ease-out. A live wait's status dot fades, and nothing else
+  // animates. `prefers-reduced-motion` is honoured."
+  it("lets an animation only fade, never move, resize or recolour", () => {
+    const frames = new Map();
+    csstree.walk(sheet(APP).ast, {
+      visit: "Atrule",
+      enter(node) {
+        if (csstree.keyword(node.name).basename !== "keyframes" || !node.block) return;
+        const properties = new Set();
+        csstree.walk(node.block, {
+          visit: "Declaration",
+          enter(decl) {
+            properties.add(decl.property.toLowerCase());
+          },
+        });
+        frames.set(csstree.generate(node.prelude).trim(), properties);
+      },
+    });
+    const decorative = [];
+    // The shorthand and the `animation-name` longhand both name keyframes.
+    const animated = [...new Set([...rulesDeclaring(APP, "animation"), ...rulesDeclaring(APP, "animation-name")])];
+    for (const rule of animated) {
+      for (const decl of rule.declarations.filter((d) => d.property === "animation" || d.property === "animation-name")) {
+        const name = decl.value.split(/[\s,]+/).find((word) => frames.has(word));
+        const changed = name ? [...frames.get(name)] : [];
+        if (!changed.length || changed.some((property) => property !== "opacity")) {
+          decorative.push(`${rule.selectorText} (line ${rule.line}) animates ${changed.join(", ") || "unknown keyframes"}`);
+        }
+      }
+    }
+    expect(decorative).toEqual([]);
   });
 
   it("keeps every transition at or under 150ms", () => {

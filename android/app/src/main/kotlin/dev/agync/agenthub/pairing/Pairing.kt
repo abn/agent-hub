@@ -1,6 +1,8 @@
 package dev.agync.agenthub.pairing
 
+import java.time.Duration
 import java.time.Instant
+import kotlinx.coroutines.channels.ReceiveChannel
 
 /** What a scanned or typed code says before anything is dialled. Fields the code does not carry are null. */
 data class PairOffer(
@@ -78,6 +80,17 @@ interface Pairing {
   /** Drops the pending peer: the check strings differed, or the person cancelled. */
   suspend fun abort(handshake: Handshake)
 
-  /** Waits until the operator confirms or refuses the check string on the hub. */
-  suspend fun awaitConfirmation(handshake: Handshake): Confirmation
+  /** How long a pairing waits for the operator before it gives up. */
+  val confirmWindow: Duration get() = Duration.ofMinutes(15)
+
+  /**
+   * Waits until the operator confirms or refuses the check string on the hub. A value on
+   * [checkNow] asks for a check at once, without waiting out the interval; [onChecked] hears
+   * when each check completes.
+   */
+  suspend fun awaitConfirmation(
+    handshake: Handshake,
+    checkNow: ReceiveChannel<Unit>? = null,
+    onChecked: (Instant) -> Unit = {},
+  ): Confirmation
 }

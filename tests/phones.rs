@@ -900,6 +900,102 @@ async fn the_event_stream_ticks_over_the_session() {
     state.phones.shutdown().await;
 }
 
+/// The ticks the stream has had since `ticks` was last drained.
+fn drained(ticks: &mut tokio::sync::broadcast::Receiver<agent_hub::app::Tick>) -> usize {
+    let mut count = 0;
+    while ticks.try_recv().is_ok() {
+        count += 1;
+    }
+    count
+}
+
+/// The web app waits for a confirmed phone to pick up its confirmation: the
+/// phone's first connection after the confirm sets `checked_in_at` and ticks
+/// the stream once, and a later one does not tick again.
+#[tokio::test]
+async fn a_confirmed_phones_first_check_in_is_recorded_and_ticks_once() {
+    let (_test, state, _tendril) = hub("phones-check-in").await;
+    let pairing = issue(&state).await;
+    let mut phone = Phone::new(0x95);
+    let sas = phone.pair(&pairing).await;
+    let id = phone.identity.device_id();
+    paired(&state, &id).await;
+    let confirmed = call(
+        &state,
+        request(
+            "POST",
+            &format!("/api/v1/devices/{id}/confirm"),
+            Some(BEARER),
+            Some(json!({ "check_string": sas })),
+        ),
+    )
+    .await;
+    assert_eq!(confirmed.status(), StatusCode::OK);
+    let confirmed = json_body(confirmed).await;
+    assert!(
+        confirmed["checked_in_at"].is_null(),
+        "nothing has checked in yet: {confirmed}"
+    );
+    let mut ticks = state.ticker.subscribe();
+
+    let session = phone.connect().await.expect("a confirmed phone connects");
+    let mut client = Client::over(session, Arc::clone(phone.roster.roster())).await;
+    let (status, me) = client.call("GET", "/api/v1/devices/me", None).await;
+    assert_eq!(status, StatusCode::OK, "{me}");
+    let row = device(&state, &id).await.expect("kept");
+    assert!(
+        row["checked_in_at"].is_string(),
+        "the first request after the confirm is a check-in: {row}"
+    );
+    assert_eq!(drained(&mut ticks), 1, "the check-in ticks the stream once");
+
+    let (status, _) = client.call("GET", "/api/v1/home", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let again = phone.connect().await.expect("connects again");
+    let mut second = Client::over(again, Arc::clone(phone.roster.roster())).await;
+    let (status, _) = second.call("GET", "/api/v1/devices/me", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(drained(&mut ticks), 0, "a later request does not tick");
+    assert!(device(&state, &id).await.expect("kept")["checked_in_at"].is_string());
+    state.phones.shutdown().await;
+}
+
+/// A clock that steps back after the confirm does not make every later session
+/// look like the first: the phone checks in once and stays checked in.
+#[tokio::test]
+async fn a_clock_stepped_back_after_the_confirm_still_checks_in_once() {
+    use agent_hub::store::devices;
+    let test = open("phones-clock").await;
+    let id = "dev_00000000000000aa";
+    devices::record_pending(&test.db, id, "Pixel 9", "android", "aaaa bbbb")
+        .await
+        .expect("pending");
+    devices::activate(&test.db, id).await.expect("confirmed");
+    // The confirm as a clock that has since stepped back would have stamped it.
+    test.db
+        .connect()
+        .expect("connect")
+        .execute(
+            "UPDATE devices SET confirmed_at = '2999-01-01T00:00:00Z' WHERE id = ?1",
+            [id],
+        )
+        .await
+        .expect("move the confirm ahead of the clock");
+    assert!(
+        devices::touch(&test.db, id).await.expect("touch"),
+        "the first session is the check-in"
+    );
+    assert!(
+        !devices::touch(&test.db, id).await.expect("touch"),
+        "a later session is not"
+    );
+    let device = devices::get(&test.db, id)
+        .await
+        .expect("read")
+        .expect("kept");
+    assert!(device.checked_in_at.is_some(), "{device:?}");
+}
+
 /// A token, a cookie or an agent name a phone sends changes nothing: the
 /// request is the operator on that phone, who sees a confidential project the
 /// member behind the token cannot.

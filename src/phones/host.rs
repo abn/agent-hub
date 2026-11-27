@@ -181,6 +181,7 @@ impl Host {
         };
         let sessions = {
             let host = Arc::downgrade(&host);
+            let state = state.clone();
             tokio::spawn(async move {
                 loop {
                     let (stream, guard) = match recv_routed(&session_queue, QUEUE_WAIT).await {
@@ -190,8 +191,9 @@ impl Host {
                     };
                     let Some(host) = host.upgrade() else { break };
                     let app = app.clone();
+                    let state = state.clone();
                     let worker = Arc::clone(&host);
-                    host.track(async move { worker.session(app, stream, guard).await });
+                    host.track(async move { worker.session(&state, app, stream, guard).await });
                 }
             })
         };
@@ -567,7 +569,13 @@ impl Host {
 
     /// Run one phone session: admitted by Tendril, then checked against the
     /// hub's own row, then served as HTTP/2 until either side ends it.
-    async fn session(&self, app: axum::Router, stream: Box<dyn PathStream>, guard: HalfOpenGuard) {
+    async fn session(
+        &self,
+        state: &AppState,
+        app: axum::Router,
+        stream: Box<dyn PathStream>,
+        guard: HalfOpenGuard,
+    ) {
         let roster = {
             let _held = self.store_lock.lock().await;
             match self.store.load_roster() {
@@ -646,12 +654,18 @@ impl Host {
             self.forget_session(&device_id, &session);
             return;
         }
-        if let Err(err) = devices::touch(&self.db, &device_id).await {
-            tracing::debug!(
-                device = %device_id,
-                error = %err,
-                "phones: could not record a phone as seen",
-            );
+        // The first session after the operator's confirm is the phone picking
+        // it up; the web app waits on a tick for that, and only for that one.
+        match devices::touch(&self.db, &device_id).await {
+            Ok(true) => state.notify(),
+            Ok(false) => {}
+            Err(err) => {
+                tracing::debug!(
+                    device = %device_id,
+                    error = %err,
+                    "phones: could not record a phone as seen",
+                );
+            }
         }
         tracing::info!(
             device = %device_id,

@@ -340,7 +340,9 @@ route here but `me` takes the admin token and is refused to a phone.
   relay. Each device has `id`
   (Tendril's device id), `name`, `kind`, `state` (`pending`, `active` or
   `revoked`), `check_string` while pending, and `paired_at`, `confirmed_at`,
-  `revoked_at` and `last_seen_at`.
+  `revoked_at` and `last_seen_at`. `checked_in_at` is null until the phone
+  first connects after it is confirmed, and then the time of its latest
+  connection since; that first connection also ticks the event stream, once.
 - `POST /api/v1/devices/pairing` returns a fresh code: `{uri, code, address,
   expires_at, qr}`. `uri` is the host-signed `tendril://pair` URI, `address`
   the LAN or tailnet `host:port` to type beside the code (null when the hub

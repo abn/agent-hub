@@ -22,7 +22,20 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -70,6 +83,10 @@ import dev.agync.agenthub.ui.theme.SmallTopBar
 import dev.agync.agenthub.ui.theme.hairlineBottom
 import dev.agync.agenthub.ui.theme.switchRow
 import dev.agync.agenthub.viewmodel.PairStep
+import dev.agync.agenthub.viewmodel.StopReason
+import java.time.Clock
+import java.time.Instant
+import kotlinx.coroutines.delay
 
 private fun plain(s: String) = AnnotatedString(s)
 
@@ -97,6 +114,8 @@ data class PairActions(
   val onNotNow: () -> Unit,
   val onOpenSettings: () -> Unit,
   val onPrefs: ((DevicePrefs) -> DevicePrefs) -> Unit,
+  val onContinue: () -> Unit,
+  val onStartAgain: () -> Unit,
 )
 
 @Composable
@@ -106,6 +125,7 @@ fun PairScreen(
   fmt: Fmt,
   actions: PairActions,
   notice: String? = null,
+  clock: Clock = Clock.systemDefaultZone(),
   scanner: @Composable () -> Unit,
 ) {
   val c = Hub.colors
@@ -116,9 +136,11 @@ fun PairScreen(
       is PairStep.Manual -> Manual(step, actions)
       is PairStep.Confirm -> Confirm(step.offer, step.deviceName, fmt, actions)
       is PairStep.Connecting -> Working(actions)
-      is PairStep.CheckString -> CheckString(step.handshake, step.needsYou, actions)
+      is PairStep.CheckString -> CheckString(step, fmt, clock, actions)
       is PairStep.Alerts -> if (step.notificationsDenied) NotifyDenied(step, actions) else Alerts(step, prefs, actions)
       is PairStep.CodeFailed -> CodeFailed(step, actions)
+      is PairStep.Confirmed -> Confirmed(step, actions)
+      is PairStep.Stopped -> Stopped(step, fmt, actions)
       PairStep.Done -> Unit
     }
   }
@@ -321,21 +343,66 @@ private fun Working(a: PairActions) {
   }
 }
 
-/** One step of the handshake: a check when done, a still ring when working (no spinner motion). */
+/**
+ * One step of the handshake: a check when done, a ring when working. The ring pulses slowly while
+ * [pulse] is set and animations are on. [announce] makes the text a polite live region that reads
+ * that string: it changes with the state, not with a ticking [detail].
+ */
 @Composable
-private fun StepLine(glyph: String, text: AnnotatedString, done: Boolean, working: Boolean = false) {
+private fun StepLine(
+  glyph: String,
+  text: AnnotatedString,
+  done: Boolean,
+  working: Boolean = false,
+  pulse: Boolean = false,
+  announce: String? = null,
+  detail: String? = null,
+) {
   val c = Hub.colors
+  val alpha = if (working && pulse) rememberPulse() else 1f
   Row(Modifier.fillMaxWidth().hairlineBottom(c.line).padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-    if (working) Box(Modifier.padding(2.dp).size(20.dp).border(2.dp, c.line, CircleShape).drawBehind {
+    if (working) Box(Modifier.alpha(alpha).padding(2.dp).size(20.dp).border(2.dp, c.line, CircleShape).drawBehind {
       drawArc(c.ink, -90f, 90f, false, style = Stroke(2.dp.toPx()), topLeft = Offset(-1.dp.toPx(), -1.dp.toPx()), size = Size(size.width + 2.dp.toPx(), size.height + 2.dp.toPx()))
     }) else Glyph(glyph, tint = c.ink2)
-    Text(text, style = Hub.type.body.copy(fontSize = 15.sp, fontWeight = if (working) FontWeight.SemiBold else FontWeight.Normal, color = c.ink), modifier = Modifier.weight(1f))
+    Column(Modifier.weight(1f)) {
+      Text(
+        text, style = Hub.type.body.copy(fontSize = 15.sp, fontWeight = if (working) FontWeight.SemiBold else FontWeight.Normal, color = c.ink),
+        modifier = if (announce == null) Modifier else Modifier.semantics { contentDescription = announce; liveRegion = LiveRegionMode.Polite },
+      )
+      if (detail != null) Text(detail, style = Hub.type.mono.copy(fontSize = 13.sp, color = c.ink2), modifier = Modifier.padding(top = 4.dp))
+    }
   }
 }
 
+/** A slow fade of the working ring, about 1.8 seconds a round. Still when the system has animations off. */
 @Composable
-private fun CheckString(h: Handshake, needsYou: Boolean, a: PairActions) {
+private fun rememberPulse(): Float {
+  val context = LocalContext.current
+  if (!pulseAllowed(animatorDurationScale(context))) return 1f
+  return rememberInfiniteTransition(label = "pairing pulse").animateFloat(
+    1f, 0.35f, infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "pairing pulse alpha",
+  ).value
+}
+
+/** The time as the wait sees it: read again each second, and again whenever the hub was asked. */
+@Composable
+private fun rememberNow(clock: Clock, running: Boolean, checkedAt: Instant?): State<Instant> =
+  produceState(clock.instant(), clock, running, checkedAt) {
+    value = clock.instant()
+    while (running) {
+      delay(1_000)
+      value = clock.instant()
+    }
+  }
+
+@Composable
+private fun CheckString(s: PairStep.CheckString, fmt: Fmt, clock: Clock, a: PairActions) {
   val c = Hub.colors
+  val h = s.handshake
+  val needsYou = s.needsYou
+  val wait = s.wait
+  val now by rememberNow(clock, running = wait != null, checkedAt = wait?.checkedAt)
+  val view = wait?.view(now)
   Column(Modifier.fillMaxSize()) {
     StepBar("Confirm on the hub", "1 of 2", a, a.onCancelPairing, backDescription = "Cancel pairing", close = true)
     Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
@@ -348,7 +415,9 @@ private fun CheckString(h: Handshake, needsYou: Boolean, a: PairActions) {
         StepLine(
           G.Check,
           buildAnnotatedString { withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(if (needsYou) "Compare the check string" else "Waiting for you to confirm on the hub") } },
-          done = false, working = true,
+          done = false, working = true, pulse = !needsYou,
+          announce = if (needsYou) null else view?.status ?: "Waiting for you to confirm on the hub",
+          detail = view?.meta,
         )
       }
       Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp).fillMaxWidth().background(c.sunk, dev.agync.agenthub.ui.theme.ControlShape).padding(16.dp)) {
@@ -359,9 +428,22 @@ private fun CheckString(h: Handshake, needsYou: Boolean, a: PairActions) {
         "You typed the code, so nothing has checked the hub's key yet. Add a phone on the hub shows a check string too. Say they match only if the two are the same.",
         style = Hub.type.body.copy(fontSize = 15.sp, lineHeight = 23.sp, color = c.ink2), modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp),
       ) else Text(
-        "Add a phone on the hub now shows a check string too. If the two match, confirm there. This screen moves on by itself.",
+        "On the hub, Settings, Phones shows the same check string. Confirm there if they match. This usually takes under a minute, and this screen moves on by itself.",
         style = Hub.type.body.copy(fontSize = 15.sp, lineHeight = 23.sp, color = c.ink2), modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp),
       )
+      if (view != null && view.stillWaiting) Column(
+        Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp).fillMaxWidth()
+          .drawBehind { drawRect(c.accent, size = Size(3.dp.toPx(), size.height)) }.padding(start = 16.dp),
+      ) {
+        Text(
+          buildAnnotatedString {
+            withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append("Still waiting.") }
+            append(" If Add a phone on the hub shows no confirm button, reload that page.")
+          },
+          style = Hub.type.body.copy(fontSize = 15.sp, lineHeight = 23.sp, color = c.ink),
+        )
+        Text("The pairing stays open until ${fmt.time(wait.deadline)}.", style = Hub.type.body.copy(fontSize = 15.sp, lineHeight = 23.sp, color = c.ink2), modifier = Modifier.padding(top = 4.dp))
+      }
       Text(
         "If they differ, refuse on the hub and cancel here. Something stands between this phone and the hub.",
         style = Hub.type.body.copy(fontSize = 15.sp, lineHeight = 23.sp, color = c.ink2), modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
@@ -375,6 +457,57 @@ private fun CheckString(h: Handshake, needsYou: Boolean, a: PairActions) {
         }
       } else HubButton("Cancel pairing", a.onCancelPairing, Modifier.fillMaxWidth(), size = ButtonSize.Large)
     }
+  }
+}
+
+/** The hub confirmed: all three steps done, and a button for the impatient. The flow moves on by itself after a beat. */
+@Composable
+private fun Confirmed(s: PairStep.Confirmed, a: PairActions) {
+  val c = Hub.colors
+  val h = s.handshake
+  Column(Modifier.fillMaxSize()) {
+    StepBar("Confirm on the hub", "1 of 2", a, null, close = true)
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+      Column(Modifier.padding(horizontal = 16.dp)) {
+        StepLine(G.Check, buildAnnotatedString {
+          append("Reached ${h.hubName}")
+          if (h.via != null) withStyle(SpanStyle(color = c.ink3)) { append(" · via ${h.via}") }
+        }, done = true)
+        StepLine(G.Check, plain(if (h.needsLocalConfirm) "You said the check strings match" else "The hub's key matches the code"), done = true)
+        StepLine(
+          G.Check, buildAnnotatedString { withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append("Confirmed on the hub") } }, done = true,
+          announce = "Confirmed on the hub. Paired.",
+        )
+      }
+      Text(
+        "Paired. Next, choose how alerts reach you.",
+        style = Hub.type.body.copy(fontSize = 15.sp, lineHeight = 23.sp, color = c.ink2), modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp),
+      )
+    }
+    Foot { HubButton("Continue", a.onContinue, Modifier.fillMaxWidth(), kind = ButtonKind.Primary, size = ButtonSize.Large) }
+  }
+}
+
+/** The wait ended without a pairing. Nothing is left on the phone; the person starts over from a new code. */
+@Composable
+private fun Stopped(s: PairStep.Stopped, fmt: Fmt, a: PairActions) {
+  val c = Hub.colors
+  val body = Hub.type.body.copy(fontSize = 15.sp, lineHeight = 23.sp, color = c.ink2)
+  Column(Modifier.fillMaxSize()) {
+    StepBar("Pairing stopped", "1 of 2", a, a.onBack)
+    Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 16.dp)) {
+      when (val r = s.reason) {
+        StopReason.Refused -> {
+          Text("The hub refused this phone.", style = Hub.type.body.copy(fontSize = 15.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold, color = c.ink))
+          Text(
+            "If you did not refuse it, the check strings differed: something may stand between this phone and the hub. Start again from a new code.",
+            style = body, modifier = Modifier.padding(top = 8.dp),
+          )
+        }
+        is StopReason.RanOut -> Text("The pairing ran out at ${fmt.time(r.at)} before it was confirmed on the hub.", style = body)
+      }
+    }
+    Foot { HubButton("Start again", a.onStartAgain, Modifier.fillMaxWidth(), kind = ButtonKind.Primary, size = ButtonSize.Large) }
   }
 }
 
@@ -505,3 +638,9 @@ private fun CodeFailed(s: PairStep.CodeFailed, a: PairActions) {
     }
   }
 }
+
+/** The system's animation speed: 0 when the person has turned animations off. */
+internal fun animatorDurationScale(context: android.content.Context): Float =
+  android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+
+internal fun pulseAllowed(durationScale: Float): Boolean = durationScale > 0f

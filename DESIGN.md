@@ -1138,7 +1138,7 @@ Projects register, Members and access, Connect, and the knowledge base.
 - **Phones.** Settings > Phones, pushed from Settings with "Settings /
   Phones" as the control row's crumb on a desktop and a back chevron to
   Settings on a phone; the rail keeps Settings marked. One column at the 640
-  prose width, two quiet group labels. ADD A PHONE holds one of three states.
+  prose width, two quiet group labels. ADD A PHONE holds one of six states.
   With nothing pending, one sentence and **Add a phone**, the copper primary.
   With a code, the QR picture of the hub-signed pairing URI at 256 (dark
   modules on a light ground in both themes, `--qr-ink` on `--qr-ground`, since
@@ -1146,15 +1146,47 @@ Projects register, Members and access, Connect, and the knowledge base.
   the lede, a definition list of Code (mono, 17), Address (mono, only when the
   hub has a LAN or tailnet address, never a loopback one) and Works until (the
   clock time and "once"), each copyable value with the copy glyph on its own
-  row, one prose line on what the code and address are for, then New code and
-  Close as outlines; both withdraw the code on screen. When the relay route is
-  on, one line in both of these states says a phone away from home goes
-  through a public relay that sees only encrypted traffic. With a phone
-  waiting, the group label turns copper over an ink rule, the phone's name
-  "wants to pair" with the "Waiting on you" pill on the copper wash, a visible
-  "Check string" label over the string in mono at 28 on the sunken ground, one
-  prose line on comparing it, then **They match, confirm** (copper, with the
-  check glyph) and They differ, refuse (outline). PHONES lists every phone the
+  row, a status line "Waiting for the phone" behind a small copper dot, the
+  line "Scan with Agent Hub on the phone. This page moves on by itself when
+  the phone reaches the hub.", one prose line on what the code and address
+  are for, then New code and Close as outlines; both withdraw the code on
+  screen. When the relay route is on, one line in the first two states and
+  the ran-out one says a phone away from home goes through a public relay
+  that sees only encrypted traffic. With a phone waiting, the group label
+  turns copper over an ink rule, the phone's name "wants to pair" with the
+  "Waiting on you" pill on the copper wash, a visible "Check string" label
+  over the string in mono at 28 on the sunken ground, one prose line on
+  comparing it, then **They match, confirm** (copper, with the check glyph)
+  and They differ, refuse (outline). After the confirm the section stays:
+  "Confirmed" in `--ok`, the dot and "Waiting for Pixel 9 to pick it up", the
+  line "Usually a few seconds. The phone checks every few seconds while it
+  waits.", and Close. When the hub says the phone has checked in since the confirm
+  (`checked_in_at`), the line reads "Pixel 9 is paired" in `--ok` and the
+  dot goes. After two minutes without a check-in it reads "Pixel 9 has not
+  checked in yet. Open Agent Hub on the phone." in ink, with no dot and no
+  alarm colour. A code that runs out on screen is noticed at its
+  `expires_at`, not on the next repaint: "The code ran out at 14:32 before a
+  phone used it." over "Make a new one, then scan it with Agent Hub on the
+  phone.", with **New code** as the primary and Close. Every status line is a
+  polite live region (`role="status"`) whose node is kept, so a change of
+  words is announced.
+  - **Live.** While the screen is open every stream tick refetches the
+    phones, one fetch in flight and at most one queued, and patches Add a
+    phone and the list in place: a node that did not change is left alone,
+    so focus and an open dialog stay. When the stream is down and a code is
+    live or a confirmed phone has not checked in, the screen polls every
+    3 s instead, and stops when that ends or the screen closes.
+  - **Cue.** While a phone waits on the operator the tab's title starts
+    "(1) ". A phone that starts waiting while the screen is open raises one
+    desktop notification, "Pixel 9 wants to pair", "Compare the check string
+    on Settings, Phones.", whose click focuses the window. The page asks for
+    the permission only when the operator makes a code, and only while it is
+    undecided; a refusal is left alone. A phone already waiting when the
+    screen opened raises none.
+  - **Motion.** The dot fades between full and a third of its opacity, slowly
+    and alternating, and moves nothing. It is the one animation in the web
+    app, and reduced motion stops it, which leaves the dot and the words.
+  PHONES lists every phone the
   hub knows, its count right-aligned in the label: a phone glyph in the glyph
   column, the name, the state as a dot and a word (green active, a ring for
   pending, the word alone for unpaired), and a mono meta line of when it
@@ -1232,7 +1264,8 @@ Projects register, Members and access, Connect, and the knowledge base.
 - Time is short on a row and whole on request. No timestamp is a tab stop of
   its own; a list of them would be the whole ring.
 - Motion is never decorative. Reveals and underlines take at most 150ms,
-  ease-out. `prefers-reduced-motion` is honoured.
+  ease-out. A live wait's status dot fades, and nothing else animates.
+  `prefers-reduced-motion` is honoured.
 
 ## Alert hierarchy
 
@@ -1301,8 +1334,8 @@ named checks from the current handoff.
    coarse pointer, no control in a header or control row taller than 32px on a
    fine pointer, and a visible focus ring on every control.
 10. **Keyboard.** The full keyboard path above, in both directions.
-11. **Motion.** Nothing decorative, at most 150ms ease-out, reduced motion
-    honoured.
+11. **Motion.** Nothing decorative, at most 150ms ease-out, an animation
+    only ever fades opacity, reduced motion honoured.
 12. **Alert hierarchy.** L0 quiet, L1 unread, L2 waiting. No red, no animation,
     no modal for an alert.
 13. **Labels, time, copy.** Every section label on every screen the router
@@ -1399,7 +1432,7 @@ Where it is silent, the web app's rule holds.
 | Verbs | Shown on every row, not only the selected one. |
 | Snooze | Per device, and it says so: "Snooze 1h on this phone", "on this tablet". It is never sent to the hub. |
 | Focus | A 2 dp copper ring, 2 dp outside the control, for keyboard and D-pad focus only. |
-| Motion | Nothing moves that does not have to. The pairing wait is a static ring with words. |
+| Motion | Nothing moves that does not have to. The pairing wait is a ring with words; it fades slowly while the phone waits and holds still under reduced motion. |
 | Pairing | Tendril's: a picture code or a typed code, a check string compared on both screens, a device identity per phone that the hub can revoke. The app holds no key and picks no route. "via LAN" and its kin appear as information, and only when Tendril says how it connected. |
 | Alerts | A foreground service of type `specialUse` holds the Tendril session. On every tick and every reconnect the app refetches Now, posts a notification for each new ask and cancels the notification of each ask that no longer waits. One channel per kind. No push service. |
 | Lock screen | Names no agent, says nothing of the ask, and asks for an unlock before any verb. |

@@ -34,8 +34,19 @@ Phones are not available on Windows hubs yet.
 3. Both screens show a check string. Compare them. If they are the same, press
    **They match, confirm**. If they differ, press **They differ, refuse**:
    something stands between the hub and the phone.
+4. After the confirm the screen waits for the phone to pick it up, which
+   usually takes a few seconds, and then says the phone is paired. If two
+   minutes pass with no word from the phone, open Agent Hub on it.
 
 Until you confirm, the phone gets nothing from the hub.
+
+The screen follows the hub while it is open: it moves from the code to the
+check string when the phone arrives, and on to "paired" when the phone checks
+in, with no reload. While a phone waits, the tab's title starts with "(1)".
+If the browser allows notifications, a phone that arrives while the screen is
+open raises one; the page asks for that permission only when you press
+**Add a phone**. A code that runs out before a phone uses it says so, with
+**New code** to make another.
 
 The first **Add a phone** starts the hub's Tendril host. While a phone is
 paired, the hub listens for phones on the address in `HUB_PHONES_LISTEN` (the
