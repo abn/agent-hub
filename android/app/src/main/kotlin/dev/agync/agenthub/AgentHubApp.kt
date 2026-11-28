@@ -29,6 +29,7 @@ class AgentHubApp : Application() {
 
   override fun onCreate() {
     super.onCreate()
+    registerActivityLifecycleCallbacks(dev.agync.agenthub.alerts.ForegroundTracker.app)
     val clock = Clock.systemDefaultZone()
     val store = PrefsStore(this)
     val seeded = BuildConfig.HUB_TRANSPORT == "seeded"

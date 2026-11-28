@@ -12,6 +12,8 @@ import dev.agync.agenthub.model.NowFilter
 import dev.agync.agenthub.model.NowModel
 import java.time.Clock
 import java.time.Instant
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -19,6 +21,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -65,6 +68,7 @@ class NowViewModel(
   private val repo: HubRepository,
   private val fmt: Fmt,
   private val clock: Clock,
+  private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
   private val filter = MutableStateFlow(NowFilter.All)
   private val tick = MutableStateFlow(clock.instant())
@@ -72,7 +76,7 @@ class NowViewModel(
   val events: SharedFlow<NowEvent> = _events.asSharedFlow()
 
   val ui: StateFlow<NowUi> =
-    combine(repo.state, filter, tick) { state, f, now ->
+    combine(repo.state, repo.syncedAt, filter, tick) { state, syncedAt, f, now ->
       val model = NowBuilder.build(state, now, fmt)
       val offline = state.connection as? Connection.Offline
       val snapshot = state.snapshot
@@ -87,8 +91,8 @@ class NowViewModel(
           else -> NowScreenKind.Content
         }
       val meta =
-        if (offline != null && snapshot != null) "${fmt.day(now)} · as of ${fmt.time(snapshot.asOf)}"
-        else "${fmt.day(now)} · ${model.live.count { it.parent == null }} live · synced ${snapshot?.asOf?.let(fmt::time) ?: fmt.time(now)}"
+        if (offline != null && snapshot != null) "${fmt.day(now)} · as of ${fmt.time(syncedAt ?: snapshot.asOf)}"
+        else "${fmt.day(now)} · ${model.live.count { it.parent == null }} live · synced ${fmt.time(syncedAt ?: snapshot?.asOf ?: now)}"
       val banner =
         offline?.takeIf { snapshot != null }?.let {
           val last = it.lastConnected?.let { t -> "Last connected ${via(state.lastVia, fmt.time(t))}. " }.orEmpty()
@@ -108,7 +112,11 @@ class NowViewModel(
         lastVia = state.lastVia,
         snoozes = state.snoozes,
       )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, initialUi())
+    }
+      // The list is built off the main thread, and only while a screen is collecting it: with the app in the background
+      // nothing is built, and it is built once more, from the latest state, when the screen comes back.
+      .flowOn(dispatcher)
+      .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), initialUi())
 
   private fun initialUi(): NowUi =
     NowUi(repo.hub.name, NowScreenKind.Loading, NowBuilder.build(repo.state.value, clock.instant(), fmt), NowFilter.All, "", null, "Since you looked", clock.instant(), emptyList(), emptyList(), null)

@@ -14,6 +14,7 @@ import dev.agync.agenthub.pairing.SeededPairing
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -47,6 +48,43 @@ class AlertCenterTest {
     AlertCenter(context, c, clock, scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined), holdService = { holds += it })
 
   private fun shown(id: Int) = shadowOf(context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).getNotification(null, id)
+
+  @Test fun `the foreground service is started once, not again by its own start`() {
+    val c = container()
+    c.registry.add(hub)
+    c.prefs.update { it.copy(stayConnected = true) }
+    var starts = 0
+    lateinit var alerts: AlertCenter
+    // Like HoldService: a start runs onStartCommand, which tells the center and syncs. Capped so a loop ends the test.
+    alerts = AlertCenter(context, c, clock, scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined), holdService = { start ->
+      if (start && starts++ < 20) {
+        alerts.serviceStarted()
+        alerts.sync()
+      }
+    })
+    alerts.sync()
+    assertEquals("the service restarted itself through sync", 1, starts)
+    alerts.sync()
+    assertEquals("a sync while the service runs must not start it again", 1, starts)
+    alerts.serviceStopped()
+    alerts.sync()
+    assertEquals("a sync after the service stopped starts it again", 2, starts)
+  }
+
+  @Test fun `the widgets are told when the hub is reached again, even if it said nothing new`() = runBlocking {
+    val rig = Fixtures.rig()
+    var seen = 0
+    val job = launch(Dispatchers.Unconfined) { widgetTriggers(listOf(rig.repo)).collect { seen++ } }
+    rig.repo.refresh()
+    val afterFirst = seen
+    rig.clock.at = Fixtures.now.plus(java.time.Duration.ofMinutes(5))
+    rig.repo.refresh()
+    assertTrue("the synced time of the widgets froze", seen > afterFirst)
+    val afterMinute = seen
+    rig.repo.refresh()
+    assertEquals("a refresh inside the same minute woke the widgets", afterMinute, seen)
+    job.cancel()
+  }
 
   @Test fun `a hub paired again gets a new repository and a new engine, never the closed one`() {
     val c = container()

@@ -5,6 +5,7 @@ import dev.agync.agenthub.model.AskStatus
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -34,7 +35,6 @@ data class HubState(
   val snapshot: NowSnapshot? = null,
   val outbox: List<QueuedDecision> = emptyList(),
   val snoozes: Map<String, Instant> = emptyMap(),
-  val lastConnected: Instant? = null,
   val lastVia: String? = null,
   val seenAt: Instant? = null,
 )
@@ -69,6 +69,16 @@ class HubRepository(
     )
   val state: StateFlow<HubState> = _state
 
+  /** The last time the hub answered, as precisely as the clock gives it. Not part of [state], so it never wakes a collector. */
+  private var lastReached: Instant? = null
+  private val _syncedAt = MutableStateFlow<Instant?>(null)
+
+  /**
+   * When the hub last answered, to the minute, which is all the screens show of it. It is kept out of [state] so a
+   * refresh that finds nothing new changes nothing a collector of [state] sees; this one moves at most once a minute.
+   */
+  val syncedAt: StateFlow<Instant?> = _syncedAt
+
   val now: Instant get() = clock.instant()
 
   /** Fetches Now, settles the connection, and sends what waited. Safe to call from any trigger. */
@@ -85,18 +95,19 @@ class HubRepository(
         activeReported = true
         onActive(hub.id)
       }
+      val reached = clock.instant()
+      lastReached = reached
+      _syncedAt.value = reached.truncatedTo(ChronoUnit.MINUTES)
+      val via = snapshot.info.via ?: info.via
+      // The same hub data over the same route is not news: the state is left alone, so nothing downstream runs.
       _state.update {
-        it.copy(
-          connection = Connection.Online,
-          snapshot = snapshot,
-          lastConnected = clock.instant(),
-          lastVia = snapshot.info.via ?: info.via,
-        )
+        if (it.connection == Connection.Online && it.lastVia == via && it.snapshot?.sameContentAs(snapshot) == true) it
+        else it.copy(connection = Connection.Online, snapshot = snapshot, lastVia = via)
       }
       if (flushOutbox()) {
         // What waited has gone through, so what the hub holds has moved on.
         val after = client.now()
-        _state.update { it.copy(snapshot = after) }
+        _state.update { if (it.snapshot?.sameContentAs(after) == true) it else it.copy(snapshot = after) }
       }
     } catch (e: HubException) {
       settle(e)
@@ -112,7 +123,7 @@ class HubRepository(
     when (e) {
       is HubException.Unreachable ->
         _state.update {
-          it.copy(connection = Connection.Offline(clock.instant(), it.lastConnected, it.lastVia))
+          it.copy(connection = Connection.Offline(clock.instant(), lastReached, it.lastVia))
         }
       is HubException.Unpaired -> {
         // What the phone kept for this hub is cleared: cached asks, snoozes and remembered passwords. Unsent text stays to copy.

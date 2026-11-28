@@ -175,7 +175,8 @@ private suspend fun load(context: Context): WidgetData {
   val app = context.applicationContext as AgentHubApp
   val container = app.container
   val hub = container.registry.state.value.current ?: return WidgetData.empty("Not paired")
-  return WidgetData.from(hub.id, hub.name, container.repository(hub).state.value, container.clock.instant(), container.fmt)
+  val repo = container.repository(hub)
+  return WidgetData.from(hub.id, hub.name, repo.state.value, container.clock.instant(), container.fmt, repo.syncedAt.value)
 }
 
 class NeedsYouListWidget : GlanceAppWidget() {

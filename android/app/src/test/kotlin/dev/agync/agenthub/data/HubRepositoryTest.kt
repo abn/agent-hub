@@ -3,6 +3,7 @@ package dev.agync.agenthub.data
 import dev.agync.agenthub.Fixtures
 import dev.agync.agenthub.model.AskStatus
 import java.time.Duration
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -21,6 +22,36 @@ class HubRepositoryTest {
     assertEquals(Connection.Online, s.connection)
     assertEquals("LAN", s.lastVia)
     assertEquals(4, s.snapshot!!.asks.size)
+  }
+
+  @Test fun `a refresh that finds the same hub data does not emit a new state`() = runTest {
+    val rig = Fixtures.rig()
+    val seen = mutableListOf<HubState>()
+    val job = backgroundScope.launch(kotlinx.coroutines.Dispatchers.Unconfined) { rig.repo.state.collect { seen += it } }
+    rig.repo.refresh()
+    val afterFirst = seen.size
+    rig.clock.at = Fixtures.now.plus(Duration.ofSeconds(30))
+    rig.repo.refresh()
+    rig.clock.at = Fixtures.now.plus(Duration.ofSeconds(60))
+    rig.repo.refresh()
+    assertEquals("an identical refresh emitted", afterFirst, seen.size)
+    rig.seeded.answer("9MX4TB", "Wait for the weekend")
+    rig.repo.refresh()
+    assertEquals(afterFirst + 1, seen.size)
+    job.cancel()
+  }
+
+  @Test fun `an identical refresh still moves the time the hub was last reached`() = runTest {
+    val rig = Fixtures.rig()
+    rig.repo.refresh()
+    rig.clock.at = Fixtures.now.plus(Duration.ofMinutes(9))
+    rig.repo.refresh()
+    assertEquals(Fixtures.now.plus(Duration.ofMinutes(9)), rig.repo.syncedAt.value)
+    rig.clock.at = Fixtures.now.plus(Duration.ofMinutes(12))
+    rig.seeded.reachable = false
+    rig.repo.refresh()
+    val c = rig.repo.state.value.connection as Connection.Offline
+    assertEquals(Fixtures.now.plus(Duration.ofMinutes(9)), c.lastConnected)
   }
 
   @Test fun `an unreachable hub keeps the cache and records when it was last reached`() = runTest {
