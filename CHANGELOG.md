@@ -4,6 +4,13 @@ All notable changes to Agent Hub are recorded in this file. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.20.0...agent-hub-v1.21.0) (2026-11-28)
+
+
+### Bug Fixes
+
+* **android:** stop the hold service restarting itself in the background ([1d315b1](https://github.com/agync/agent-hub/commit/1d315b1598ad74cb486fb28fb75db1bf0f16e346))
+
 ## [1.20.0](https://github.com/agync/agent-hub/compare/agent-hub-v1.19.0...agent-hub-v1.20.0) (2026-11-27)
 
 
