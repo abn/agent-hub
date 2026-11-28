@@ -30,7 +30,7 @@ data class WidgetData(
 
     fun empty(note: String) = WidgetData(null, "Agent Hub", "", note, emptyList(), 0, emptyList())
 
-    fun from(hubId: String, hubName: String, state: HubState, now: Instant, fmt: Fmt): WidgetData {
+    fun from(hubId: String, hubName: String, state: HubState, now: Instant, fmt: Fmt, syncedAt: Instant? = null): WidgetData {
       val m = NowBuilder.build(state, now, fmt)
       val all = state.snapshot?.live.orEmpty().filter { it.state == SessionState.Live }
       val tops = all.filter { it.parent == null }
@@ -41,7 +41,7 @@ data class WidgetData(
           is Connection.Offline -> if (state.snapshot == null) "Cannot reach $hubName" else null
           else -> null
         }
-      return WidgetData(hubId, hubName, state.snapshot?.asOf?.let(fmt::time).orEmpty(), note, m.needsYou, m.canWait.size, lines)
+      return WidgetData(hubId, hubName, (syncedAt ?: state.snapshot?.asOf)?.let(fmt::time).orEmpty(), note, m.needsYou, m.canWait.size, lines)
     }
   }
 }

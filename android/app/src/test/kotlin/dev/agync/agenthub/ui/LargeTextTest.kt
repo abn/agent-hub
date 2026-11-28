@@ -20,7 +20,9 @@ import dev.agync.agenthub.ui.theme.BottomNav
 import dev.agync.agenthub.ui.theme.G
 import dev.agync.agenthub.ui.theme.NavItem
 import dev.agync.agenthub.viewmodel.NowViewModel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import dev.agync.agenthub.viewmodel.NowScreenKind
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -68,9 +70,11 @@ class LargeTextTest {
     val rig = Fixtures.rig()
     runBlocking { rig.repo.refresh() }
     val vm = NowViewModel(rig.repo, Fixtures.fmt(), rig.clock)
+    // The screen is built for a collector only, so take what the app would have drawn.
+    val ui = runBlocking { vm.ui.first { it.kind == NowScreenKind.Content } }
     compose.setContent {
       PhoneFrame(dark = true) {
-        NowScreen(vm.ui.value, Fixtures.fmt(), NowActions({}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}))
+        NowScreen(ui, Fixtures.fmt(), NowActions({}, { _, _ -> }, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}))
       }
     }
     compose.waitForIdle()

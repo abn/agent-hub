@@ -57,7 +57,10 @@ data class NowSnapshot(
   val recent: List<FeedEvent>,
   val live: List<SessionSummary>,
   val answeredToday: List<FeedEvent>,
-)
+) {
+  /** Whether [other] says the same about the hub; only the time it was fetched may differ. */
+  fun sameContentAs(other: NowSnapshot): Boolean = copy(asOf = other.asOf) == other
+}
 
 /**
  * The hub as the app sees it. The real implementation speaks over a Tendril session; the app

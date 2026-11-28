@@ -28,6 +28,9 @@ class SystemAlertPoster(private val context: Context, private val prefs: () -> D
   private val nm = NotificationManagerCompat.from(context)
   private val accent = 0xFF84461D.toInt()
 
+  private fun channelFor(kind: AskKind) =
+    when (kind) { AskKind.Approval -> Channels.APPROVALS; AskKind.Question -> Channels.QUESTIONS; AskKind.Joining -> Channels.JOINING; AskKind.Idea -> Channels.QUESTIONS }
+
   private fun allowed() = context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
 
   private fun id(hubId: String, askId: String) = (hubId + "/" + askId).hashCode()
@@ -57,10 +60,10 @@ class SystemAlertPoster(private val context: Context, private val prefs: () -> D
     // Every lock-screen verb needs an unlock first.
     NotificationCompat.Action.Builder(0, label, pi).setAuthenticationRequired(true).build()
 
-  override fun post(hubId: String, hubName: String, ask: Ask) {
+  override fun post(hubId: String, hubName: String, ask: Ask, groupKey: String?) {
     if (!allowed()) return
     val p = prefs()
-    val channel = when (ask.kind) { AskKind.Approval -> Channels.APPROVALS; AskKind.Question -> Channels.QUESTIONS; AskKind.Joining -> Channels.JOINING; AskKind.Idea -> Channels.QUESTIONS }
+    val channel = channelFor(ask.kind)
     val channelName = AskText.kindLabel(ask.kind).let { if (ask.kind == AskKind.Approval) "Approvals" else if (ask.kind == AskKind.Question) "Questions" else it }
     val subText = if (hubCount() > 1) "$channelName · $hubName" else channelName
     val publicVersion =
@@ -76,6 +79,7 @@ class SystemAlertPoster(private val context: Context, private val prefs: () -> D
         .setCategory(NotificationCompat.CATEGORY_MESSAGE)
         .setVisibility(if (p.hideOnLockScreen) NotificationCompat.VISIBILITY_PRIVATE else NotificationCompat.VISIBILITY_PUBLIC)
         .setPublicVersion(publicVersion)
+    if (groupKey != null) b.setGroup(groupKey).setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
     // At most three actions. With the fingerprint opt-in on, a verb opens the app, where the prompt is.
     // Before API 31 a button cannot ask for an unlock, so there every verb opens the app.
     val viaApp = p.fingerprintBeforeApproving || Build.VERSION.SDK_INT < Build.VERSION_CODES.S
@@ -100,6 +104,23 @@ class SystemAlertPoster(private val context: Context, private val prefs: () -> D
 
   override fun cancel(hubId: String, askId: String) = nm.cancel(id(hubId, askId))
 
+  override fun summary(hubId: String, hubName: String, summary: AskSummary): Boolean {
+    if (!allowed()) return false
+    val n =
+      NotificationCompat.Builder(context, summary.kinds.singleOrNull()?.let(::channelFor) ?: Channels.QUESTIONS).setSmallIcon(R.drawable.ic_notification).setColor(accent)
+        .setContentTitle(AskText.summaryTitle(summary.count)).setSubText(if (hubCount() > 1) hubName else null)
+        .setGroup(summary.groupKey).setGroupSummary(true).setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+        .setContentIntent(open(hubId, "")).setOnlyAlertOnce(true).setAutoCancel(false)
+        .setCategory(NotificationCompat.CATEGORY_MESSAGE).setVisibility(if (prefs().hideOnLockScreen) NotificationCompat.VISIBILITY_PRIVATE else NotificationCompat.VISIBILITY_PUBLIC)
+        .build()
+    nm.notify(summaryId(hubId), n)
+    return true
+  }
+
+  override fun cancelSummary(hubId: String) = nm.cancel(summaryId(hubId))
+
+  private fun summaryId(hubId: String) = (hubId + "/asks").hashCode()
+
   override fun postFinished(hubId: String, hubName: String, event: FeedEvent) {
     if (!allowed()) return
     val n =
@@ -109,13 +130,30 @@ class SystemAlertPoster(private val context: Context, private val prefs: () -> D
     nm.notify(id(hubId, event.id), n)
   }
 
-  override fun connection(hubName: String, status: String) {
-    if (!allowed()) return
+  override fun connection(hubName: String, status: String): Boolean {
+    if (!allowed()) return false
+    shown = hubName to status
     nm.notify(CONNECTION_ID, connectionNotification(hubName, status))
+    return true
+  }
+
+  /** What the Connected notification last said. */
+  @Volatile private var shown: Pair<String, String>? = null
+
+  /**
+   * The Connected notification as it stands, for the service to hold when it starts again: the engine posts only when
+   * the words change, so a service that put up "Connecting" over a settled line would leave it there.
+   */
+  fun currentConnection(hubName: String): Notification {
+    val last = shown?.takeIf { it.first == hubName }
+    return connectionNotification(hubName, last?.second ?: "Connecting")
   }
 
   /** Takes the quiet "Connected" notification down, when the held sessions are stopped. */
-  fun clearConnection() = nm.cancel(CONNECTION_ID)
+  fun clearConnection() {
+    shown = null
+    nm.cancel(CONNECTION_ID)
+  }
 
   fun connectionNotification(hubName: String, status: String): Notification =
     NotificationCompat.Builder(context, Channels.CONNECTION).setSmallIcon(R.drawable.ic_notification)

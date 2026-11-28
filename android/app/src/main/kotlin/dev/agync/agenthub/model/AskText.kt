@@ -33,6 +33,9 @@ object AskText {
       AskKind.Idea -> "An idea of yours waits"
     }
 
+  /** The notification that stands for a hub's asks when there are many. */
+  fun summaryTitle(count: Int): String = if (count == 1) "One ask waits on you" else "${word(count)} asks wait on you"
+
   fun notificationBody(ask: Ask): String =
     when (ask.kind) {
       AskKind.Approval -> buildString {

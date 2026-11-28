@@ -50,6 +50,24 @@ class AlertCenter(
   val runningJobs: Int
     get() = held.values.sumOf { h -> h.jobs.count { it.isActive } } + listOf(prefsJob, widgetJob, registryJob).count { it?.isActive == true }
 
+  /**
+   * Whether HoldService is running. Its own start syncs, so asking for the service again from that sync
+   * would restart it in a loop: each lap posts the foreground notification and keeps the phone awake.
+   */
+  private var serviceRunning = false
+
+  /** Called by HoldService when it starts. */
+  @Synchronized
+  fun serviceStarted() {
+    serviceRunning = true
+  }
+
+  /** Called by HoldService when it stops. */
+  @Synchronized
+  fun serviceStopped() {
+    serviceRunning = false
+  }
+
   @Synchronized
   fun engine(hubId: String): AlertEngine? = held[hubId]?.engine
 
@@ -65,6 +83,7 @@ class AlertCenter(
     if (!stay) {
       stopHeld()
       holdService(false)
+      serviceRunning = false
       return
     }
     for ((id, h) in held.toList()) {
@@ -85,7 +104,7 @@ class AlertCenter(
       widgetHubs = ids
       widgetJob = scope.launch {
         val repos = hubs.map(container::repository)
-        kotlinx.coroutines.flow.merge(*repos.map { it.state }.toTypedArray()).collect {
+        widgetTriggers(repos).collect {
           runCatching { dev.agync.agenthub.widgets.WidgetRefresh.updateAll(context) }
           kotlinx.coroutines.delay(2_000)
         }
@@ -101,9 +120,11 @@ class AlertCenter(
     }
     // The system may refuse to start the service (ForegroundServiceStartNotAllowedException from API 31): the held
     // sessions still run while the process lives, and the next sync starts the service when it is allowed.
-    try {
-      holdService(true)
-    } catch (_: RuntimeException) {
+    if (!serviceRunning) {
+      try {
+        holdService(true)
+      } catch (_: RuntimeException) {
+      }
     }
   }
 
@@ -136,3 +157,7 @@ class AlertCenter(
     stopHeld()
   }
 }
+
+/** What redraws the launcher widgets: a change in what a hub holds, or the minute its last answer is shown as. */
+internal fun widgetTriggers(repos: List<HubRepository>): kotlinx.coroutines.flow.Flow<Unit> =
+  kotlinx.coroutines.flow.merge(*repos.flatMap { r -> listOf(r.state.map { }, r.syncedAt.map { }) }.toTypedArray())

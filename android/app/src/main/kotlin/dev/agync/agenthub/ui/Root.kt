@@ -28,6 +28,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -198,14 +200,14 @@ private class Snack(val message: String, val actionLabel: String? = null, val la
 private fun MainShell(container: AppContainer, repo: HubRepository, platform: Platform, nav: Navigator, prefs: DevicePrefs, onPair: () -> Unit) {
   val stack by nav.stack.collectAsState()
   val route = stack.last()
-  val state by repo.state.collectAsState()
+  val state by repo.state.collectAsStateWithLifecycle()
   val scope = rememberCoroutineScope()
   var snack by remember { mutableStateOf<Snack?>(null) }
   var dialog by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
   var sheet by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
   val fmt = container.fmt
   val nowVm: NowViewModel = viewModel(key = "now-" + repo.hub.id, factory = viewModelFactory { initializer { NowViewModel(repo, fmt, container.clock) } })
-  val nowUi by nowVm.ui.collectAsState()
+  val nowUi by nowVm.ui.collectAsStateWithLifecycle()
   val badge = nowUi.model.badge
 
   LaunchedEffect(repo.hub.id) { repo.refresh() }
@@ -286,8 +288,8 @@ private fun RouteContent(
   prefs: DevicePrefs, gated: (String, () -> Unit) -> Unit, snack: (Snack?) -> Unit, sheet: ((@Composable () -> Unit)?) -> Unit, dialog: ((@Composable () -> Unit)?) -> Unit, onPair: () -> Unit,
 ) {
   val fmt = container.fmt
-  val state by repo.state.collectAsState()
-  val nowUi by nowVm.ui.collectAsState()
+  val state by repo.state.collectAsStateWithLifecycle()
+  val nowUi by nowVm.ui.collectAsStateWithLifecycle()
   val now = nowUi.now
   val webUrl = state.snapshot?.info?.webUrl
   /** Opens the hub's web app at [path], when the hub told this phone where it is. */
@@ -392,11 +394,16 @@ private fun RouteContent(
 @Composable
 private fun rememberTicker(vm: NowViewModel): Int {
   var minute by remember { mutableStateOf(0) }
-  LaunchedEffect(Unit) {
-    while (true) {
-      kotlinx.coroutines.delay(60_000)
+  val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+  // The minute hand runs only while the app is on screen, and catches up the moment it comes back.
+  LaunchedEffect(lifecycle) {
+    lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
       vm.tickClock()
-      minute++
+      while (true) {
+        kotlinx.coroutines.delay(60_000)
+        vm.tickClock()
+        minute++
+      }
     }
   }
   return minute
@@ -437,7 +444,7 @@ private fun ItemRoute(askId: String, container: AppContainer, repo: HubRepositor
 
 @Composable
 private fun TabletNow(container: AppContainer, repo: HubRepository, nowVm: NowViewModel, nowActions: NowActions, nav: Navigator, platform: Platform, gated: (String, () -> Unit) -> Unit) {
-  val ui by nowVm.ui.collectAsState()
+  val ui by nowVm.ui.collectAsStateWithLifecycle()
   var selected by remember { mutableStateOf<String?>(null) }
   val first = ui.model.needsYou.firstOrNull()?.id ?: ui.model.canWait.firstOrNull()?.id
   val shown = selected ?: first

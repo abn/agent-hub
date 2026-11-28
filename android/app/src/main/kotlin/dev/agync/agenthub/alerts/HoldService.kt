@@ -17,18 +17,21 @@ class HoldService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     val app = application as AgentHubApp
     val hubName = app.container.registry.state.value.current?.name ?: "your hub"
-    val notification = app.alerts.poster.connectionNotification(hubName, "Connecting")
+    val notification = app.alerts.poster.currentConnection(hubName)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
       startForeground(SystemAlertPoster.CONNECTION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
     } else {
       startForeground(SystemAlertPoster.CONNECTION_ID, notification)
     }
+    app.alerts.serviceStarted()
     app.alerts.sync()
     return START_STICKY
   }
 
   override fun onDestroy() {
-    (application as AgentHubApp).alerts.stopAll()
+    val alerts = (application as AgentHubApp).alerts
+    alerts.serviceStopped()
+    alerts.stopAll()
     super.onDestroy()
   }
 }
